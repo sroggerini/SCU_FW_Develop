@@ -1,0 +1,15 @@
+C:\iar\ewarm-9.60.3\arm\bin\armPROC.dll
+
+ C:\iar\ewarm-9.60.3\arm\bin\armJLINK.dll
+
+ C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\EWARM\FULL_DEBUG_HW_MP28947_GD32F4xx\Exe\SCU-HW_MP28947-GD32.out
+
+ --plugin=C:\iar\ewarm-9.60.3\arm\bin\armLibSupportUniversal.dll
+
+ --device_macro=C:\iar\ewarm-9.60.3\arm/config/debugger/GD/GD32F4xx.dmac
+
+ --flash_loader=C:\iar\ewarm-9.60.3\arm/config/flashloader/GD/FlashGD32F4xxxG.board
+
+ 
+
+

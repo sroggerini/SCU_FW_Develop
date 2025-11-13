@@ -1,0 +1,362 @@
+<!DOCTYPE HTML PUBLIC "-//W3C/DTD HTML 4.0 Transitional//EN">
+<html>
+
+<link rel="icon" type="image/png" href="graphics/logoSCAME.png">
+<head>
+  <style>
+  table, th, td {
+    <!-- border: 1px solid black; -->
+    border: none;
+    border-collapse: collapse;
+    text-align:center;
+  }
+  th, td {
+    padding: 15px;
+  }
+  </style>
+  <META HTTP-EQUIV = "content-type" content="text/html; charset=ISO-8859-1;no-cache">
+  <title> SCU System Manager </title>
+    <script language="JavaScript">
+    var   interval = setInterval(autoRefresh, 4000);
+    var   focusActive = 0;
+    function ModuloSelect(){
+      var txt = document.getElementById("descrId").value;
+      var txtPrd = document.getElementById("prdId").value;
+      var txtPrdCod = document.getElementById("prdCodId").value;
+      var txtFakeCod = document.getElementById("fakeCodId").value;
+      var apName = document.getElementById("ApNid").value;
+      var apPass = document.getElementById("ApPass").value;
+      var apActK = document.getElementById("actKey").value;
+      var servP = document.getElementById("servPid").value;
+      var d1 = (Date.parse(new Date) / 1000);
+
+      var resTxt, hwVer, j;
+      var apice = "'";
+      if ((txt == "") || (txtPrd == "") || (txt.length < 22)  || ((txtPrd.length != 9) && (txtPrd[0] != '*')))
+      {
+        alert("Please insert a valid SN: S/N 00012345 MP00078-D and 100123456");
+      }  
+      else
+      {
+        {
+          var isHex = true;
+          if (txt.length >= 20)
+          {
+            hwVer = "0";
+            if (txt[2] == 'N')
+            {
+              resTxt = txt.substr(4, 8).trim();
+              if ((txt[13] == 'M') && (txt[14] == 'P') && ((txt[20] == '-') || (txt[20] == apice)))
+              {
+                 j = txt.substr(19, 3).trim();
+                 hwVer = j[0] + '-' + j[2];
+              }
+            }
+            else
+            {
+              resTxt = txt.substr(12, 8).trim();
+              if (resTxt.length == 7)
+              {
+                resTxt = "0"+resTxt;
+              }
+            }
+          }
+          else
+          {
+            resTxt = txt;
+          }
+          isHex = resTxt.match("[0-9f-fF-F]+");
+
+          if (isHex == resTxt)
+          {
+            if (txtPrd[0] == '*') {
+              txtPrd = "100123456"; txtPrdCod = "205.W17-S0"; txtFakeCod = "205*W*17*S";
+            }
+            if ((txtPrd.length != 9) && ((txtPrd.length != 13) || txtPrd[9] != '/'))
+            {
+              alert("Please insert a valid SN (Ex.: 100123456)");
+            }
+            else
+            {
+              let formData = new FormData(document.forms.person);
+              resTxt += (" <prdNum>" + txtPrd);
+              resTxt += (" <hwVer>" + hwVer);
+              resTxt += (" @<prdCode>" + txtPrdCod);
+              resTxt += ("$<fakeCode>" + txtFakeCod);
+              resTxt += ("#");
+              if ((apName.length == 10) && (apPass.length == 10)  && (apActK.length == 5) && (servP.length >= 7))
+              {
+                alert("Please check and take note on Wifi and Web info!!");
+                resTxt += ("<apName><" + apName + apPass + apActK + servP + ">");
+              }  
+              resTxt += ("<parDeT><" + d1);
+              resTxt += (">");
+              formData.append("serialNum=", resTxt);
+              let xhr = new XMLHttpRequest();
+              xhr.onload = function() {
+              if (xhr.status != 200) { 
+                  alert(`Error`); // ad esempio 404: Not Found
+                } else { 
+                  alert(`Prodotto Configurato!`); 
+                }
+              }
+              xhr.open("POST", "infoSN.cgi");
+              xhr.send(formData);
+            }
+          }
+          else
+          {
+            alert("Wrong SN format! Example--> 12345678 or FFFFFFFF");
+          }
+        }
+      }
+      focusActive = 0;
+      interval = setInterval(autoRefresh, 4000);
+    }
+    function stopCarica(){
+      var resTxt;
+
+      let formData = new FormData(document.forms.person);
+      resTxt = "Carica";
+      formData.append("Stop", resTxt);
+      let xhr = new XMLHttpRequest();
+      xhr.open("POST", "stpChg.cgi");
+      xhr.send(formData);
+      //document.getElementById("infoMac").submit();// Form submission
+    }
+
+    function stopRefresh(){
+      clearInterval(interval);
+      if (focusActive == 0)
+      {
+        focusActive = 1;
+        var txtHwVer = document.getElementById("verTab").innerText;
+        var txtHv = txtHwVer.replaceAll(/\t/gi, " ");
+        const hvArray = txtHv.split(" ");
+        var charSCU = hvArray[5].charAt(0);
+        var charMnf = hvArray[5].charAt(1);
+        var stringMnf;
+        if (charSCU=='8') charSCU = "MP00078-"; else charSCU = "MP70433-";
+        if ((charMnf>='a') && (charMnf<='g')) stringMnf = "K/N "; else stringMnf = "S/N ";
+        var txtprdVer = document.getElementById("prdTab");
+        var txtprdVer0 = document.getElementById("prdTab").rows[0].innerText;
+        var txt2 = txtprdVer0.replaceAll(/\t/gi, " ");
+        const myArray = txt2.split(" ");
+        if ((myArray[5].charAt(0) == '0') || (myArray[5].charAt(0) == '1'))
+        {
+          stringMnf += myArray[5] + " " + charSCU + charMnf;
+          document.getElementById("descrId").value = stringMnf;
+          document.getElementById("prdId").value = myArray[7];
+          document.getElementById("prdCodId").value = myArray[12];
+          document.getElementById("fakeCodId").value = myArray[14];
+        }
+      }
+      clearInterval(interval);
+    }
+    function stopFocus(){
+      clearInterval(interval);
+      focusActive = 0;
+    }
+
+    function autoRefresh() {
+      window.location = window.location.href;
+    }
+
+    function resetGen (x)
+    {
+      var resTxt, comStr, esitoStr;
+
+      let formData = new FormData(document.forms.person);
+      if (x == 1)
+      {
+        resTxt = "Carica";
+        comStr = "/reboot.html"
+      }
+      else
+      {
+        if ((x == 2) || (x == 3) || (x == 4))
+        {
+          stopRefresh();
+          let text = "Are you sure?";
+          if (confirm(text) == true) 
+          {
+            if (x == 2)
+            {
+              resTxt = "EEclear";
+              comStr = "/EEclear.html"
+              esitoStr = ""
+            }
+            else
+            {
+              if (x == 3)
+              {
+                resTxt = "EEdef";
+                comStr = "/EEdef.html"
+                esitoStr = ""
+              }
+              else
+              {
+                resTxt = "allDef";
+                comStr = "/allDef.html"
+                esitoStr = "Restore default on All Socket Command Sent!"
+              }
+            }
+          }
+          else
+          {
+            comStr = "0";
+            focusActive = 0;
+            interval = setInterval(autoRefresh, 4000);
+          }
+        }
+      }
+      if (comStr != "0")
+      {
+        formData.append("Stop", resTxt);
+        let xhr = new XMLHttpRequest();
+        xhr.open("POST", comStr);
+        xhr.send(formData);
+        if ((x == 2) || (x == 3))
+        {
+          xhr.onload = function() 
+          {
+            if (xhr.status != 200) 
+            { 
+              alert(`Error`); // ad esempio 404: Not Found
+            } 
+            else
+            { 
+              if (x == 2) alert(`Reset EEPROM executed!`); 
+              else if (x == 3) alert(`Factory default parameters restored!`); 
+            }
+          }
+        }
+      }
+    }
+
+    function getStr() {
+      var inpStrFull = document.getElementById("prdId").value;
+      var inpStr = inpStrFull.replace(/ /g,"");
+      var pTer = inpStr.indexOf("@"); var sTer = inpStr.indexOf("&"); var tTer = inpStr.indexOf("#");
+      if ((tTer != -1) && (pTer != -1) && (sTer != -1))
+      {
+        document.getElementById("prdCodId").value = inpStr.substring(pTer + 1, sTer);
+        document.getElementById("fakeCodId").value = inpStr.substring(sTer + 1, tTer);
+        document.getElementById("prdId").value = inpStr.substring(0, pTer);
+      }
+    }
+    </script>
+
+</head>
+
+  <!-- <body background="graphics/world.jpg"> -->
+  
+  <!-- <body bgcolor="#FFF987" background="graphics/beLogoUnif2.jpg"> -->
+  <body bgcolor="#FF665E">
+    <!-- <IMG src="graphics/logo.jpg" align="middle" > -->
+    <br>
+    <table border=2 cellspacing=10 cols=1 width="100%" id="verTab">
+      <tr align="center" valign="baseline">
+        <!-- <td  margin-top=25 valign="center" width="15%"><img src="graphics/beLogo.jpg" height=40> </td>
+        <td  align="center" valign="top" <big><span style="font-weight: bold;">SCU</big></td> -->
+        <td  align="center" valign="top" width="70%"><big><big><big><big><span style="font-weight: bold;">Welcome to SCU Vx.y.zza HW AB Boot Vw.ya info and download page</big></big></big></td>
+        <!-- <td  valign="baseline"><img src="graphics/beLogo.jpg" height=40> </td> 
+        <td  align="center" valign="top" <big><span style="font-weight: bold;">SCU</big></td> -->
+      </tr>
+    </table>
+    <br>
+    <table   style="table-layout: fixed; width: 100%;" id="prdTab">
+      <tbody>                                          
+        <tr>
+          <th><strong>Current SCU / PRD SN: 02:80:E1 / 100xxxxxx       </strong></th>
+          <th><strong>PRD and TEC. CODE:  204.CA23B-T23T23W1 / 204.CA.51.FFFF   </strong></th>
+          <th><strong>Functions</strong></th>
+        </tr>
+
+        <tr>
+          <td><strong>SCU SN: </strong> <input type="text" size="32" id="descrId" name="descrId" value="" autocomplete="off" maxlength="22" title="must be 8 numbers, all F to reset" onfocusin="stopRefresh()"></td>
+          <td>                                                                                                                                                       
+            <table align="center" bgcolor="#FFFFFF" border=2 cellspacing=2 cols=1 width="35%">
+              <tr align="center" valign="baseline">
+                <td  align="center" valign="top" width="40%"><big><big><big><span style="font-weight: bold; line-height: 0em">
+                  <pre class="tab"><big><big>SCUriga#1   NNNNPPNN</big></big></pre> 
+                  <pre class="tab"><big><big>SCUriga#2    4567890</big></big></pre>
+                </td>
+              </tr>
+            </table>
+          </td>
+          <td>
+            <form id="hwConf" action ="./hwConf.html" method="post" >
+              <input  style="margin-left: 0pt; height:50px; width:120px" type="submit" name="hwConf" value="HW Conf">
+            </FORM>
+            <br>
+            <form id="specF" action ="./specFunc.html" method="post" >
+              <input  style="margin-left: 0pt; height:50px; width:120px" type="submit" name="specFz" value="Special Functions">
+            </FORM>
+          </td>
+        </tr>
+
+        <tr>
+          <td><strong>Prd SN: </strong> <input type="text" size="32" id="prdId" name="prdId" value="" autocomplete="off" maxlength="9" oninput="getStr()" title="must be 9 numbers starting with 100" onfocus="stopFocus()"></td>
+          <td style="visibility:hidden0;"><strong>AP Name: </strong> <input type="text" size="12" id="ApNid" name="Apn" value="SCAME77777" autocomplete="off" maxlength="12" oninput="getStr()"  onfocus="stopFocus()">
+          <strong>AP Pass: </strong> <input type="text" size="12" id="ApPass" name="ApP" value="SCAME88888" oninput="getStr()"  onfocus="stopFocus()"  ></td>
+          <th>
+            <form id="chgPsw" action ="./changePsw.html" method="post" >
+              <input  style="margin-left: 0pt; height:50px; width:120px" type="submit" name="chgPsw" value="Change Password" disab#ed>
+            </FORM>
+          </th> 
+        </tr>
+        <tr>
+          <td><strong>Prd COD:</strong> <input type="text" size="32" id="prdCodId" name="prdCodId" value="" autocomplete="off" maxlength="22" title="Example: 204.CA23B-T2T2W1" onfocus="stopFocus()"></td>
+          <td style="visibility:hidden1;"><strong>Act. Key: </strong> <input type="text" size="10" id="actKey" name="actK" value="KEY99"  oninput="getStr()"  onfocus="stopFocus()">
+          <strong>Service Pass: </strong> <input type="text" size="12" id="servPid" name="serP" value="**********"  oninput="getStr()"  onfocus="stopFocus()"  ></td>
+          <th></th>
+        </tr>
+
+        <tr>
+          <td>
+            <strong>Tec. Code: </strong> <input type="text" size="30" id="fakeCodId" name="fakeCodId" value="" autocomplete="off" maxlength="15" title="Example: 204.CA.51.FFFF" onfocus="stopFocus()">
+            <br>
+            <br>
+            <FORM id="infoMac" METHOD=POST ACTION="/infoMac.cgi">
+              <button style="margin-left: 30pt; height:30px; width:120px" type="button" value="macItem" onclick="ModuloSelect()">Invia SN</button>
+            </FORM>
+            <br>
+            <form id="reboot" action ="./reboot.html" method="post" >
+              <button style="margin-left: 30pt; height:30px; width:100px" type="button" value="bReboot" onclick="resetGen(1)">Reboot</button>
+              <button style="margin-left: 25pt; height:30px; width:120px" type="button" value="bParDef" onclick="resetGen(3)">Factory Restore</button>
+              <button style="margin-left: 10pt; height:30px; width:120px" type="button" value="bParRes" onclick="resetGen(2)">Reset EEPROM</button>
+            </FORM>
+            <br>
+            <form id="stopCharge" action ="./stpChg.cgi" method="post" >
+              <button style="margin-left: 30pt; height:30px; width:120px" type="button" value="stpChgFz" onclick="stopCarica()" disa#led>Stop Carica Free</button>
+              <button style="margin-left: 30pt; height:30px; width:120px" type="button" value="allDef" onclick="resetGen(4)" di#abled>All Default</button>
+            </FORM>
+          </td>
+          <td>
+            <table align="center" bgcolor="#FFFFFF" border=2 cellspacing=2 cols=1 width="35%">
+              <tr align="center" valign="baseline">
+                <td  align="center" valign="top" width="40%"><big><big><big><span style="font-weight: bold; line-height: 0em">
+                  <pre class="tab"><big><big>SCUriga#3   NNNNPPNN</big></big></pre> 
+                  <pre class="tab"><big><big>SCUriga#4    4567890</big></big></pre>
+                  <pre class="tab"><big><big>SCUriga#5     567890</big></big></pre>
+                  <pre class="tab"><big><big>SCUriga#6   34567890</big></big></pre></big></big></big></td>
+              </tr>
+            </table>
+          </td>
+          <td>
+            <form id="uploadReq" action ="/initUpload.cgi" enctype="multipart/form-data" method="post">
+              <input  style="margin-left: 0pt; height:50px; width:120px" type="submit" name="GoUpload" value="Upload FW">
+            </FORM>
+            <br>
+            <form id="siConf" action ="./SinapsiConf.html" method="post" >
+              <input  style="margin-left: 0pt; height:50px; width:120px;" type="submit" name="sinConf" value="SINAPSI" disabl#d >
+            </FORM>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+  </body>
+</html>
+

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BuildDb>
+    <Tool>
+        <Name>compiler</Name>
+        <Parent>
+            <Path>C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Src\Protocol\sbcSem.c</Path>
+            <Output>
+                <Path>C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\EWARM\TARGET_DBG_HW_MP28947\List\Protocol_16990505445836233132.dir\sbcSem.lst</Path>
+            </Output>
+        </Parent>
+    </Tool>
+    <Tool>
+        <Name>linker</Name>
+        <Parent>
+            <Path>C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\EWARM\TARGET_DBG_HW_MP28947\Exe\SCU_GDF4xx_HW_MP28947.out</Path>
+            <Output>
+                <Path>C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\EWARM\TARGET_DBG_HW_MP28947\List\SCU_GDF4xx_HW_MP28947.map</Path>
+            </Output>
+        </Parent>
+    </Tool>
+</BuildDb>

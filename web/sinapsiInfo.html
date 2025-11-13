@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<!-- saved from url=(0022)http://192.168.30.126/ -->
+<link rel="icon" type="image/png" href="graphics/logoSCAME.png">
+<html lang="it">
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>SINAPSI CONFIGURATION</title>
+      <link rel="stylesheet" href="./style.css">
+    <script language="JavaScript">
+      var   interval = setInterval(autoRefresh, 4000);
+      function myFunction() {
+
+        var form = document.getElementById("infoItem"),
+            formCfg = document.getElementById("CFGWORD"),
+            inputs = form.getElementsByTagName("input");
+        var check = 0x00000000;
+        var Is, It, IsN, ItN, iAdd, iAddN;
+        for (var i = 0, max = inputs.length, mask = 1; i < max; i += 2, mask = mask << 1) {
+           // Take only those inputs which are checkbox
+           if (inputs[i].type === "checkbox" && inputs[i].checked) {
+              check |= mask;
+           }
+        }
+        It = formCfg.value; 
+        if (check != 0)
+        {
+          check = 1; 
+        }
+
+        var name = "check<" + check + ">CfgW<" + It + ">";
+        let formData = new FormData(document.forms.person);
+        formData.append("middle", name);
+        let xhr = new XMLHttpRequest();
+        xhr.open("POST", "sinapsiCheck");
+        xhr.send(formData);
+        xhr.onload = function() {
+          if (xhr.status != 200) { 
+            alert(`Error`); // ad esempio 404: Not Found
+          } else { 
+            alert(`Configurazione eseguita!`); 
+          }
+        };
+      }
+      function stopRefresh(){
+        clearInterval(interval);
+      }      
+      function autoRefresh() {                   
+        window.location = window.location.href;  
+      }                                          
+      
+    </script>
+   </head>
+   <body>
+       <div>
+          <div class="hwconf">
+             <h2>IOM2G Meter</h2>
+              <FORM id="noSave" name="xButton" action ="mainPage.html" METHOD="get">
+                <input type="submit" value="X"><br>
+              </FORM>
+             <div class="panel_container">
+                <div class="panel">
+                   <div class="panel" style="width: 100%;">
+                     <h1>IOM2G general data</h1>
+                     <ul>
+                       <FORM id="socket" name="presa" METHOD="post">
+                         <li><input type="text" id="FWVER"   value="@0a"        style="margin-right: 5px; width: 120px; text-align: center;"><span>2:    FW Version</span></li>
+                         <li><input type="text" id="IOM2GSN" value="@U28072022" style="margin-right: 5px; width: 120px; text-align: center;"><span>1280: Serial Number</span></li>
+                         <li><input type="text" id="IOM2GTP" value="@c"      style="margin-right: 5px; width: 120px; text-align: center;"><span>1285: Device Type</span></li>
+                         <li><input type="text" id="BTACTR"  value="@d"      style="margin-right: 5px; width: 120px; text-align: center;"><span>4:    Bluetooth activation status</span></li>
+                         <li><input type="text" id="M1RxQ" value="@001"      style="margin-right: 5px; width: 120px; text-align: center;"><span>5:    M1 Rx quality</span></li>
+                         <li><input type="text" id="M1PLC"  value="@f"       style="margin-right: 5px; width: 120px; text-align: center;"><span>0:    M1 PLC status</span></li>
+                         <li><input type="text" id="M2RxQ" value="@002"      style="margin-right: 5px; width: 120px; text-align: center;"><span>6:    M2 Rx quality</span></li>
+                         <li><input type="text" id="M2PLC"  value="@h"       style="margin-right: 5px; width: 120px; text-align: center;"><span>1:    M2 PLC status</span></li>
+                         <li><input type="text" id="BIU"    value="@003"     style="margin-right: 5px; width: 120px; text-align: center;"><span>29:   BiU</span></li>
+                         <li><input type="text" id="IOM2GDU" value="@000000" style="margin-right: 5px; width: 120px; text-align: center;"><span>31:   Device Uptime</span></li>
+                         <li><input type="text" id="M1CNT"  value="@0001"    style="margin-right: 5px; width: 120px; text-align: center;"><span>40:   M1 Frame counter</span></li>
+                         <li><input type="text" id="M1LOST" value="@0002"    style="margin-right: 5px; width: 120px; text-align: center;"><span>42:   M1 Frame lost</span></li>
+                         <li><input type="text" id="M2CNT"  value="@0003"    style="margin-right: 5px; width: 120px; text-align: center;"><span>44:   M2 Frame counter</span></li>
+                         <li><input type="text" id="M2LOST" value="@0004"    style="margin-right: 5px; width: 120px; text-align: center;"><span>46:   M2 Frame lost</span></li>
+                         <li><input type="text" id="MAC"    value="@0:A1:A2:00:01:03" style="margin-right: 5px; width: 120px; text-align: center;"><span>48:   device MAC</span></li>
+                         <li><input type="text" id="CONTRA" value="@01"      style="margin-right: 5px; width: 120px; text-align: center;"><span>22:   Costante di Trasformazione</span></li>
+                       </FORM>
+                     </ul>
+                  </div>
+                </div>
+                <div class="panel">
+                   <div class="panel" style="width: 100%;">
+                      <h1>IOM2G power Info</h1>
+                      <ul>
+                        <FORM id="engMeter" name="em" METHOD="post">    
+                         <li><input type="text" id="M1TSPIMMIST" value="@z00000001" style="margin-right: 5px; width: 120px; text-align: center;"><span>10: M1 TS P ATT IMM IST [sec]</span></li>
+                         <li><input type="text" id="M1PIMMIST"   value="@z000002"  style="margin-right: 5px; width: 120px; text-align: center;"><span>12: M1 P ATT IMM IST [mW]</span></li>
+                         <li><input type="text" id="M2TSPIMMIST" value="@z00000003" style="margin-right: 5px; width: 120px; text-align: center;"><span>15: M2 TS P ATT IMM IST [sec]</span></li>
+                         <li><input type="text" id="M2PIMMIST"   value="@z000004"  style="margin-right: 5px; width: 120px; text-align: center;"><span>17: M2 P ATT IMM IST [mW]</span></li>
+                         <li><input type="text" id="M1PCONTR"    value="@z005"  style="margin-right: 5px; width: 120px; text-align: center;"><span>20: M1 P Contrattuale [W]</span></li>
+                         <li><input type="text" id="M1PDISP"     value="@z006"  style="margin-right: 5px; width: 120px; text-align: center;"><span>20: M1 P Disponibile [W]</span></li>
+                         <li><input type="text" id="TSDIST"      value="@z00000007"  style="margin-right: 5px; width: 120px; text-align: center;"><span>23: TS TEMPO DISTACCO [sec]</span></li>
+                         <li><input type="text" id="DIST"        value="@z008"  style="margin-right: 5px; width: 120px; text-align: center;"><span>25: TEMPO DISTACCO [sec]</span></li>
+                         <li><input type="text" id="TSFASCIA"    value="@z00000009"  style="margin-right: 5px; width: 120px; text-align: center;"><span>26: TS FASCIA ORARIA [sec]</span></li>
+                         <li><input type="text" id="FASCIA"      value="@z010"  style="margin-right: 5px; width: 120px; text-align: center;"><span>28: INDICE FASCIA [N.D.]</span></li>
+                         <li><input type="text" id="TSPAPREIST"  value="@z00000011" style="margin-right: 5px; width: 120px; text-align: center;"><span>35: TS P ATT PRE IST [sec]</span></li>
+                         <li><input type="text" id="PAPREIST"    value="@z000012"   style="margin-right: 5px; width: 120px; text-align: center;"><span>37: P ATT PRE IST [mW]</span></li>
+                         <li><input type="text" id="PAPREMAX"    value="@z000013"   style="margin-right: 5px; width: 120px; text-align: center;"><span>37: P ATT PRE MAX [W]</span></li>
+                         <li><input type="text" id="CAPREMAX"    value="@z000014"   style="margin-right: 5px; width: 120px; text-align: center;"><span>37: I ATT PRE MAX [mA]</span></li>
+                         <li><input type="text" id="PEST"        value="@z000015"   style="margin-right: 5px; width: 120px; text-align: center;"><span>50: Pest [W]</span></li>
+                          </br>
+                         <li><input type="checkbox" disabled id="DEL541"  value="undefined"  style="margin-right: 111px;" check02 ><span style="vertical-align: super;">07: DELIBERA 541</span></li>
+                       </FORM>
+                     </ul>
+                   </div>
+                </div>
+                <div class="panel">
+                   <h1>set Parameters</h1>
+                   <ul>
+                     <FORM id="infoItem" name="person" METHOD="post">
+                      <li><input type="checkbox" onfocus="stopRefresh()" id="checks_CFGM" value="undefined" style="margin-right: 110px;" check01 ><span style="vertical-align: center;">03: Bluetooth Activation Restore</span></li>
+                       </br>
+                      <li><input type="text" id="CFGWORD"    value="@z00000012"   style="margin-right: 5px; width: 120px; text-align: center;" onfocus="stopRefresh()"><span>07: CONFIG WORD</span></li>
+                     </FORM>
+                   </ul>
+                </div>
+             </div>
+             <br>
+             <form id="uploadReq" action ="/hwConf.html" method="post">
+               <input type="button" value="Write" onclick="myFunction()">
+             </FORM>
+         </div>
+       </div>
+  </body>
+</html>

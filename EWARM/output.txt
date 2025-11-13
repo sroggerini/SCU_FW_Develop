@@ -1,0 +1,56 @@
+ Il volume nell'unit… C non ha etichetta.
+ Numero di serie del volume: 3CAC-7EF8
+
+ Directory di C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\EWARM
+
+21/10/2025  12:36    <DIR>          .
+04/09/2025  15:18    <DIR>          ..
+19/09/2025  15:59    <DIR>          .vscode
+06/10/2025  16:34           473.379 Backup (1) of ScameControlUnit.ewd
+06/10/2025  16:34           484.495 Backup (1) of ScameControlUnit.ewp
+06/10/2025  16:34           910.797 Backup (1) of ScameControlUnit.ewt
+19/09/2025  11:08           473.379 Backup of ScameControlUnit.ewd
+19/09/2025  11:39           484.495 Backup of ScameControlUnit.ewp
+19/09/2025  11:39           910.797 Backup of ScameControlUnit.ewt
+18/06/2025  09:14               153 binCheck.bat
+18/09/2025  11:40               193 binCheckDbgGD-HW_MP28947.bat
+07/08/2025  12:43               171 binCheckDbgGD.bat
+18/06/2025  09:14               155 binCheckGD.bat
+18/09/2025  11:41               199 binCheckTargetGD-HW_MP298947.bat
+01/09/2025  17:27               177 binCheckTargetGD.bat
+18/06/2025  09:14             7.168 CheckTag.exe
+02/10/2025  16:11           939.133 cspycomm.log
+18/06/2025  09:14        29.840.984 dotnet-runtime-9.0.6-win-x64.exe
+21/10/2025  11:05    <DIR>          FULL_DEBUG_GD32F4xx
+21/10/2025  10:36    <DIR>          FULL_DEBUG_HW_MP28947_GD32F4xx
+07/08/2025  12:43                32 keyEccRawDbg.bin
+01/09/2025  17:27                32 keyEccRawTarget.bin
+18/06/2025  09:14               561 NotePerGenerazioneTarget.txt
+21/10/2025  12:37                 0 output.txt
+07/08/2025  12:43                64 pubkeyEccRawDbg.bin
+01/09/2025  17:27                64 pubkeyEccRawTarget.bin
+19/09/2025  16:49               183 ScameControlUnit.code-workspace
+19/09/2025  11:08           473.379 ScameControlUnit.ewd
+19/09/2025  11:39           484.495 ScameControlUnit.ewp
+19/09/2025  11:39           910.797 ScameControlUnit.ewt
+06/10/2025  16:34               170 ScameControlUnit.eww
+13/10/2025  09:59           479.981 ScameControlUnit_970.ewd
+06/10/2025  16:37           491.245 ScameControlUnit_970.ewp
+06/10/2025  16:37         1.058.117 ScameControlUnit_970.ewt
+31/07/2025  08:17             2.262 SCU_GD32F470xG_boot.icf
+18/06/2025  09:14             1.996 SCU_with_GD32F470xG.icf
+21/10/2025  12:36    <DIR>          settings
+18/06/2025  09:14         1.440.270 srec_cat.exe
+18/06/2025  09:14            22.544 startup_stm32f427xx.s
+18/06/2025  09:14            27.972 startup_stm32f746xx.s
+18/06/2025  09:14            32.639 startup_stm32h573xx.s
+18/06/2025  09:14             1.601 stm32f746xx_flashBoot.icf
+18/06/2025  09:14             1.599 stm32f746xx_flashNoBoot.icf
+18/06/2025  09:14             1.377 stm32h573xx_flash.icf
+18/06/2025  09:14             1.348 stm32h573xx_flash_ns.icf
+21/10/2025  12:36    <DIR>          TARGET
+15/10/2025  14:16    <DIR>          TARGET_DBG_HW_MP28947
+21/10/2025  12:36    <DIR>          TARGET_REL_GD
+14/10/2025  08:27    <DIR>          TARGET_REL_HW_MP28947
+              39 File     39.958.403 byte
+              10 Directory  258.879.836.160 byte disponibili

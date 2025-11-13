@@ -1,0 +1,640 @@
+/**
+*   @file      handler_metrology.c
+*   @author    IPC - Industrial BU
+*   @date      17 May 2016
+*   @brief     Implements routines to handle Metrology
+*   @note      (C) COPYRIGHT 2013 STMicroelectronics
+*
+* @attention
+*
+* THE PRESENT SOFTWARE WHICH IS FOR GUIDANCE ONLY AIMS AT PROVIDING CUSTOMERS
+* WITH CODING INFORMATION REGARDING THEIR PRODUCTS IN ORDER FOR THEM TO SAVE TIME.
+* AS A RESULT, STMICROELECTRONICS SHALL NOT BE HELD LIABLE FOR ANY DIRECT,
+* INDIRECT OR CONSEQUENTIAL DAMAGES WITH RESPECT TO ANY CLAIMS ARISING FROM THE
+* CONTENT OF SUCH SOFTWARE AND/OR THE USE MADE BY CUSTOMERS OF THE CODING
+* INFORMATION CONTAINED HEREIN IN CONNECTION WITH THEIR PRODUCTS.
+*
+*/
+
+/*******************************************************************************
+* INCLUDE FILES:
+*******************************************************************************/
+
+#include "handler_metrology.h"
+#include "metrology.h"
+#include "st_device.h"
+#include "metroTask.h"
+#include "nvram.h"
+#include "handler_nvram.h"
+
+#include <string.h>
+
+/** @addtogroup GENERIC
+  * @{
+  */
+/*
+#define NVRAM_MARKER_LEG            0xAA3333AA
+#define NVRAM_VERSION_LEG           1
+*/
+/*******************************************************************************
+* TYPES:
+*******************************************************************************/
+
+/*******************************************************************************
+* MACROS & CONSTANTS:
+*******************************************************************************/
+       /*+------------------------------------------------------------------------------------+
+         |                                        U32                                         |
+         |---------------------|-------------------|-------------------|----------------------|
+         |     STPM EXT4       |     STPM EXT3     |     STPM EXT2     |     STPM EXT1        |
+         |---------------------|-------------------|-------------------|----------------------|
+         |    u4   |     u4    |   u4    |   u4    |     u4  |     u4  |      u4   |  u4      |
+         |---------|-----------|--------------------------------------------------------------|
+         |CH masks | STPM type |CH masks |STPM type|CH masks |STPM type|  CH masks |STPM type |
+         |---------|-----------|--------------------------------------------------------------|
+
+        STPM CFG EXTx (u8):
+        -----------------
+        MSB u4 : Channel  Mask :  Channels affected to STPM
+            0 : No Channel affected
+            1 : Channel 1 affected
+            2 : Channel 2 affected
+            4 : Channel 3 affected
+            8 : Channel 4 affected
+
+        LSB u4 :  STPM type : 6 to 8
+            0 : No STPM
+            6 : STPM32
+            7 : STPM33
+            8 : STPM34
+
+        EX : STPM EXT 1: One STPM34 with Channels 2 and 3 affected on it
+        LSB u4 = 8 (STPM34)
+        MSB u4 = 6 ( 4:Channel 3 + 2:Channel 2)
+
+        STPM CONFIG : U32 = 0x00000068
+
+        +------------------------------------------------------------------------------------+*/
+
+const nvmLeg_t metroDefaultNvm = {
+  NVRAM_MARKER_LEG, // marker
+  NVRAM_VERSION_LEG,// version
+  PLTF_STM32_METER, // crc
+  DEFAULT_SN,       // Serial number 
+  {                 // Config
+    0x00000005,
+    0x00006818      // System configured as: 
+                    // - EXT1 device is STPM34 with only the channel1 enabled
+                    // - EXT2 device is STPM34 with channel 2 (int Channel 1) and 3 (int Channel 2) enabled (for 3P)
+  },
+  {                 // data1[19] STPM (Config for CT)
+    DEFAULT_DSP_CR1_VAL,
+    DEFAULT_DSP_CR2_VAL,
+#ifdef POWER_BOARD    
+    DSP_CR3_CLKOUT_TO_16MHz_VAL, // DSP_CR3 --> CLKOUT @16MHz
+#else
+    0x000004E0,     // DSP_CR3
+#endif    
+    0x00000000,     // DSP_CR4
+    0x003ff800,     // DSP_CR5
+    0x003ff800,     // DSP_CR6
+    0x003ff800,     // DSP_CR7
+    0x003ff800,     // DSP_CR8
+    0x00000fff,     // DSP_CR9
+    0x00000fff,     // DSP_CR10
+    0x00000fff,     // DSP_CR11
+    0x00000fff,     // DSP_CR12
+    0x03270327,     // DFE_CR1 register --> GAIN1 at x2
+    0x03270327,     // DFE_CR2    
+    0x00000000,     // DSP_IRQ1
+    0x00000000,     // DSP_IRQ2
+    0x00000000,     // DSP_CR4
+    0x00000000,     // DSP_SR1
+    0x00004007,     // DSP_SR2
+  },
+  {                 // data2[19] STPM (Config for CT)
+    DEFAULT_DSP_CR1_VAL,
+    DEFAULT_DSP_CR2_VAL,
+    0x000004e0,      // DSP_CR3  
+    0x00000000,      // DSP_CR4
+    0x003ff800,      // DSP_CR5
+    0x003ff800,      // DSP_CR6
+    0x003ff800,      // DSP_CR7
+    0x003ff800,      // DSP_CR8
+    0x00000fff,      // DSP_CR9
+    0x00000fff,      // DSP_CR10
+    0x00000fff,      // DSP_CR11
+    0x00000fff,      // DSP_CR12
+    0x03270327,      // DFE_CR1 register --> GAIN1 at x2
+    0x03270327,      // DFE_CR2 
+    0x00000000,      // DSP_IRQ1
+    0x00000000,      // DSP_IRQ2
+    0x00000000,      // DSP_CR4
+    0x00000000,      // DSP_SR1
+    0x00004007,      // DSP_SR2
+  },
+  {                 // data3[19] STPM (Config for CT)
+    DEFAULT_DSP_CR1_VAL,
+    DEFAULT_DSP_CR2_VAL,
+    0x000004e0,
+    0x00000000,
+    0x003ff800,
+    0x003ff800,
+    0x003ff800,
+    0x003ff800,
+    0x00000fff,
+    0x00000fff,
+    0x00000fff,
+    0x00000fff,
+    0x03270327,     // DFE_CR1 register --> GAIN1 at x2
+    0x03270327,
+    0x00000000,
+    0x00000000,
+    0x00000000,
+    0x00000000,
+    0x00004007,
+  },
+  {                 // data4[19] STPM (Config for CT)
+    DEFAULT_DSP_CR1_VAL,
+    DEFAULT_DSP_CR2_VAL,
+    0x000004e0,
+    0x00000000,
+    0x003ff800,
+    0x003ff800,
+    0x003ff800,
+    0x003ff800,
+    0x00000fff,
+    0x00000fff,
+    0x00000fff,
+    0x00000fff,
+    0x03270327,
+    0x03270327,
+    0x00000000,
+    0x00000000,
+    0x00000000,
+    0x00000000,
+    0x00004007,
+  },
+  {               // powerFact[NUM_SENSOR_TYPE][4]
+
+    /* for current sensor type --> TA SBT002  */
+    25757906 /* with R21 of 13ohm the value is --> 11623604 */ /* ORIGINAL VALUE IS --> 30154605 */ ,     // ch 1  
+    25757906 /* with R21 of 13ohm the value is --> 11623604 */ /* ORIGINAL VALUE IS --> 30154605 */ ,     // ch 2
+    25757906 /* with R21 of 13ohm the value is --> 11623604 */ /* ORIGINAL VALUE IS --> 30154605 */ ,     // ch 3
+    25757906 /* with R21 of 13ohm the value is --> 11623604 */ /* ORIGINAL VALUE IS --> 30154605 */ ,     // ch 4
+    
+    /* for current sensor type --> TA SDL007 */    
+    38468469 /* with R21 of 13ohm the value is --> 11623604 */ /* ORIGINAL VALUE IS --> 30154605 */ ,     // ch 1
+    38468469 /* with R21 of 13ohm the value is --> 11623604 */ /* ORIGINAL VALUE IS --> 30154605 */ ,     // ch 2
+    38468469 /* with R21 of 13ohm the value is --> 11623604 */ /* ORIGINAL VALUE IS --> 30154605 */ ,     // ch 3
+    38468469 /* with R21 of 13ohm the value is --> 11623604 */ /* ORIGINAL VALUE IS --> 30154605 */ ,     // ch 4
+    
+  },
+  {               // voltageFact[4] --> is not affected by TA type
+    
+    116274,       // ch 1
+    116274,       // ch 2
+    116274,       // ch 3
+    116274,       // ch 4
+    
+  },
+  {               // currentFact[NUM_SENSOR_TYPE][4]
+    
+    /* for current sensor type --> EM_TA_TYPE_SBT002 */
+    22170 /* with R21 of 13ohm the value is --> 10005 */ /* ORIGINAL VALUES IS --> 25934 */,        // ch 1
+    22170 /* with R21 of 13ohm the value is --> 10005 */ /* ORIGINAL VALUES IS --> 25934 */,        // ch 2
+    22170 /* with R21 of 13ohm the value is --> 10005 */ /* ORIGINAL VALUES IS --> 25934 */,        // ch 3
+    22170 /* with R21 of 13ohm the value is --> 10005 */ /* ORIGINAL VALUES IS --> 25934 */,        // ch 4
+    
+    /* for current sensor type --> EM_TA_TYPE_SDL007  */        
+    33250 /* with R21 of 13ohm the value is --> 10005 */ /* ORIGINAL VALUES IS --> 25934 */,        // ch 1
+    33250 /* with R21 of 13ohm the value is --> 10005 */ /* ORIGINAL VALUES IS --> 25934 */,        // ch 2
+    33250 /* with R21 of 13ohm the value is --> 10005 */ /* ORIGINAL VALUES IS --> 25934 */,        // ch 3
+    33250 /* with R21 of 13ohm the value is --> 10005 */ /* ORIGINAL VALUES IS --> 25934 */,        // ch 4
+        
+  },
+  
+  2048,  /* Calibration factor for Voltage L1 */
+  2048,  /* Calibration factor for Voltage L2 */
+  2048,  /* Calibration factor for Voltage L3 */
+  2048,  /* Calibration factor for Current L1 */
+  2048,  /* Calibration factor for Current L2 */
+  2048,  /* Calibration factor for Current L3 */
+  
+  DEVICE_NOT_CALIBRATED,        /* Calibration status */
+  EM_SCAME_DEFAULT_BAUDRATE | (EM_TA_TYPE_SBT002 << EM_CURRSENS_CONFIG_BIT_POS),  /* Configuration */
+};
+
+#ifdef UART_XFER_STPM3X /* UART MODE */   
+
+const STPM_Com_port_t STPM_com_port[4] ={  
+  {
+  USART3,    //USART used by device 1
+  GPIOE,     //CS used by device 1
+  GPIO_PIN_14,
+  GPIOE,     //SYN used by device 1
+  GPIO_PIN_15,
+  GPIOE,     //EN used by device 1
+  GPIO_PIN_13
+  },
+  {
+  USART6,     //USART used by device 2
+  GPIOC,      //CS used by device 2
+  GPIO_PIN_8,
+  GPIOC,      //SYN used by device 2
+  GPIO_PIN_9,
+  GPIOA,      //EN used by device 2
+  GPIO_PIN_8
+  },
+  {
+  USART2,    //USART used by device 3
+  GPIOA,     //CS used by device 3
+  GPIO_PIN_0,
+  GPIOA,     //SYN used by device 3
+  GPIO_PIN_1,
+  GPIOC,     //EN used by device 3
+  GPIO_PIN_3
+  },
+  {
+  USART2,    //USART used by device 4
+  GPIOA,     //CS used by device 4
+  GPIO_PIN_0,
+  GPIOA,     //SYN used by device 4
+  GPIO_PIN_1,
+  GPIOC,     //EN used by device 4
+  GPIO_PIN_3
+  }
+};
+#endif
+
+#ifdef SPI_XFER_STPM3X /* SPI MODE */   
+
+const STPM_Com_port_t STPM_com_port[4] ={  
+  {
+    SPI2,           //SPI used by device 1
+    GPIOE,          //SCS used by device 1
+    GPIO_PIN_15,
+    GPIOB,          //SYN used by device 1
+    GPIO_PIN_6,
+    GPIOC,          //EN used by device 1
+    GPIO_PIN_0
+  },
+  {
+    SPI2,           //SPI used by device 2
+    GPIOE,          //SCS used by device 2
+    GPIO_PIN_8,
+    GPIOB,          //SYN used by device 2
+    GPIO_PIN_2, 
+    GPIOE,          //EN used by device 2
+    GPIO_PIN_2
+  }, 
+  /* This firmware is able to manage 4 external devices , but for our application they are only two:
+     Device1 in monophase version and Device 2 for threephase.
+     So other initializations are indicatives                                                   */
+  {
+    SPI2,           //SPI used by device 3
+    GPIOE,          //SCS used by device 3
+    GPIO_PIN_15,
+    GPIOB,          //SYN used by device 3
+    GPIO_PIN_6,
+    GPIOC,          //EN used by device 3
+    GPIO_PIN_0
+  },
+  {
+    SPI2,           //SPI used by device 4
+    GPIOE,          //SCS used by device 4
+    GPIO_PIN_8,
+    GPIOB,          //SYN used by device 4
+    GPIO_PIN_2, 
+    GPIOE,          //EN used by device 4
+    GPIO_PIN_2
+  }
+};
+#endif
+
+/*******************************************************************************
+* GLOBAL VARIABLES:
+*******************************************************************************/
+extern metroData_t metroData;
+extern METRO_Device_Config_t Tab_METRO_internal_Devices_Config[NB_MAX_DEVICE];
+
+/* Structure used to share the measures with the SCU board */
+em_Measures_t   em_Measures;
+em_Config_t     em_Config;    
+em_Status_t     em_Status;
+
+/* TA type global variable */
+EM_CurrSens_type_e EM_CurrSens_type;
+
+/*******************************************************************************
+* LOCAL VARIABLES:
+*******************************************************************************/
+
+/*******************************************************************************
+* LOCAL FUNCTION PROTOTYPES:
+*******************************************************************************/
+static uint8_t  MET_CheckConfigInNVM();
+static void     MET_ApplyNvmConfig(void);
+static void     MET_UpdateNvmConfig(void);
+static void     MET_UpdateNvmHWfactors(void);
+
+
+/*******************************************************************************
+*
+*                       IMPLEMENTATION: Public functions
+*
+*******************************************************************************/
+/**
+  * @brief  Configures the Metrology peripheral.
+  * @param  None
+  * @retval None
+  */
+void MET_Conf(void)
+{
+    metroData.nvm = (nvmLeg_t*)NVM_GetPtr(NVRAM_LEG_ID);
+    if (MET_CheckConfigInNVM() == 0)
+    {
+      memcpy(metroData.nvm, &metroDefaultNvm, sizeof(nvmLeg_t));
+    }
+}
+
+/**
+  * @brief  Initialize the Port to communicated to Metrology peripheral
+  *         
+  * @param[in]   None
+  * @retval None
+  */
+
+void Metro_com_port_device(void)
+{
+
+  for (METRO_NB_Device_t i=EXT1;i<(NB_MAX_DEVICE);i++)
+  {
+    if(Tab_METRO_internal_Devices_Config[i].device != 0)
+    {
+      Tab_METRO_internal_Devices_Config[i].STPM_com_port= STPM_com_port[(i-1)];
+    }
+  }
+
+}
+
+/**
+  * @brief  restore Metrology configuration from NVM
+  * @param  None
+  * @retval 0 if KO - 1 if OK
+  */
+void MET_RestoreConfigFromNVM( void )
+{
+  if (MET_CheckConfigInNVM())
+  {
+    MET_ApplyNvmConfig();
+  }
+  else
+  {
+    MET_RestoreDefaultConfig(3);
+  }
+}
+
+/**
+  * @brief  restore Metrology configuration from default
+  * @param  None
+  * @retval None
+  */
+
+void MET_RestoreDefaultConfig(uint32_t nbPhase)
+{
+  memcpy(metroData.nvm, &metroDefaultNvm, sizeof(nvmLeg_t));
+  if (nbPhase == 1)
+  {
+    metroData.nvm->config[1] = 0x16;
+  }
+  MET_ApplyNvmConfig();
+}
+
+/**
+  * @brief  save current Metrology configuration to NVM
+  * @param  None
+  * @retval None
+  */
+void MET_SaveConfigToNVM( void )
+{
+  MET_UpdateNvmConfig();
+  MET_UpdateNvmHWfactors();
+  NVM_Write(NVM_SAVE_LEG);
+}
+
+
+/*******************************************************************************
+*
+*                       IMPLEMENTATION: Private functions
+*
+*******************************************************************************/
+/**
+  * @brief  checks for a valid  Metrology configuration in NVM
+  * @param  None
+  * @retval Status : 0 if KO - 1 if OK
+  */
+static uint8_t MET_CheckConfigInNVM()
+{
+  int i;
+  if (metroData.nvm->marker != NVRAM_MARKER_LEG)
+  {
+    return(0);
+  }
+  metroData.nvm->crc = 0;
+
+  if (metroData.nvm->config[0] != 0x00000005)          // STM32
+  {
+    MET_Set_NVM_to_1P_Type();  
+  }
+  else if (((metroData.nvm->config[1] & (DEVICE_MASK_CONF + CHANNEL_MASK_CONF)) != 0x00000016) &&  // STPM32 for phase 1
+           ((metroData.nvm->config[1] & (DEVICE_MASK_CONF + CHANNEL_MASK_CONF)) != 0x00000097) &&  // STPM33 for phase 1 & Tamper
+           ((metroData.nvm->config[1] & (DEVICE_MASK_CONF + CHANNEL_MASK_CONF)) != 0x00000018))    // STPM34 for phase 1 & 2
+  {
+    metroData.nvm->config[1] = 0x00000016;
+  }
+  else if (((metroData.nvm->config[1] & (DEVICE_MASK_CONF + CHANNEL_MASK_CONF)<<8) != 0x00002600) &&  // STPM32 for phase 2
+           ((metroData.nvm->config[1] & (DEVICE_MASK_CONF + CHANNEL_MASK_CONF)<<8) != 0x0000A700) &&  // STPM33 for phase 2 & Tamper
+           ((metroData.nvm->config[1] & (DEVICE_MASK_CONF + CHANNEL_MASK_CONF)<<8) != 0x00006800 ))   // STPM34 channel 2 and 3 for phase 2 & 3 */
+  {
+    metroData.nvm->config[1] &= ~((DEVICE_MASK_CONF + CHANNEL_MASK_CONF)<<8);
+  }
+  
+   /* FOR OUR APPLICATION THERE ARE ONLY 2 STPM34 DEVICES:
+      - EXT1 WITH ONLY 1 CHANNEL IN CASE OF 1P 
+      - EXT2 WITH 2 CHANNELS IN CASE OF 3P 
+
+      SO THIS PART IS NOT NEEDED --> 
+
+  else if (((metroData.nvm->config[1] & (DEVICE_MASK_CONF + CHANNEL_MASK_CONF)<<16) != 0x00460000) &&  // STPM32 for phase 3
+           ((metroData.nvm->config[1] & (DEVICE_MASK_CONF + CHANNEL_MASK_CONF)<<16) != 0x00C70000))    // STPM33 for phase 3 & Tamper
+  {
+    metroData.nvm->config[1] &= ~((DEVICE_MASK_CONF + CHANNEL_MASK_CONF)<<16);
+  }
+  else if (((metroData.nvm->config[1] & (uint32_t)((DEVICE_MASK_CONF + CHANNEL_MASK_CONF)<<24)) != 0x86000000))   // STPM32 for phase Tamper
+  {
+    metroData.nvm->config[1] &= ~((DEVICE_MASK_CONF + CHANNEL_MASK_CONF)<<24);
+  }
+
+  */
+  
+  
+   /* Minimum 1 phase */ 
+   metroData.nbPhase = (uint8_t)((metroData.nvm->config[1]&(CHANNEL_MASK_CONF_CHANNEL_1<<4))>>4);
+   /* get the others in case of 3 phases system */                                  
+   metroData.nbPhase += (uint8_t)((uint8_t)((metroData.nvm->config[1]&(CHANNEL_MASK_CONF_CHANNEL_2<<12))>>13) 
+                       + (uint8_t)((metroData.nvm->config[1]&(CHANNEL_MASK_CONF_CHANNEL_3<<12))>>14));
+   
+   /* FOR OUR APPLICATION THERE ARE ONLY 2 STPM34 DEVICES:
+      - EXT1 WITH ONLY 1 CHANNEL IN CASE OF 1P 
+      - EXT2 WITH 2 CHANNELS IN CASE OF 3P
+
+      SO THIS PART IS NOT NEEDED --> 
+      metroData.nbPhase += (uint8_t)((uint8_t)((metroData.nvm->config[1]&(CHANNEL_MASK_CONF_CHANNEL_3<<20))>>22));  */
+
+
+   // check for power factor - force to default power Factor if not
+  for (i=0; i<4; i++)
+  {
+    if ((metroData.nvm->powerFact[EM_CurrSens_type][i] == 0) || (metroData.nvm->powerFact[EM_CurrSens_type][i] == 0xFFFFFFFF))
+    {
+      metroData.nvm->powerFact[EM_CurrSens_type][i] = metroDefaultNvm.powerFact[EM_CurrSens_type][i];
+    }
+  }
+  return(1);
+}
+
+/**
+  * @brief  Apply NVM config to various devices
+  * @param  None
+  * @retval None
+  */
+static void MET_ApplyNvmConfig(void)
+{
+   
+  /* Configure EXT4 device */
+  
+  if ((metroData.nvm->config[1] & ((uint32_t)DEVICE_MASK_CONF << 24)) != 0)
+  {
+    /* Check if Config device inside RAM can permit access to EXT chip */
+    if ((Tab_METRO_internal_Devices_Config[EXT4].device >= STPM32)&&(Tab_METRO_internal_Devices_Config[EXT4].device < NB_MAX_STPM))
+    {  
+      /* write configuration into STPM */
+      Metro_Write_Block_to_Device(EXT4, 0, 19, metroData.nvm->data4);
+  
+      /* Read back configuration to show the read block access */
+      Metro_Read_Block_From_Device(EXT4, 0, 19, (uint32_t *)&Tab_METRO_internal_Devices_Config[EXT4].metro_stpm_reg);    
+    }
+  }
+
+  /* Configure EXT3 device */
+  
+  if ((metroData.nvm->config[1] & ((uint32_t)DEVICE_MASK_CONF << 16)) != 0)
+  {
+    /* Check if Config device inside RAM can permit access to EXT chip */
+    if ((Tab_METRO_internal_Devices_Config[EXT3].device >= STPM32)&&(Tab_METRO_internal_Devices_Config[EXT3].device < NB_MAX_STPM))
+    {  
+      /* write configuration into STPM */
+      Metro_Write_Block_to_Device(EXT3, 0, 19, metroData.nvm->data3);
+  
+      /* Read back configuration to show the read block access */
+      Metro_Read_Block_From_Device(EXT3, 0, 19, (uint32_t *)&Tab_METRO_internal_Devices_Config[EXT3].metro_stpm_reg);    
+    }
+  }
+
+  /* Configure EXT2 device */
+  
+  if ((metroData.nvm->config[1] & ((uint32_t)DEVICE_MASK_CONF << 8)) != 0)
+  {
+    /* Check if Config device inside RAM can permit access to EXT chip */
+    if ((Tab_METRO_internal_Devices_Config[EXT2].device >= STPM32)&&(Tab_METRO_internal_Devices_Config[EXT2].device < NB_MAX_STPM))
+    {  
+      /* write configuration into STPM */
+      Metro_Write_Block_to_Device(EXT2, 0, 19, metroData.nvm->data2);
+  
+      /* Read back configuration to show the read block access */
+      Metro_Read_Block_From_Device(EXT2, 0, 19, (uint32_t *)&Tab_METRO_internal_Devices_Config[EXT2].metro_stpm_reg);    
+    }
+  }
+  
+  /* Configure the EXT1 device */
+
+  if ((metroData.nvm->config[1] & (uint32_t)DEVICE_MASK_CONF) != 0)
+  {
+    /* Check if Config device inside RAM can permit access to EXT chip */
+    if ((Tab_METRO_internal_Devices_Config[EXT1].device >= STPM32)&&(Tab_METRO_internal_Devices_Config[EXT1].device < NB_MAX_STPM))
+    {  
+      /* write configuration into STPM */
+      Metro_Write_Block_to_Device(EXT1, 0, 19, metroData.nvm->data1);
+  
+      /* Read back configuration to show the read block access */
+      Metro_Read_Block_From_Device(EXT1, 0, 19, (uint32_t *)&Tab_METRO_internal_Devices_Config[EXT1].metro_stpm_reg);    
+    }
+    else /*  not correct init made or no chip detected */
+    {
+      /* reset to single phase the NVRAM config */
+      MET_Set_NVM_to_1P_Type();                         
+    }
+  } 
+  
+}
+
+/**
+  * @brief  Update NVM config by reading from various devices
+  * @param  None
+  * @retval None
+  */
+
+static void MET_UpdateNvmConfig(void)
+{
+  if ((metroData.nvm->config[1] & DEVICE_MASK_CONF) != 0)
+  {
+    Metro_Read_Block_From_Device(EXT1, 0, 19, metroData.nvm->data1 );
+  }
+
+  if ((metroData.nvm->config[1] & (DEVICE_MASK_CONF<<8)) != 0)
+  {
+    Metro_Read_Block_From_Device(EXT2, 0, 19, metroData.nvm->data2 );
+  }
+
+  if ((metroData.nvm->config[1] & (DEVICE_MASK_CONF<<16)) != 0)
+  {
+    Metro_Read_Block_From_Device(EXT3, 0, 19, metroData.nvm->data3 );
+  }
+
+  if ((metroData.nvm->config[1] & (DEVICE_MASK_CONF<<24)) != 0)
+  {
+    Metro_Read_Block_From_Device(EXT4, 0, 19, metroData.nvm->data4 );
+  }
+}
+
+
+/**
+  * @brief  Update NVM HW factors
+  * @param  None
+  * @retval None
+  */
+static void MET_UpdateNvmHWfactors(void)
+{
+  for (int i=0; i<4; i++)
+  {
+    Metro_Get_Hardware_Factors((METRO_Channel_t)(CHANNEL_1 +i),&metroData.nvm->powerFact[EM_CurrSens_type][i],&metroData.nvm->voltageFact[i],&metroData.nvm->currentFact[EM_CurrSens_type][i]);
+  }
+}
+
+/**
+  * @brief  Set NVM to 1P Type
+  * @param  None
+  * @retval None
+  */
+void MET_Set_NVM_to_1P_Type(void)
+{
+  metroData.nvm->config[0] = 0x00000005;
+  metroData.nvm->config[1] = 0x00000016;  
+}
+
+/**
+  * @}
+  */
+
+/* End Of File */

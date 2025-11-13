@@ -1,0 +1,4337 @@
+/******************* (C) COPYRIGHT 2009 STMicroelectronics *********/
+/**
+* @file        telnet.c
+*
+* @brief       Small telnet application with terminal console - Implementation -
+*
+* @author      Nick
+*
+* @riskClass   C
+*
+* @moduleID
+*
+* @vcsInfo
+*     $Id: telnet.c 765 2025-06-10 07:53:52Z npiergi $
+*
+*     $Revision: 765 $
+*
+*     $Author: npiergi $
+*
+*     $Date: 2025-06-10 09:53:52 +0200 (mar, 10 giu 2025) $
+*
+*
+* @copyright
+*       Copyright (C) 2017 SCAME S.p.A. All rights reserved.
+*       This file is copyrighted and the property of Aesys S.p.A.. It contains confidential and proprietary
+*       information. Any copies of this file (in whole or in part) made by any method must also include a copy of this
+*       legend.
+*       Developed by:  SCAME S.p.A.
+***********************************************************************************************************************/
+
+/************************************************************
+ * Include
+ ************************************************************/
+#include <main.h>
+#include <stddef.h>
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
+#include <stdarg.h>
+#include <ctype.h>
+#ifdef GD32F4xx
+#include "stm32f4xx_hal.h"
+#include "stm32f4xx_ll_rcc.h"
+#else
+#include "stm32h5xx_hal.h"
+#include "stm32h5xx_ll_rcc.h"
+#include "stm32h5xx_ll_rcc_legacy.h"
+#endif   
+#include "cmsis_os.h"
+#include "ff.h"
+#include "telnet.h"
+#include "lwip/tcp.h"
+#include "dbg_Task.h"
+#include "fatMng.h"
+#include "ExtFlash.h"
+#include "rtcApi.h"
+#include "displayPin.h"
+#include "hts.h"
+#include "i2c.h"
+#include "wrapper.h"
+#include "Em_Task.h"
+#include "ioExp.h"
+#include "scuMdb.h"
+
+#include "eeprom.h"
+#include "EnergyMng.h"
+#include "EvsMng.h"
+#include "BlockMng.h"
+#include "LcdMng.h"
+#include "PersMng.h"
+#include "PwmMng.h"
+#include "RfidMng.h"
+#include "annVocali.h"
+#include "adcTask.h"
+#include "sbcGsy.h"
+#include "prot_OnUsart.h"
+#include "diffRiarm.h"
+#include "scheduleMng.h"
+#include "iar_dlmalloc.h"
+#include "hts.h"
+#include "sinapsi.h"
+
+#ifndef HW_MP28947   
+#include "lwip.h"
+#else
+#include "metroTask.h"
+#endif
+   
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**           LOCAL MACROS, TYPEDEF, STRUCTURE, ENUM                         **
+**                                                                          **
+******************************************************************************
+*/
+#define GREETING "Hello. What is your name?\r\n"
+#define HELLO "Hello "
+#define MAX_NAME_SIZE 64
+
+#define CONFIGURE_WITH_HAL  1
+
+struct name 
+{
+  int length;
+  char bytes[MAX_NAME_SIZE];
+};
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Local Variables                               **
+**                                                                          **
+****************************************************************************** 
+*/ 
+static   struct           tcp_pcb *pcb;
+/* Buffer used for reception and transmission */
+static   telnetMsg_st     telnetTxMsg[1];
+static   telnetMsg_st     telnetRxMsg;
+static   struct           tcp_pcb *pcbTelnet;  /* telnet TCP connection Block */
+static   uint8_t          telnetBufferTxMsg[640];
+static   uint16_t         inBuffer;
+
+static   uint8_t          stateUI, txPossible, userNameOk;
+
+static   uint8_t          iRx, iTx;
+static   size_t           txByteCount;
+static   uint8_t          bufferTmp[TELNET_MSG_SIZE];
+static   uint8_t          lastPos;
+static   console_t        console = { CONSOLE_IDLE, 0, 0, 0 };
+
+static const char     welcomeLogin[] = "Welcome on SCAME SCU Telnet Server!!\r\nUsername: ";
+static const char     passwordReq[] = "Password: ";
+static const char     loginOk[] = "\r\nLogin successfully!!\r\n";
+static const char     username[] = {'d', 'e', 'v', 'e', 'l', 'o', 'p', 'e', 'r'};
+static const char     password[] = {'C', 'l', 'u', '0', '0', 's', 'o', '0', '0', 'n', 'e', '0', '0', '@'};
+static const char     wrongPassword[] = " \n\rWrong Login!! Retry...\r\nUsername: ";
+
+static const uint8_t  AdcOrigin [5][10]  = { "Vin_ADC", "PP_ADC ", "SW_ADC", "TA_ADC", "TEMP_ADC"};
+
+const uint8_t  resetOrigin [4][8]  = { "PINRST ", "PORRST ", "IWDGRST", "NVICRST"};
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Global Const                                   **
+**                                                                          **
+****************************************************************************** 
+*/ 
+
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Global Variables                              **
+**                                                                          **
+****************************************************************************** 
+*/ 
+/*  SITOS  data link queue  declaration */
+xQueueHandle telenetTxQueue = NULL;
+
+DIR            locDir;              /* Directory object */  
+FILINFO        locFinfo;  
+FIL            locFile;             /* File objects */  
+
+time_t locTimeInitial, locTimeFinal;
+
+/* DEBUG   queue  declaration */
+xQueueHandle consoleQueue = NULL;
+
+uint8_t*                    pLongMsg;
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            External Variables                            **
+**                                                                          **
+******************************************************************************
+*/
+//extern annVoce_st annVoce[NUM_ANN];
+extern sFLASH_Info sFLASH_Information;
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            External Function                             **
+**                                                                          **
+******************************************************************************
+*/
+
+extern void stopVINconversion (void);
+extern void PWM_On_CNTCT_Modify (uint8_t New_DutyCycle_Perc);
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Internal Function prototype                   **
+**                                                                          **
+******************************************************************************
+*/
+static err_t    telnet_recv               (void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err);
+static err_t    telnet_accept             (void *arg, struct tcp_pcb *pcb, err_t err);
+static void     telnet_conn_err           (void *arg, err_t err);
+static void     telnet_init               (void);
+static err_t    telnetMng                 (telnetMsg_st  telnetRxMsg);
+static void     consoleMng                (uint8_t* buffer);
+static void     idleConsole               (uint8_t* msgRcv);
+static void     PrintMenu                 (void);
+static void     funzioniQSPIflash         (uint8_t* msgRcv);
+
+static void     funzioneDataOra           (uint8_t* msgRcv);
+static void     funzioneSetSn             (uint8_t* msgRcv);
+static void     funzioneSetHts            (uint8_t* msgRcv);
+static void     funzioniLCD               (uint8_t* msgRcv);
+static void     funzioniEEPROM            (uint8_t* msgRcv);
+static void     funzioniStation           (uint8_t* msgRcv);
+static void     funzioniEm                (uint8_t* msgRcv);
+static void     funzioniWifi              (uint8_t* msgRcv);
+static void     funzioniNet               (uint8_t* msgRcv);
+static uint8_t  getDigit                  (uint8_t digit);
+static void     funzioniModbus            (uint8_t* msgRcv);
+static void     funzioniNet               (uint8_t* msgRcv);
+static void     funzioniSem               (uint8_t* msgRcv);
+static void     funzioniIP                (uint8_t* msgRcv);
+static void     funzioniSram              (uint8_t* msgRcv);
+static void     funzioniNet               (uint8_t* msgRcv);
+static void     funzioniActivationKey     (uint8_t* msgRcv);
+static void     funzioneTransactionsMng   (uint8_t* msgRcv);
+static void     funzioneSetProductSn      (uint8_t* msgRcv);
+static void     funzioneSetProductCode    (uint8_t* msgRcv);
+static void     funzioneSetFakeCode       (uint8_t* msgRcv);
+static void     funzioneSetUserPin        (uint8_t* msgRcv);
+static void     funzioniOscType           (uint8_t* msgRcv);
+static void     funzioneViewConnNumber    (uint8_t* msgRcv);
+static void     funzioneViewFWVersions    (uint8_t* msgRcv);
+static void     funzioniEVLOG             (uint8_t* msgRcv);
+
+static void     PrintHtsMenu              (void);
+
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Function Definition                           **
+**                                                                          **
+******************************************************************************
+*/
+
+
+/**
+*
+* @brief       Gestione del protocollo SITOS: rx side
+*
+* @param [in]  (void const *: not used  
+*  
+* @retval      none 
+*  
+****************************************************************/
+void telnetProcess (void * pvParameters)
+{
+  uint32_t        timeTickTelnet;
+
+  /*-------- Creates an empty mailbox for uart SITOS messages --------------------------*/
+  telenetTxQueue = xQueueCreate(TELNET_MAX_MESSAGE_NUM, sizeof(telnetMsg_st));
+  configASSERT(telenetTxQueue != NULL);
+
+  telnet_init();
+  timeTickTelnet = portMAX_DELAY;
+  inBuffer = 0;
+
+  for (;;)
+  {
+#ifdef COME_ERA
+    /* Wait for some event from SW to be transmitted on telnet */
+    if (xQueueReceive(telenetTxQueue, (void *)&telnetTxMsg[ixBuff], portMAX_DELAY) == pdPASS)
+    {
+      //tcp_write(pcb, (void*)&telnetMsg.bufferMsg, telnetMsg.lenMsg, 1); 
+      //tcp_write(pcbTelnet, (void*)&telnetMsg.bufferMsg, telnetMsg.lenMsg, 1); 
+      telnetMng(telnetTxMsg[ixBuff]);
+      ixBuff = (ixBuff + 1) & (uint8_t)0x03;
+    }
+    else
+    {
+      continue;
+    }
+#else
+    /* Wait for some event from SW to be transmitted on telnet */
+    if (xQueueReceive(telenetTxQueue, (void *)&telnetTxMsg[0], timeTickTelnet) == pdPASS)
+    {
+      if ((stateUI == STATE_UI_TRANSPARENT) && (telnetTxMsg[0].telnetEv == TELNET_TX))
+      {
+        /*      destination                                      source           length */
+        memcpy((void*)&telnetBufferTxMsg[inBuffer], (void*)telnetTxMsg[0].bufferMsg, (size_t)telnetTxMsg[0].lenMsg);
+        inBuffer += telnetTxMsg[0].lenMsg;
+        timeTickTelnet = TIMEOUT_WAIT_TO_SEND;
+      }
+      else
+      {
+        telnetMng(telnetTxMsg[0]);
+      }
+    }
+    else
+    {
+      telnetTxMsg[0].lenMsg = inBuffer;
+      telnetTxMsg[0].telnetEv = TELNET_TX;
+      telnetTxMsg[0].pBufferMsg = (uint8_t*)telnetBufferTxMsg;
+      inBuffer = (uint16_t)0;
+
+      timeTickTelnet = portMAX_DELAY;
+      /* call telnet function to transmit the long message */
+      telnetMng(telnetTxMsg[0]);
+    }
+#endif
+  }
+}
+
+/**
+  * @brief  Called when a data is received on the telnet connection
+  * @param  arg    the user argument
+  * @param  pcb    the tcp_pcb that has received the data
+  * @param  p    the packet buffer
+  * @param  err    the error value linked with the received data
+  * @retval error value
+  */
+static err_t telnet_recv(void *arg, struct tcp_pcb *pcb, struct pbuf *p, err_t err)
+{
+  struct pbuf *q;
+  struct name *name = (struct name *)arg;
+  int done, iacCom;
+  char *c;
+  int i;
+ 
+
+  /* We perform here any necessary processing on the pbuf */
+  if (p != NULL) 
+  {        
+    /* We call this function to tell the LwIp that we have processed the data */
+    /* This lets the stack advertise a larger window, so more data can be received*/
+    tcp_recved(pcb, p->tot_len);
+
+    /* Check the name if NULL, no data passed, return withh illegal argument error */
+    if(!name) 
+    {
+      pbuf_free(p);
+      return ERR_ARG;
+    }
+
+    done = 0;
+    for(q=p; q != NULL; q = q->next) 
+    {
+      c = q->payload;
+      for(i=0; i<q->len && !done; i++) 
+      {
+        done = ((c[i] == '\r') || (c[i] == '\n'));
+        if(name->length < MAX_NAME_SIZE) 
+        {
+          name->bytes[name->length++] = c[i];
+        }
+      }
+    }
+    if(done) 
+    {
+      if(name->bytes[name->length-2] != '\r' || name->bytes[name->length-1] != '\n') 
+      {
+        if((name->bytes[name->length-1] == '\r' || name->bytes[name->length-1] == '\n') && (name->length+1 <= MAX_NAME_SIZE)) 
+        {
+          name->length += 1;
+        } 
+        else if(name->length+2 <= MAX_NAME_SIZE) 
+        {
+          name->length += 2;
+        } 
+        else 
+        {
+          name->length = MAX_NAME_SIZE;
+        }
+
+        name->bytes[name->length-2] = '\r';
+        name->bytes[name->length-1] = '\n';
+      }
+      /* Send out the first message */  
+      name->bytes[name->length] = '\0';
+      //tPrintf("HELLO %s\r\n", name->bytes);
+      //tcp_write(pcb, HELLO, strlen(HELLO), 1);
+      //tcp_write(pcb, name->bytes, name->length, TCP_WRITE_FLAG_COPY);
+      // put in the queue UI
+      telnetRxMsg.telnetEv = TELNET_RX;
+      telnetRxMsg.lenMsg = (uint8_t)name->length;
+      /*             destination                      source */
+      memcpy((void*)&telnetRxMsg.bufferMsg[0], (void*)&name->bytes[0], telnetRxMsg.lenMsg);
+      configASSERT(xQueueSendToBack(telenetTxQueue, (void *)&telnetRxMsg, portMAX_DELAY) == pdPASS);
+      name->length = 0;
+    }
+    else
+    {
+      /* check IAC command */
+      for (i = 0, iacCom = 0; i < name->length - 1; i+=3)
+      {
+        if ((uint8_t)name->bytes[i] == IAC)
+        {
+          iacCom = 1;
+          break;
+        }
+      }
+      if (iacCom == 1)
+      {
+        telnetRxMsg.telnetEv = TELNET_RX;
+        telnetRxMsg.lenMsg = (uint8_t)name->length;
+        /*             destination                      source */
+        memcpy((void*)&telnetRxMsg.bufferMsg[0], (void*)&name->bytes[0], telnetRxMsg.lenMsg);
+        configASSERT(xQueueSendToBack(telenetTxQueue, (void *)&telnetRxMsg, portMAX_DELAY) == pdPASS);
+        name->length = 0;
+      }
+    }
+    
+    /* End of processing, we free the pbuf */
+    pbuf_free(p);
+  }  
+  else if (err == ERR_OK) 
+  {
+    /* When the pbuf is NULL and the err is ERR_OK, the remote end is closing the connection. */
+    /* We free the allocated memory and we close the connection */
+    mem_free(name);
+    pcbTelnet = NULL;
+    telnetRxMsg.telnetEv = TELNET_CLOSE;
+    telnetRxMsg.lenMsg = (uint8_t)0;
+    configASSERT(xQueueSendToBack(telenetTxQueue, (void *)&telnetRxMsg, portMAX_DELAY) == pdPASS);
+    return tcp_close(pcb);
+  }
+  return ERR_OK;
+
+
+}
+
+/**
+  * @brief  This function when the Telnet connection is established
+  * @param  arg  user supplied argument 
+  * @param  pcb     the tcp_pcb which accepted the connection
+  * @param  err     error value
+  * @retval ERR_OK
+  */
+static err_t telnet_accept(void *arg, struct tcp_pcb *pcb, err_t err)
+{     
+
+  /* Tell LwIP to associate this structure with this connection. */
+  tcp_arg(pcb, mem_calloc(sizeof(struct name), 1));    
+  
+  /* Configure LwIP to use our call back functions. */
+  tcp_err(pcb, telnet_conn_err);
+  tcp_recv(pcb, telnet_recv);
+
+  /* Send out the first message */  
+  //tPrintf("Versione SITOS: = %s\r\n", sitosVersion());
+
+  pcbTelnet = pcb;
+  return (ERR_OK);
+}
+
+/**
+  * @brief  Initialize the hello application  
+  * @param  None 
+  * @retval None 
+  */
+void telnet_init(void)
+{
+  err_t err;
+  
+  /* Init TCP control block  */
+  pcbTelnet = NULL;
+  pLongMsg = NULL;
+
+  /* init console telnet manager  */
+  stateUI = STATE_UI_INIT_TELNET;
+#ifdef COME_ERA
+  ixBuff  = 0;
+#endif
+  
+  /* Create a new TCP control block  */
+  pcb = tcp_new();                                 
+
+  /* Assign to the new pcb a local IP address and a port number */
+  /* Using IP_ADDR_ANY allow the pcb to be used by any local interface */
+  err = tcp_bind(pcb, IP_ADDR_ANY, 6323);        
+
+  if(err == ERR_OK)
+  {
+    /* Set the connection to the LISTEN state */
+    pcb = tcp_listen(pcb);                
+
+    /* Specify the function to be called when a connection is established */    
+    tcp_accept(pcb, telnet_accept);   
+  }
+
+}
+
+/**
+  * @brief  This function is called when an error occurs on the connection 
+  * @param  arg
+  * @parm   err
+  * @retval None 
+  */
+static void telnet_conn_err(void *arg, err_t err)
+{
+  struct name *name;
+  name = (struct name *)arg;
+
+  mem_free(name);
+}
+
+
+
+/**
+*
+* @brief        esegue la gestione dei messaggi su telnet 
+*
+* @param [in]   none
+*
+* @retval       err_t - ERR_OK se non ci sono errori
+*
+***********************************************************************************************************************/
+static err_t  telnetMng (telnetMsg_st  telnetMsg)
+{
+  size_t                    n;
+  err_t                     error;
+  uint16_t                  available, len;
+  char                      expectedPass[sizeof(password) + 1];
+  struct    DataAndTime_t*  pDataTime;
+
+  txPossible = TRUE;
+  error = ERR_OK;
+
+  if (telnetMsg.telnetEv == TELNET_CLOSE)
+  {
+    /* new socket tcp for a future connection */
+    telnet_init();
+    return (ERR_OK); 
+  }
+
+    switch (stateUI)
+    {
+      case STATE_UI_INIT_TELNET:
+        osDelay (250);
+        iRx = 0;
+        iTx = 0;
+        if (telnetMsg.telnetEv == TELNET_RX)
+        {
+          do
+          {
+            if(telnetMsg.bufferMsg[iRx] == IAC)
+            {
+              /* a telnet protocol message has been detected */
+              iRx++; // point to command name
+              switch(telnetMsg.bufferMsg[iRx])
+              {
+                case WILL:  // 0xFB = 251
+                  iRx++;
+                  if(telnetMsg.bufferMsg[iRx] == TERMINAL_TYPE)
+                  {
+                    // terminal type: answer DO
+                    telnetMsg.bufferMsg[iTx++] = IAC;
+                    telnetMsg.bufferMsg[iTx++] = DONT;
+                    telnetMsg.bufferMsg[iTx++] = TERMINAL_TYPE;
+                  }
+                  if(telnetMsg.bufferMsg[iRx] == SGA)
+                  {
+                    // suppress go ahead: answer DON'T
+                    telnetMsg.bufferMsg[iTx++] = IAC;
+                    telnetMsg.bufferMsg[iTx++] = DONT;
+                    telnetMsg.bufferMsg[iTx++] = SGA;
+                  }
+                  if(telnetMsg.bufferMsg[iRx] == NEGOTIATE_WINDOW_SIZE)
+                  {
+                    // negotiate window size: answer DON'T
+                    telnetMsg.bufferMsg[iTx++] = IAC;
+                    telnetMsg.bufferMsg[iTx++] = DONT;
+                    telnetMsg.bufferMsg[iTx++] = NEGOTIATE_WINDOW_SIZE;
+                  }
+                  break;
+                case WONT:  // 0xFC = 252
+                  break;
+                case DO:    // 0xFD = 253
+                  iRx++;
+                  if(telnetMsg.bufferMsg[iRx] == SGA)
+                  {
+                    // suppress go ahead: answer WILL
+                    telnetMsg.bufferMsg[iTx++] = IAC;
+                    telnetMsg.bufferMsg[iTx++] = WONT;
+                    telnetMsg.bufferMsg[iTx++] = SGA;
+                  }
+                  if(telnetMsg.bufferMsg[iRx] == ECHO)
+                  {
+                    // echo: answer WONT
+                    telnetMsg.bufferMsg[iTx++] = IAC;
+                    telnetMsg.bufferMsg[iTx++] = WONT;
+                    //telnetMsg.bufferMsg[iTx++] = WILL;
+                    telnetMsg.bufferMsg[iTx++] = ECHO;
+                  }
+                  break;
+                case DONT:  // 0xFE = 254
+                  break;
+              }
+            }
+            iRx++;
+          } while(iRx < telnetMsg.lenMsg);
+        }
+        if(iTx != 0)
+        {
+          n = iTx;
+          txByteCount += n;
+        }
+        else
+        {
+          txPossible = FALSE;
+        }
+        // Start Login message.
+        telnetMsg.telnetEv = TELNET_TX;
+        configASSERT(xQueueSendToBack(telenetTxQueue, (void *)&telnetMsg, portMAX_DELAY) == pdPASS);
+        stateUI = STATE_UI_LOGIN;
+        break;
+
+      case STATE_UI_LOGIN:
+        osDelay (500);
+        /*             destination                      source */
+        (void)strcpy((char *)&telnetMsg.bufferMsg[0], (char *)welcomeLogin); 
+        n = strlen(welcomeLogin);
+        txByteCount += n;
+        stateUI = STATE_UI_USERNAME;
+        break;
+
+    case STATE_UI_USERNAME:
+      if (telnetMsg.telnetEv == TELNET_RX)
+      {
+        if (strstr((char*)telnetMsg.bufferMsg, "\r\n") != NULL)
+        {
+          /*             destination                      source */
+          memcpy((void*)&bufferTmp[lastPos], (void*)&telnetMsg.bufferMsg[0], telnetMsg.lenMsg);
+          /* telnetMsg.bufferMsg has /r/n at the end of username */
+          if ((telnetMsg.lenMsg == sizeof(username) + 2) && (strncmp((char*)bufferTmp, username, sizeof(username)) == 0))
+          {
+            // username corretta
+            userNameOk = TRUE;
+          }
+          else
+          {
+            // username errata
+            userNameOk = FALSE;
+          }
+          /*             destination                      source */
+          (void)strcpy((char *)&telnetMsg.bufferMsg[0], (char *)passwordReq); 
+          n = strlen(passwordReq);
+          txByteCount += n;
+          stateUI = STATE_UI_PASSWORD;
+          lastPos = 0;
+        }
+        else
+        {
+          txPossible = FALSE;
+          /*             destination                      source */
+          memcpy((void*)&bufferTmp[lastPos], (void*)&telnetMsg.bufferMsg[0], telnetMsg.lenMsg);
+          lastPos += telnetMsg.lenMsg; 
+        }
+      }
+      break;
+
+    case STATE_UI_PASSWORD:
+      if (telnetMsg.telnetEv == TELNET_RX)
+      {
+        if (strstr((char*)telnetMsg.bufferMsg, "\r\n") != NULL)
+        {
+
+          pDataTime = getCurrentLocalTime((uint32_t*)bufferTmp);
+          len = sprintf(expectedPass, "Clu%02dso%02dne%02d@", pDataTime->Day, pDataTime->Month, pDataTime->Hour);
+
+          /*             destination                      source */
+          memcpy((void*)&bufferTmp[lastPos], (void*)&telnetMsg.bufferMsg[0], telnetMsg.lenMsg);
+          if ((strncmp((char*)bufferTmp, expectedPass, sizeof(password)) == 0) && (userNameOk == TRUE) && (len >= sizeof(password)))
+          {
+            // password  corretta
+            /*             destination                      source */
+            (void)strcpy((char *)&telnetMsg.bufferMsg[0], (char *)loginOk); 
+            n = strlen(loginOk);
+            stateUI = STATE_UI_TRANSPARENT;
+            putInConsoleQueueHandle((uint8_t*)"m\r\n");
+            lastPos = 0;
+            txPossible = FALSE;
+          }
+          else
+          {
+            // password  errata
+            /*             destination                      source */
+            (void)strcpy((char *)&telnetMsg.bufferMsg[0], (char *)wrongPassword); 
+            n = strlen(wrongPassword);
+            txByteCount += n;
+            stateUI = STATE_UI_USERNAME;
+          }
+        }
+        else
+        {
+          txPossible = FALSE;
+          /*             destination                      source */
+          memcpy((void*)&bufferTmp[lastPos], (void*)&telnetMsg.bufferMsg[0], telnetMsg.lenMsg);
+          lastPos += telnetMsg.lenMsg; 
+        }
+      }
+      break;
+
+      case STATE_UI_TRANSPARENT:
+        if (telnetMsg.telnetEv == TELNET_TX)
+        {
+          n = telnetMsg.lenMsg;
+          txByteCount += n;
+        }
+        else
+        {
+          if (telnetMsg.telnetEv == TELNET_RX)
+          {
+            if (strstr((char*)telnetMsg.bufferMsg, "\r\n") != NULL)
+            {
+              if ((telnetMsg.bufferMsg[0] == 0xFF) && (telnetMsg.bufferMsg[1] == 0xF1))
+              {
+                /* no operation received from client: ignore it */
+                lastPos = 0;
+                telnetMsg.bufferMsg[0] = '\0';
+              }   
+              else
+              {
+                /*             destination                      source */
+                memcpy((void*)&bufferTmp[lastPos], (void*)&telnetMsg.bufferMsg[0], telnetMsg.lenMsg);
+                lastPos += telnetMsg.lenMsg; 
+                /* transmission to Console */
+                bufferTmp[lastPos] = '\0';  // end string terminator
+                putInConsoleQueueHandle(bufferTmp);
+                lastPos = 0;
+              }
+            }
+            else
+            {
+              /*             destination                      source */
+              memcpy((void*)&bufferTmp[lastPos], (void*)&telnetMsg.bufferMsg[0], telnetMsg.lenMsg);
+              lastPos += telnetMsg.lenMsg; 
+            }
+          }
+          txPossible = FALSE;
+        }
+        break;
+
+      default:
+        txPossible = FALSE;
+        break;
+    }
+    
+  if (txPossible == TRUE)
+  {
+    available = tcp_sndbuf(pcbTelnet);
+    while (available < telnetMsg.lenMsg)
+    {
+      osDelay(500);
+      available = tcp_sndbuf(pcbTelnet);
+    }
+    do
+    {
+#ifdef COME_ERA
+      //Send data back to the client
+      error = tcp_write(pcbTelnet, (void*)&telnetMsg.bufferMsg, n, 1); 
+#else
+      if (stateUI != STATE_UI_TRANSPARENT)
+      {
+        //Send data back to the client
+        error = tcp_write(pcbTelnet, (void*)&telnetMsg.bufferMsg, n, 1); 
+      }
+      else
+      {
+        //Send data back to the client
+        error = tcp_write(pcbTelnet, (void*)telnetMsg.pBufferMsg, n, 1); 
+      }
+#endif
+      //error = socketSend(contextUI->socket, telnetMsg.bufferMsg, n, &n, 0);
+      if (error != ERR_OK) 
+      {
+        osDelay(100);
+      }
+    } while (error != ERR_OK);
+  }
+  return (error); 
+}
+
+/**
+*
+* @brief        esegue gestione del menu' utente
+*
+* @param [in]   uint8_t*: puntatore al buffer del comando immesso da tstiera
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static void consoleMng (uint8_t* buff )
+{
+
+  /* start processo */
+  switch (console.stato)
+  {
+    case CONSOLE_IDLE:
+      idleConsole (buff);
+      break;
+      
+    case COMANDO_DATA_ORA:
+      funzioneDataOra (buff);
+      break;
+
+    case COMANDO_SET_SN:
+      funzioneSetSn (buff);
+      break;
+      
+    case COMANDO_SET_HTS:
+      funzioneSetHts (buff);
+      break;
+      
+    case COMANDO_TRANSACTIONS_MNG:
+      funzioneTransactionsMng(buff);
+      break;
+      
+   case COMANDO_SET_PRODUCT_SN:
+    funzioneSetProductSn(buff);
+    break;
+    
+   case COMANDO_SET_PRODUCT_CODE:
+    funzioneSetProductCode(buff);
+    break;
+
+   case COMANDO_VIEW_CONN_NUMBER:
+    funzioneViewConnNumber(buff);
+    break;
+    
+   case COMANDO_VIEW_FW_VERSIONS:
+    funzioneViewFWVersions(buff);
+    break;
+    
+    case COMANDO_VIEW_ASSIGNED:
+     funzioneViewFWVersions(buff);
+     break;
+
+   case COMANDO_SET_FAKE_CODE:
+    funzioneSetFakeCode(buff);
+    break;
+    
+   case COMANDO_SET_USER_PIN:
+    funzioneSetUserPin(buff);
+    break;
+    
+    case COMANDI_FLASH:
+      funzioniQSPIflash (buff);
+      break;
+
+    case COMANDI_SRAM:
+      funzioniSram (buff);
+      break;
+
+
+    case COMANDO_SET_IP_PAR:
+      funzioniIP (buff);
+      break;
+
+    case COMANDI_LCD:
+      funzioniLCD (buff);
+      break;
+
+    case COMANDI_EEPROM:
+      funzioniEEPROM (buff);
+      break;
+
+    case COMANDI_STATION_MNG:
+      funzioniStation (buff);
+      break;
+
+    case COMANDI_EM_MNG:
+      funzioniEm (buff);
+      break;
+
+    case COMANDI_WIFI:
+      funzioniWifi (buff);
+      break;
+      
+    case COMANDO_SHOW_NET_PAGE:
+      funzioniNet( buff );
+      break;
+      
+    case COMANDO_SHOW_ACT_KEY:
+      funzioniActivationKey( buff );
+      break;
+    
+  case COMANDO_SET_OSC_TYPE:
+      funzioniOscType (buff);    
+      break;
+      
+    case COMANDI_MODBUS:
+      funzioniModbus (buff);
+      break;
+
+    case COMANDI_SEM:
+      funzioniSem (buff);
+      break;
+      
+    case COMANDO_EVLOG:
+      funzioniEVLOG (buff);
+      break;
+      
+    default:
+      break;
+  }
+}
+
+
+static void idleConsole (uint8_t* msgRcv)
+{
+  //uint32_t tmp;
+  rseSetReg_st*         pTmp;
+  uint32_t              tRim;
+  char                  ch;
+  
+  switch (msgRcv[0])
+  {
+#ifdef SIMULATORE_CARICHI
+    case SEL_RELAY_CMD:                       // digitato '@': per debug, commuta il carico di stufette 
+      if (msgRcv[1] == 'R')
+      {
+        setReleCarico(&msgRcv[2]); 
+        ch = 0;
+        while (msgRcv[ch] != '\r')
+        {
+          tmeDateStr[ch] = msgRcv[ch];
+          ch++;
+        }
+        tmeDateStr[ch] = msgRcv[ch];
+        ch++;
+        tmeDateStr[ch] = '\0';
+        tPrintf("%s", tmeDateStr);
+      }
+      break;
+#endif
+    case SEL_DATA_TIME:                       // digitato '1'
+      console.stato = COMANDO_DATA_ORA;
+      PrintMenu ();
+      break;
+
+    case SEL_LCD_CMD:                       // digitato '2'
+      console.stato = COMANDI_LCD;
+      PrintMenu ();
+      break;
+
+    case SEL_EE_CMD:                       // digitato '3'
+      console.stato = COMANDI_EEPROM;
+      PrintMenu ();
+      break;
+
+    case SEL_QSPI_CMD:                       // digitato '4'
+      console.stato = COMANDI_FLASH;
+      PrintMenu ();
+      break;
+
+    case SEL_STATION_CMD:                    // digitato '5'
+      console.stato = COMANDI_STATION_MNG;
+      PrintMenu ();
+      break;
+
+    case SEL_EM_CMD:                        // digitato '6'
+      console.stato = COMANDI_EM_MNG;
+      PrintMenu ();
+      break;
+
+    case SEL_IP4_CMD:                       // digitato '8'
+      tPrintf("IP      address  %d.%d.%d.%d\n\r",  NetworkConfiguration.IpAddress[0], NetworkConfiguration.IpAddress[1], 
+                                                  NetworkConfiguration.IpAddress[2], NetworkConfiguration.IpAddress[3]);
+      tPrintf("Mask    address  %d.%d.%d.%d\n\r", NetworkConfiguration.SubnetMask[0], NetworkConfiguration.SubnetMask[1], 
+                                                  NetworkConfiguration.SubnetMask[2], NetworkConfiguration.SubnetMask[3]);
+      tPrintf("Gateway address  %d.%d.%d.%d\n\r", NetworkConfiguration.Gateway[0], NetworkConfiguration.Gateway[1], 
+                                                  NetworkConfiguration.Gateway[2], NetworkConfiguration.Gateway[3]);
+      tPrintf("MAC     address  %02X:%02X:%02X:%02X:%02X:%02X\n\r", 
+                                                  NetworkConfiguration.MACAddress[0], NetworkConfiguration.MACAddress[1], 
+                                                  NetworkConfiguration.MACAddress[2], NetworkConfiguration.MACAddress[3],
+                                                  NetworkConfiguration.MACAddress[4], NetworkConfiguration.MACAddress[5]);
+      tPrintf("HTTP Port:  %d\n\r", NetworkConfiguration.portHttp); 
+      console.stato = COMANDO_SET_IP_PAR;
+      PrintMenu ();
+      break;
+
+    case SEL_SRAM_UP:                          // digitato '0'
+      console.stato = COMANDI_SRAM;
+      PrintMenu (); 
+      break;
+
+    case SEL_EVLOG_CMD:                        //  digitato 'l'
+      console.stato = COMANDO_EVLOG;      
+      PrintMenu ();
+      break;
+      
+    case SEL_SET_SN:                          // digitato 's'
+      console.stato = COMANDO_SET_SN;
+      PrintMenu ();
+      break;
+     
+    case SEL_HTS_SENS:                        // digitato 't'
+      console.stato = COMANDO_SET_HTS;
+      PrintMenu ();
+      break;
+    
+    case SEL_RSE_CMD:                         // digitato 'p'
+      pTmp = getRWSinapsiInfo();
+      tPrintf(" PCont = %10d[W]  Ts = %10d\n\r PDisp = %10d[W]  Ts = %10d\n\r", pTmp->m1Pc, pTmp->m1PcTs, pTmp->m1Pd, pTmp->m1PdTs);
+      tPrintf(" PAtPr = %10d[W]  Ts = %10d\n\r PAtIm = %10d[W]  Ts = %10d\n\r", pTmp->m1Papi, pTmp->m1PapiTs, pTmp->m1Paii, pTmp->m1PaiiTs);
+
+      /*************  TIMER_DIST_T     ********************/
+      ch = (char)' '; tRim = checkSinapsiTimer (TIMER_DIST_T) / 1000;
+      if (tRim != 0)
+      {
+        ch = (char)'*';
+        tPrintf(" Tdist = %10d[s]  Ts = %10d %c [%d]\n\r\n\r", pTmp->m1TimeResDist, pTmp->m1ResDistTs, ch, tRim);
+      }
+      else
+      {
+        tPrintf(" Tdist = %10d[s]  Ts = %10d %c\n\r\n\r", pTmp->m1TimeResDist, pTmp->m1ResDistTs, ch);
+      }
+      osDelay(100);
+
+      tPrintf(" Fa_Or = %10d     Ts = %10d\n\r", pTmp->m1Pfo, pTmp->m1PfoTs);
+
+      /*************  TIMER_PMAX_T     ********************/
+      ch = (char)' '; tRim = checkSinapsiTimer (TIMER_PMAX_T) / 1000;
+      if (tRim != 0)
+      {
+        ch = (char)'*';
+        tPrintf(" PmaxT = %10d[W]  Ts = %10d %c [%d]\n\r", pTmp->m1PmrTlim, pTmp->m1PmrTlimTs, ch, tRim);
+      }
+      else
+      {
+        tPrintf(" PmaxT = %10d[W]  Ts = %10d\n\r", pTmp->m1PmrTlim, pTmp->m1PmrTlimTs, ch);
+      }
+      /*************  TIMER_SUSP_T     ********************/
+      ch = (char)' '; tRim = checkSinapsiTimer (TIMER_SUSP_T) / 1000;
+      if (tRim != 0)
+      {
+        ch = (char)'*';
+        tPrintf(" TSosp = %10d[s] %c [%d]\n\r UnixT = %10d[s]\n\r", pTmp->m1SospRicTlimTs, ch, tRim, pTmp->m1UtSync);
+      }
+      else
+      {
+        tPrintf(" TSosp = %10d[s] %c\n\r UnixT = %10d[s]\n\r", pTmp->m1SospRicTlimTs, ch, pTmp->m1UtSync);
+      }
+
+      break;
+      
+    case SEL_MODBUS_CMD:
+      console.stato = COMANDI_MODBUS;
+      PrintMenu ();
+      break;
+
+    case SEL_RESET_SCU:                     // digitato 'r'
+      __disable_irq();
+      setFlagForNvic();
+      HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_CHARGE_STATUS, 0L);
+      while(HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_CHARGE_STATUS) != 0x00000000);
+      NVIC_SystemReset();
+      break;
+
+#ifdef GD32F4xx      
+    case SEL_WIFI_CMD:                      // digitato 'w'
+      console.stato = COMANDI_WIFI;
+      PrintMenu ();
+      break;
+      
+    case SEL_SEM_CMD:                      // digitato 'S'
+      console.stato = COMANDI_SEM;
+      PrintMenu ();
+      break;
+      
+#endif
+      
+    default:                                 // digitato 'm'
+      PrintMenu ();
+      break;
+  }
+}
+
+// *****************************************
+static void PrintHtsMenu (void)
+{
+  uint8_t     dData, dArray[5],temp_int, temp_dec;
+  uint16_t    temp_degrees;
+
+  temp_degrees = hts_temp_degrees_get();
+  temp_int = (temp_degrees / 10);
+  temp_dec = (temp_degrees % 10);
+
+  eeprom_param_get(TEMP_CTRL_ENB_EADD, &dData, 1);
+  tPrintf("\n\r1     Temperature control enable   %d [1/0]\n\r", dData);
+
+  eeprom_param_get(TEMP_CTRL_VAL_EADD, &dData, 1);
+
+  if (dData <= 9)
+    tPrintf("2     Temperature control value    %d [deg]\n\r", dData);
+  else
+    tPrintf("2     Temperature control value   %d [deg]\n\r", dData);
+
+  eeprom_param_get(TEMP_DELTA_EADD, &dData, 1);
+
+  if ((dData & 0x7F) <= 9)
+    tPrintf("3 [s] Temperature control delta   ");
+  else
+    tPrintf("3 [s] Temperature control delta  ");
+
+  osDelay(200);
+
+  if (dData == 0)
+    tPrintf(" ");
+  else if (dData & 0x80)
+    tPrintf("-");
+  else
+    tPrintf("+");
+
+  osDelay(200);
+
+  dData &= 0x7F;
+  tPrintf("%d [deg] [s=null/-]\n\r", dData);
+
+  eeprom_param_get(TEMP_HYSTERESIS_EADD, &dData, 1);
+
+  if (dData <= 9)
+    tPrintf("4     Temperature control hyster   %d [deg]\n\r", dData);
+  else
+    tPrintf("4     Temperature control hyster  %d [deg]\n\r", dData);
+
+  tPrintf("\n\r      Measured Temperature        %d,%d [deg]\n\r", temp_int, temp_dec);
+  osDelay(200);
+  tPrintf("\n\re  x        [x=0 dis; x=1 ena] Temperature logs");
+  tPrintf("\n\rc [x]xxx   Correzione in mV [100..3000]\n\r");
+  osDelay(200);
+  hts_camera_sim_get(dArray);
+
+  tPrintf("\n\r");
+  tPrintf("\n\rf xx       Temperatura finale in deg [50-80] %d", dArray[0]);
+  tPrintf("\n\ro xx       Temp offset in deg [0-60]         %d", dArray[1]);
+  osDelay(200);
+  tPrintf("\n\rs xx       Vel in salita in deg/min [1-9]    %d", dArray[2]);
+  tPrintf("\n\rd xx       Vel in discesa in deg/min [1-9]   %d", dArray[3]);
+  tPrintf("\n\rv x        0=esc; 1=inc; 2=dec; 3=stab     %d\n\r", dArray[4]);
+}
+
+// *****************************************
+static void PrintMenu (void)
+{
+  char                  tmeDateStr[32];
+  uint32_t              temp;
+  uint8_t               ix;
+  struct mallinfo       m;
+//  uint8_t           filenameLen;
+//  unsigned char*    filename; 
+
+  switch (console.stato)
+  {
+    case CONSOLE_IDLE:
+      if (getScuOpMode() == SCU_EMUMAX0_S)
+      {
+        tPrintf ("\r\n SCU_SLAVE FW Ver: %s_11", (char*)getFwVer());
+      }
+      else
+      {
+        tPrintf ("\r\n SCU_MASTER FW Ver: %s_11", (char*)getFwVer());
+      }
+      if ((LL_RCC_IsActiveFlag_PINRST() != (uint32_t)0) || (LL_RCC_IsActiveFlag_PORRST() != (uint32_t)0) || 
+          (LL_RCC_IsActiveFlag_IWDGRST() != (uint32_t)0) || (LL_RCC_IsActiveFlag_SFTRST() != (uint32_t)0))
+      {
+        //if (checkFlagForNvic() == (uint8_t)TRUE) ix = 3;
+        ix = Get_RST_Origin ();        
+        //resetFlagForNvic();
+        LL_RCC_ClearResetFlags();                   
+        // Aggiorno data e ora
+        UpdateGlobalDT();
+        /*         destination       source */
+        strncpy((char*)tmeDateStr, (char*)BOOT_ADDR_VER, BOOT_VER_SIZE);
+        tmeDateStr[BOOT_VER_SIZE] = '\0';
+        if (tmeDateStr[0] == (uint8_t)'V')
+        {
+          /* Send out the first message */  
+          tPrintf (" Boot Ver: %s", (char*)tmeDateStr);
+          tmeDateStr[0] = '\0';
+        }
+        (void)getCurrentLocalTime(&temp); 
+        /* Send out the first message */  
+        tPrintf ("  Reset By: %s at %s", (char*)&resetOrigin[ix][0], (char*)temp);
+      }
+      tPrintf (" \r\n\r\n 1. Time and Date\r\n 2. LCD test\r\n 3. EEPROM test\r\n 4. FLASH QSPI\r\n");      
+      tPrintf (" 5. Station Mng\r\n 6. Energy Meter\r\n 7. Modbus command\r\n 8. IP config\r\n");
+      tPrintf (" l. Log Eventi\r\n");      
+      tPrintf (" r. Reset \r\n s. Set Serial Number\r\n");
+#ifdef GD32F4xx      
+      tPrintf (" p. SINAPSI regs\r\n w. Wifi\r\n t. H&T Sensor\r\n S. SEM\r\n m. Main menu\r\n");
+#else
+      tPrintf (" p. SINAPSI regs\r\n t. H&T Sensor\r\n m. Main menu\r\n");      
+#endif      
+      break;
+
+    case COMANDO_DATA_ORA:
+      tmeDateStr[0] = '\0';
+      // Aggiorno data e ora
+      (void)getCurrentLocalTime((uint32_t*)tmeDateStr);
+      tPrintf("Current date and Time %s, %s \n\r", (char*)tmeDateStr);
+      tPrintf (" s aaaammgg d hhmmss +/-z d=1/0 Ora legale ON/OFF z= time zone\n\r");
+      tPrintf (" v x [x=0/1 Time LCD OFF/ON]\n\r m. Main menu\r\n");
+      break;
+
+    case COMANDO_SET_HTS:
+      PrintHtsMenu();
+      break;
+
+    case COMANDO_SET_SN:
+      eeprom_param_get(SERNUM_BYTE0_EADD, (uint8_t*)tmeDateStr, 4);
+      if (!((tmeDateStr[0] == 0xFF) || (tmeDateStr[2] == 0xFF) || (tmeDateStr[2] == 0xFF) || (tmeDateStr[3] == 0xFF)))
+      {
+        temp =  ((uint32_t)((tmeDateStr[0] & 0xF0) >> 4) * 10000000) + ((uint32_t)((tmeDateStr[0] & 0x0F)) * 1000000) +
+                ((uint32_t)((tmeDateStr[1] & 0xF0) >> 4) * 100000)   + ((uint32_t)((tmeDateStr[1] & 0x0F)) * 10000)   +
+                ((uint32_t)((tmeDateStr[2] & 0xF0) >> 4) * 1000)     + ((uint32_t)((tmeDateStr[2] & 0x0F)) * 100)     +
+                ((uint32_t)((tmeDateStr[3] & 0xF0) >> 4) * 10)       + ((uint32_t)((tmeDateStr[3] & 0x0F)) * 1);
+        tPrintf("Current SN %08d", temp);
+      }
+      tPrintf (" s xxxxxxxx [8] new serial number\n\r r restore to default SN\n\r m. Main menu\r\n");
+      break;
+      
+    case COMANDO_SHOW_NET_PAGE:
+    {
+      AppEmobTask_printWifiInfo();
+      if(AppEmobTask_getWifiRssi() == 0)
+      {
+        tPrintf("a \"<ssid>\" \"<password>\" Connect to Wi-Fi\r\n");
+      }
+      else
+      {
+        tPrintf("a. Disconnect from Wi-Fi\r\n");
+      }
+      
+      tPrintf ("m. Return\r\n");
+    }
+    break;
+      
+   case COMANDO_SHOW_ACT_KEY:
+    {
+      uint32_t activation = AppEmobTask_getActivationKey();
+      tPrintf( "Current activation key %d\r\n", activation );
+      tPrintf ("m. Return\r\n");
+    }
+    break;
+    
+   case COMANDO_SET_PRODUCT_SN:
+    memcpy(tmeDateStr, getProductSerialNumberEeprom(), 16);
+    tmeDateStr[10] = '\0';
+    tPrintf("Current product serial number %s\n\r", tmeDateStr);
+    tPrintf (" s xxxxxxxxx [9] new product serial number\n\r r restore to default product serial number\n\r m. Main menu\r\n");
+    break;
+    
+   case COMANDO_SET_PRODUCT_CODE:
+    memcpy(tmeDateStr, getProductCode(), 24);
+    tmeDateStr[16] = '\0';
+    tPrintf("Current product code %s\n\r", tmeDateStr); 
+    tPrintf ("d xxxxxxxxxxxxxxxx [16] new product code\n\r r restore to default product code\n\r m. Main menu\r\n");
+   break;
+    
+   case COMANDO_VIEW_CONN_NUMBER:
+    tPrintf ("v xx --> View connector number of SCU xx (1 to 16) \n\r");
+    tPrintf ("m. Main menu\r\n");
+    break;
+
+   case COMANDO_VIEW_FW_VERSIONS:
+    Print_Slave_FW_Version();
+    break;
+
+    case COMANDO_VIEW_ASSIGNED:
+     Print_Slave_Assigned();
+     break;
+      
+   case COMANDO_SET_FAKE_CODE:
+    memcpy(tmeDateStr, getFakeProductCode(), 20);
+    tmeDateStr[14] = '\0';
+    tPrintf("Current fake product code %s\n\r", tmeDateStr);
+    tPrintf (" f xxxxxxxxxxxxxx [14] new fake product code\n\r r restore to default fake product code\n\r m. Main menu\r\n");
+    break;
+    
+   case COMANDO_SET_USER_PIN:
+    memcpy(tmeDateStr, getUserPin(), 5);
+    tmeDateStr[5] = '\0';
+    tPrintf("Current user pin %s", tmeDateStr);
+    tPrintf (" u xxxxx [5] new user pin\n\r r restore to 00000 user pin\n\r m. Main menu\r\n");
+    break;
+
+    case COMANDO_TRANSACTIONS_MNG:
+      tPrintf("[Transactions control]\n\r e - Erase all the transactions\n\r m - Main menu\r\n");
+      break;
+            
+    case COMANDI_FLASH:
+      tPrintf("[QSPI Flash command]\n\r r XXXXXX - Read XXXXXX address \n\r");
+      tPrintf(" w XXXXXX YY - Write YY data to XXXXXX address \n\r e XXXXXX - Erase sector\n\r");
+      tPrintf(" t - Erase all transactions \n\r");
+      tPrintf(" m. Main menu\n\r");
+      m = __iar_dlmallinfo();
+      tPrintf ( "total free space = %u, %uk\n\r" , m.fordblks, m.fordblks/1024 );
+      break;
+
+    case COMANDI_LCD:
+      tPrintf("[LCD&LED command]\n\r s a cc r -string- Put string at col cc[01-20] row r[1-2] aligned a [l-c-r]\n\r");
+      tPrintf(" b xx - set brigthness at xx% \n\r c xxx - set contrast at xxx level \n\r w n ll - n [r,g,b] ll=lum [10..99] soft blue \n\r");
+      tPrintf(" l n xx - set brigthness led n [r,g,b] at xx% \n\r o - all led off \n\r");
+      tPrintf(" p xx  - send picuture xx\n\r e x  - 0 dis LCD 1 ena LCD\n\r i - init LCD\n\r");
+      tPrintf(" f n xxxx - set flashing led n [r,g,b] at xxxx msec% \n\r m. Main menu\n\r");
+      break;
+
+    case COMANDI_EEPROM:
+      tPrintf("[EEPROM command]\n\r r aaaa - read 4 bytes from aaaa address\n\r");      
+      tPrintf(" c- Check the presence in EEPROM of SCU backup data (PRESENT/NOT PRESENT)\n\r");
+      tPrintf(" w aaaa xxxx - write xxxx at address aaaa \n\r");
+      tPrintf(" e - Restore MAKE AS DEFAULT data\n\r");
+      tPrintf(" E - Restore factory default data \n\r");
+      tPrintf(" v xx - set volume to xx [00..64] \n\r");
+      tPrintf(" l x - 0 lcd old, 1 lcd new (HWver >= 3.1) \n\r");
+      tPrintf(" a xx - 99 reset, 01..16 set address \n\r");
+      tPrintf(" R Erase all eeprom data \n\r");
+      tPrintf(" B broadcast for all SCU factory restore \n\r");
+      tPrintf(" m. Main menu\n\r");
+      break;
+
+    case COMANDI_STATION_MNG:
+      tPrintf("[Station command]\n\r p xx - pwm 'xx' duty on CP\n\r l x - stop CP pin at level x\n\r");
+      tPrintf(" C - read CP_ADC\n\r a x - read adc x [0..5] 5=Vin\n\r r - read rotary switch\n\r");
+      tPrintf(" b x - x=0: block OFF x=1=block ON\n\r B x - x=r: BACKUP registers reset\n\r       x=c Get TRAP counter for EEPROM data check\n\r       x=z Reset TRAP counter for EEPROM data check\n\r  c v - card reader version\n\r");
+      tPrintf(" d x - x=0: diff. OFF x=1= diff ON x=2 read status\n\r T - uP temperature\n\r");
+      tPrintf(" P xx - xx = duty cycle percentage on CNTCT PWM pin \n\r");
+      tPrintf(" t x - 0 stop TA, 1 start TA meas, 2 read TA\n\r");
+      tPrintf(" R x - 0 stop polling, 1 start polling \n\r");
+      osDelay(100);
+      tPrintf(" o x - 0 power down active, 1 power down inactive\n\r");
+      tPrintf(" Q x - 0 post suspension inactive, 1-6 post suspension active\n\r");
+#ifdef MANAGE_IRC16M_OSC      
+      tPrintf(" w x - x sec to low power\n\r v - voice ON\n\r V - voice OFF\n\r X - Oscillator type\n\r y - reset info Code\n\r m. Main menu\n\r");
+#else
+      tPrintf(" w x - x sec to low power\n\r k x - Contattore ON x=1/OFF x=0\n\r y - reset info Code\n\r m. Main menu\n\r");      
+#endif      
+      break;
+
+    case COMANDI_EM_MNG:
+      tPrintf("[EM command]\n\r r aaaa - read 4 bytes from aaaa address\n\r d - discovery EM\n\r p - 0 = NULL 1 = 3KW in Sinapsi Pdisp");
+      tPrintf("\n\r q - 0 = Chain2 KO 1 = Chain2 OK\n\r");
+      tPrintf(" ENERGY METER INT --> g x - x: v=voltage / V=voltage for 3ph\n\r");
+      tPrintf(" ENERGY METER INT --> a=current / A x = current for 3ph x: 1 to 3 = nbr of phase\n\r");
+      tPrintf(" ENERGY METER INT --> p=act power / e=act energy / s=session act energy / r=init sess active energy\n\r");
+      tPrintf(" ENERGY METER INT --> v = fw version \n\r");
+      tPrintf(" ENERGY METER EXT --> G x - x: p=total act power / P x = act power for L1-L2-L3\n\r");
+      tPrintf(" ENERGY METER EXT --> V = fw version \n\r");
+#ifdef HW_MP28947      
+      tPrintf(" ENERGY METER PA775 --> R = reinit energy meter\n\r");      
+#endif      
+      tPrintf(" m. Main menu\n\r");
+      break;
+
+    case COMANDI_WIFI:
+      tPrintf("[Wifi command]\n\r");
+      tPrintf(" n - Network page\n\r");
+      tPrintf(" a - Show activation key\n\r");
+      tPrintf(" t - Transactions \n\r c - Product serial number \n\r");
+      tPrintf(" d - Product code \n\r f - Fake product code \n\r");
+      tPrintf(" u - User pin \n\r");
+      tPrintf( " x - AT firmware update\n\r" );
+      tPrintf(" m - Main menu \n\r");
+      break;
+      
+    case COMANDI_MODBUS:
+      tPrintf("[MODBUS command]\n\r rv n - read SW version on SCU n\n\r rs n aaaa - read on SCU n the register aaaa\n\r");
+      tPrintf(" M. Write uid master\n\r");
+      tPrintf(" U. Write uid user\n\r");
+      tPrintf(" m. Main menu\n\r");
+      break;
+
+    case COMANDO_SET_IP_PAR:
+      tPrintf("[IP params]\n\r  i <X>.<Y>.<Z>.<W> - New IP address\n\r  s <X>.<Y>.<Z>.<W> - New Subnet Mask\n\r  g <X>.<Y>.<Z>.<W> - New Gateway Mask\n\r");
+      tPrintf("  M [00:11:BF:]<Y>:<Z>:<W> - Last 3 MAC bytes\n\r  h xxxx - HTTP port\n\r  v Invio richiesta  EM ETH \n\r  m. Main menu\n\r");
+#ifdef TEST_CHANGE_BR
+      osDelay(500);
+      lowLevelBrChange (UART_DBG, (uint32_t)19200);
+#endif
+      break;
+
+    case COMANDI_SRAM:
+      tPrintf("[SRAM uP command]\n\r r XXXXXX - Read XXXXXX address \n\r");
+      tPrintf(" w XXXXXX YY - Write YY data to XXXXXX address \n\r");
+      tPrintf(" m. Main menu\n\r");
+      break;
+      
+    case COMANDO_SET_OSC_TYPE:
+      tPrintf("[Oscillator type selection:]\n\r");     
+      tPrintf(" e - External 50MHhz oscillator \n\r i - Internal 16MHz oscillator \n\r m. Main menu\n\r");      
+      break;
+      
+    case COMANDI_SEM:      
+      tPrintf("[SEM commands]\n\r");
+      tPrintf(" e - Show connector number of a specific SCU\n\r");
+      tPrintf(" f - Show FW version for all the SCU connected\n\r");
+      if (isSemMasterFz() == TRUE)
+        tPrintf(" a - Show all SCU with assigned address\n\r");
+      tPrintf(" m - Main menu\n\r");      
+      break;
+      
+    case COMANDO_EVLOG:
+      tPrintf("[Event LOG command]\n\r");
+      tPrintf(" s - Show Event LOG for this SCU\n\r");
+      tPrintf(" e - Erase the entire event LOG\n\r");
+      tPrintf(" m - Main menu\n\r");            
+      break;
+      
+      default:
+      break;
+  }
+}
+
+static void funzioniQSPIflash (uint8_t* msgRcv)
+{
+  uint8_t     hexAdd[] = "000000";
+  uint8_t     hexVal[] = "0000";
+  uint8_t     RetVal;
+  uint16_t    val, backVal;
+  uint32_t    add;
+
+  switch (msgRcv[0])
+  {
+    case 'e':
+      if  ((isxdigit(msgRcv[2])) && (isxdigit(msgRcv[3])) && (isxdigit(msgRcv[4])) && (isxdigit(msgRcv[5])) &&
+           (isxdigit(msgRcv[6])) && (isxdigit(msgRcv[7])) )
+      {
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = msgRcv[4]; hexAdd[3] = msgRcv[5];
+        hexAdd[4] = msgRcv[6]; hexAdd[5] = msgRcv[7]; 
+        add = (uint32_t)strtol ((char*)hexAdd, NULL, 16);
+        RetVal = raw_sFLASH_Erase_SubBlock(add);
+        if (RetVal == HAL_OK)
+        {
+          tPrintf("Erase Executed!\n\r");
+        }
+        else
+        {
+          tPrintf("Erase fail!\n\r");
+        }
+      }
+      break;
+
+    case 'r':
+      if  ((isxdigit(msgRcv[2])) && (isxdigit(msgRcv[3])) && (isxdigit(msgRcv[4])) && (isxdigit(msgRcv[5])) &&
+           (isxdigit(msgRcv[6])) && (isxdigit(msgRcv[7])) )
+      {
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = msgRcv[4]; hexAdd[3] = msgRcv[5];
+        hexAdd[4] = msgRcv[6]; hexAdd[5] = msgRcv[7];
+        tPrintf("Status Reg = 0x%02X Config Reg = 0x%02X\n\r", getStatusReg(), getConfigReg());
+        add = (uint32_t)strtol ((char*)hexAdd, NULL, 16);
+        (void)FlashRead(add, (uint8_t*)&val, sizeof(val));
+        tPrintf("Add 0x%06X = 0x%04X\n\r", add, val);
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case 'w':
+      if  ((isxdigit(msgRcv[2])) && (isxdigit(msgRcv[3])) && (isxdigit(msgRcv[4])) && (isxdigit(msgRcv[5])) &&
+           (isxdigit(msgRcv[6])) && (isxdigit(msgRcv[7])) )
+      {
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = msgRcv[4]; hexAdd[3] = msgRcv[5];
+        hexAdd[4] = msgRcv[6]; hexAdd[5] = msgRcv[7];
+        add = (uint32_t)strtol ((char*)hexAdd, NULL, 16);
+        if  ((isxdigit(msgRcv[9])) && (isxdigit(msgRcv[10])) && (isxdigit(msgRcv[11])) && (isxdigit(msgRcv[12])))
+        {
+          hexVal[0] = msgRcv[9]; hexVal[1] = msgRcv[10]; hexVal[2] = msgRcv[11]; hexVal[3] = msgRcv[12];
+          tPrintf("Status Reg = 0x%02X Config Reg = 0x%02X\n\r", getStatusReg(), getConfigReg());
+          val = (uint32_t)strtol ((char*)hexVal, NULL, 16);
+          if (FlashWrite(add, (uint8_t*)&val, sizeof(val), sizeof(val)) == 0)
+          {
+            FlashRead(add, (uint8_t*)&backVal, sizeof(val));
+            tPrintf("Add 0x%06X write=0x%04X readBack=0x%04X\n\r", add, val, backVal);
+          }
+          else
+          {
+            tPrintf("Write fail!\n\r");
+          }
+        }
+        else
+        {
+          tPrintf("Wrong command!\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+            
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    default:
+      break;
+  }
+}
+
+static void funzioniSram (uint8_t* msgRcv)
+{
+  uint8_t     hexAdd[] = "00000000";
+  uint8_t     hexVal[] = "0000";
+  uint32_t    add, val, reverseVal;
+  uint8_t*    pData;
+  uint8_t*    pRevData;
+
+  switch (msgRcv[0])
+  {
+    case 'r':
+      if  ((isxdigit(msgRcv[2])) && (isxdigit(msgRcv[3])) && (isxdigit(msgRcv[4])) && (isxdigit(msgRcv[5])) &&
+           (isxdigit(msgRcv[6])) && (isxdigit(msgRcv[7])) && (isxdigit(msgRcv[8])) && (isxdigit(msgRcv[9])))
+      {
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = msgRcv[4]; hexAdd[3] = msgRcv[5];
+        hexAdd[4] = msgRcv[6]; hexAdd[5] = msgRcv[7]; hexAdd[6] = msgRcv[8]; hexAdd[7] = msgRcv[9];
+        add = (uint32_t)strtol ((char*)hexAdd, NULL, 16);
+        val = *((uint32_t*)add);
+        pData = (uint8_t*)&val;
+        pRevData = (uint8_t*)&reverseVal;
+        pRevData[0] = pData[3]; pRevData[1] = pData[2]; pRevData[2] = pData[1]; pRevData[3] = pData[0];
+        tPrintf("Add 0x%08X = 0x%08X\n\r", add, reverseVal);
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case 'w':
+      if  ((isxdigit(msgRcv[2])) && (isxdigit(msgRcv[3])) && (isxdigit(msgRcv[4])) && (isxdigit(msgRcv[5])) &&
+           (isxdigit(msgRcv[6])) && (isxdigit(msgRcv[7])) && (isxdigit(msgRcv[8])) && (isxdigit(msgRcv[9])))
+      {
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = msgRcv[4]; hexAdd[3] = msgRcv[5];
+        hexAdd[4] = msgRcv[6]; hexAdd[5] = msgRcv[7]; hexAdd[6] = msgRcv[8]; hexAdd[7] = msgRcv[9];
+        add = (uint32_t)strtol ((char*)hexAdd, NULL, 16);
+        if  ((isxdigit(msgRcv[9])) && (isxdigit(msgRcv[10])) && (isxdigit(msgRcv[11])) && (isxdigit(msgRcv[12])))
+        {
+          hexVal[0] = msgRcv[11]; hexVal[1] = msgRcv[12]; hexVal[2] = msgRcv[13]; hexVal[3] = msgRcv[14];
+          val = (uint32_t)strtol ((char*)hexVal, NULL, 16);
+          *((uint32_t*)add) = val;
+          tPrintf("Add 0x%08X write=0x%04X\n\r", add, val);
+        }
+        else
+        {
+          tPrintf("Wrong command!\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+            
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    default:
+      break;
+  }
+}
+
+                
+
+/**
+*
+* @brief       Set date and time from console 
+*
+* @param [in]  uint8_t*: string witk date and time  
+*        
+*  
+* @retval      none 
+*  
+****************************************************************/
+static void funzioneDataOra (uint8_t* msgRcv)
+{
+  struct DataAndTime_t  locDateTime;
+  char                  timeZone;
+
+  switch (msgRcv[0])
+  {
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    case 'v':
+      if ((msgRcv[1] == ' ') && ((msgRcv[2] == '0') || (msgRcv[2] == '1')))
+      {
+        timeOnLcd((uint8_t)(msgRcv[2] - '0'));
+      }
+      break;
+
+    case 's':
+      if ((msgRcv[1] == ' ') && (msgRcv[22] == '\r') && (msgRcv[23] == '\n'))
+      {
+        if ((msgRcv[2] == '2') && (msgRcv[3] == '0'))
+        {
+          locDateTime.Year = 2000 + (msgRcv[4] -'0') * 10 + (msgRcv[5] -'0');
+          if (msgRcv[10] == ' ')
+          {
+            locDateTime.Month = (msgRcv[6] -'0') * 10 + (msgRcv[7] -'0');
+            locDateTime.Day   = (msgRcv[8] -'0') * 10 + (msgRcv[9] -'0');
+            locDateTime.dstFlag = (msgRcv[11] -'0');
+            locDateTime.Hour = (msgRcv[13] -'0') * 10 + (msgRcv[14] -'0');
+            locDateTime.Minute = (msgRcv[15] -'0') * 10 + (msgRcv[16] -'0');
+            locDateTime.Second = (msgRcv[17] -'0') * 10 + (msgRcv[18] -'0');
+            /* save DST flag   *****/
+            eeprom_param_set(DST_EADD, (uint8_t*)&locDateTime.dstFlag, 1);
+            timeZone = (msgRcv[21] - '0');
+            if (msgRcv[20] == '-')
+            {
+              timeZone *= (char)-1;
+            }
+            /* save time zone   *****/
+            eeprom_param_set(TIME_ZONE_EADD, (uint8_t*)&timeZone, 1);
+            /* set new date and time */
+            struct tm structUnixTime = {0} ;
+            structUnixTime.tm_sec  = (int)locDateTime.Second;
+            structUnixTime.tm_min  = (int)locDateTime.Minute;
+            structUnixTime.tm_hour = (int)locDateTime.Hour;
+            structUnixTime.tm_mday = (int)locDateTime.Day;
+            structUnixTime.tm_mon  = (int)locDateTime.Month - 1;
+            structUnixTime.tm_year = (int)locDateTime.Year - 1900;
+            //structUnixTime.tm_wday = (int)pLocDateTime->DayWeek;
+            uint32_t currentUnixTime = (uint32_t)mktime((struct tm *)&structUnixTime);
+            currentUnixTime -= locDateTime.dstFlag * 3600;
+            currentUnixTime -= timeZone * 3600;
+            /* Save Date and Time informations received from App, into BKP SRAM region */
+            /* Save also the checksum */
+            BKP_SRAM_UnixTimestamp_Save(currentUnixTime);    /* Ticket SCU-100 */
+
+            setDateTimeFromUnixT(currentUnixTime);
+            tPrintf("Date and time set!\n\r");
+          }
+        }
+      }
+      else
+      {
+        tPrintf("Error in data format\n\r");
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
+/**
+*
+* @brief       Set SCU serial number from console 
+*
+* @param [in]  uint8_t*: string with serial number 
+*        
+*  
+* @retval      none 
+*  
+****************************************************************/
+static void funzioneSetSn (uint8_t* msgRcv)
+{
+  uint8_t cnt, esito, sn[4];
+
+  switch (msgRcv[0])
+  {
+    case 'r':
+      sn[0] = sn[1] = sn[2] = sn[3] = (uint8_t)0xFF;     
+      eeprom_param_set(SERNUM_BYTE0_EADD, sn, 4);
+      tPrintf("All 'FF' to SN!!\n\r");
+      break;
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    case 's':
+      if ((msgRcv[1] == ' ') && (msgRcv[10] == '\r') && (msgRcv[11] == '\n'))
+      {
+        for (cnt = 0, esito = (uint8_t)1; cnt < 8; cnt++)
+        {
+          if (isdigit(msgRcv[2 + cnt]) == 0) 
+          {
+            esito = (uint8_t)0;
+          }
+        }
+        if (esito)
+        {
+          sn[3] = 0; sn[3] = (msgRcv[9] - '0'); sn[3] |= ((msgRcv[8] - '0') << 4);  /* BCD, first two LSB digit  */
+          sn[2] = 0; sn[2] = (msgRcv[7] - '0'); sn[2] |= ((msgRcv[6] - '0') << 4);  
+          sn[1] = 0; sn[1] = (msgRcv[5] - '0'); sn[1] |= ((msgRcv[4] - '0') << 4);  
+          sn[0] = 0; sn[0] = (msgRcv[3] - '0'); sn[0] |= ((msgRcv[2] - '0') << 4);  /* BCD, first two MSB digit  */
+          eeprom_param_set(SERNUM_BYTE0_EADD, sn, 4); 
+          tPrintf("SN stored!!\n\r");
+        }
+        else
+        {
+          tPrintf("Error in data format\n\r");
+        }
+      }
+      break;
+  }
+}
+
+
+/**
+*
+* @brief       Set SCU Product Serial Number (9 chipher)
+*
+* @param [in]  uint8_t*: string with Product Serial Number 
+*        
+*  
+* @retval      none 
+*  
+****************************************************************/
+static void funzioneSetProductSn (uint8_t* msgRcv)
+{
+  uint8_t cnt, esito, PrdSn[5];
+
+  switch (msgRcv[0])
+  {
+    case 'r':
+      PrdSn[0] = PrdSn[1] = PrdSn[2] = PrdSn[3] = PrdSn[4] = (uint8_t)0xFF;     
+      eeprom_param_set(PRD_SN_EE_ADDRES, PrdSn, 5);
+      tPrintf("All 'FF' to SN!!\n\r");
+      break;
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    case 's':
+      if ((msgRcv[1] == ' ') && (msgRcv[11] == '\r') && (msgRcv[12] == '\n'))
+      {
+        for (cnt = 0, esito = (uint8_t)1; cnt < 9; cnt++)
+        {
+          if (isdigit(msgRcv[2 + cnt]) == 0) 
+          {
+            esito = (uint8_t)0;
+          }
+        }
+        if (esito)
+        {      
+          /* Store Product serial number in eeprom */
+          setProductSerialNumberEeprom((char*)&msgRcv[2], 9, (uint8_t)TRUE);
+          tPrintf("Product SN stored!!\n\r");
+        }
+        else
+        {
+          tPrintf("Error in data insertion format\n\r");
+        }
+      }
+      else
+      {        
+          tPrintf("Error in data insertion format\n\r");
+      }
+      break;
+  }
+}
+
+/**
+*
+* @brief       Set HTS parameters from console 
+*
+* @param [in]  
+*        
+*  
+* @retval      none 
+*  
+****************************************************************/
+static void funzioneSetHts (uint8_t* msgRcv)
+{
+  uint16_t value;
+  uint8_t  dData;
+ 
+  switch (msgRcv[0])
+  {
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+    
+    case 't':
+      PrintHtsMenu();
+      break;
+
+    case '1':
+      if ((msgRcv[1] == ' ') && ((msgRcv[2] == '0') || (msgRcv[2] == '1')))
+      {
+        msgRcv[2] -= '0';
+        eeprom_param_set(TEMP_CTRL_ENB_EADD, &msgRcv[2], 1);
+
+        tPrintf("Temperature control enable %d \n\r", msgRcv[2]);
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case '2':
+      if ((msgRcv[1] == ' ') && (isdigit(msgRcv[2]) != 0) && ((isdigit(msgRcv[3]) != 0) || (msgRcv[3] == 0x0D)))
+      {
+        if (msgRcv[3] == 0x0D)
+          dData = (msgRcv[2] - '0');
+        else
+          dData = ((msgRcv[2] - '0') * 10) + (msgRcv[3] - '0');
+
+        eeprom_param_set(TEMP_CTRL_VAL_EADD, &dData, 1);
+        tPrintf("Temperature control value %d [deg]\n\r", dData);
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case '3':
+      if (((msgRcv[1] == ' ') && (msgRcv[2] == '-') && (((isdigit(msgRcv[3]) != 0) || (isdigit(msgRcv[4]) != 0)) || ((isdigit(msgRcv[3]) != 0) || (msgRcv[4] == 0x0D))))
+       || ((msgRcv[1] == ' ')                       && (((isdigit(msgRcv[2]) != 0) || (isdigit(msgRcv[3]) != 0)) || ((isdigit(msgRcv[2]) != 0) || (msgRcv[3] == 0x0D)))))
+      {
+        if (msgRcv[2] != '-')
+        {
+          msgRcv[4] = msgRcv[3];
+          msgRcv[3] = msgRcv[2];
+        }
+
+        if (msgRcv[4] == 0x0D)
+          dData = (msgRcv[3] - '0');
+        else
+          dData = ((msgRcv[3] - '0') * 10) + (msgRcv[4] - '0');
+        
+        if ((msgRcv[2] == '-') && (dData != 0))
+            dData |= 0x80;
+          
+        eeprom_param_set(TEMP_DELTA_EADD, &dData, 1);
+        
+        tPrintf("Temperature control delta ");
+
+        if (dData & 0x80)
+          tPrintf("-");
+        else if (dData != 0)
+          tPrintf("+");
+
+        dData &= 0x7F;
+        tPrintf("%d [deg]\n\r", dData);
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+      
+    case '4':
+      if ((msgRcv[1] == ' ') && (isdigit(msgRcv[2]) != 0) && ((isdigit(msgRcv[3]) != 0) || (msgRcv[3] == 0x0D)))
+      {
+        if (msgRcv[3] == 0x0D)
+          dData = (msgRcv[2] - '0');
+        else
+          dData = ((msgRcv[2] - '0') * 10) + (msgRcv[3] - '0');
+
+        eeprom_param_set(TEMP_HYSTERESIS_EADD, &dData, 1);
+        tPrintf("Temperature control hyster %d [deg]\n\r", dData);
+      }
+      else
+      {
+        dData = ((msgRcv[2] - '0') * 10) + (msgRcv[3] - '0');
+      }
+      break;
+
+    case 'e':
+      if ((msgRcv[1] == ' ') && ((msgRcv[2] == '0') || (msgRcv[2] == '1')))
+      {
+        msgRcv[2] -= '0';
+        printHtsEnable(msgRcv[2]);
+        if (msgRcv[2] == 0)
+        {
+          tPrintf("Print HTS disabled!\n\r");
+        }
+        else
+        {
+          tPrintf("Print HTS enabled!\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case 'c':
+      if ((msgRcv[1] == ' ') && ((isdigit(msgRcv[2]) != 0) && (isdigit(msgRcv[3]) != 0) && (isdigit(msgRcv[4]) != 0)))
+      {
+        value = (msgRcv[2] - '0') * 100 + (msgRcv[3] - '0') * 10 + (msgRcv[4] - '0');
+        if ((isdigit(msgRcv[5]) != 0))
+        {
+          /* a number with 4 digit */
+          value = value * 10;
+          value = value + (msgRcv[5] - '0'); 
+        }
+        setTempOffsetValue(value);
+        tPrintf("New Correction: %d!\n\r", value);
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case 'f':
+      if ((msgRcv[1] == ' ') && ((isdigit(msgRcv[2]) != 0) && (isdigit(msgRcv[3]) != 0)))
+      {
+        dData = (msgRcv[2] - '0') * 10 + (msgRcv[3] - '0');
+
+        if ((dData >= 50) && (dData <= 80))
+            {
+            hts_camera_sim_set(0, dData);
+            tPrintf("Temperatura finale %d deg\n\r", dData);
+            }
+        else
+        {
+          tPrintf("Wrong command!\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case 'o':
+      if ((msgRcv[1] == ' ') && ((isdigit(msgRcv[2]) != 0) && ((isdigit(msgRcv[3]) != 0) || (msgRcv[3] == 0x0D))))
+      {
+        if (msgRcv[3] == 0x0D)
+          dData = (msgRcv[2] - '0');
+        else
+          dData = ((msgRcv[2] - '0') * 10) + (msgRcv[3] - '0');
+
+        if (/*(dData >= 0) && */(dData <= 60))
+            {
+            hts_camera_sim_set(1, dData);
+            tPrintf("Temp offset %d deg\n\r", dData);
+            }
+        else
+        {
+          tPrintf("Wrong command!\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case 's':
+      if ((msgRcv[1] == ' ') && (isdigit(msgRcv[2]) != 0))
+      {
+        dData = (msgRcv[2] - '0');
+
+        if (dData <= 9)
+            {
+            hts_camera_sim_set(2, dData);
+            tPrintf("Vel in salita %d deg/min\n\r", dData);
+            }
+        else
+        {
+          tPrintf("Wrong command!\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case 'd':
+      if ((msgRcv[1] == ' ') && (isdigit(msgRcv[2]) != 0))
+      {
+        dData = (msgRcv[2] - '0');
+
+        if (dData <= 9)
+            {
+            hts_camera_sim_set(3, dData);
+            tPrintf("Vel in discesa %d deg/min\n\r", dData);
+            }
+        else
+        {
+          tPrintf("Wrong command!\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case 'v':
+      if ((msgRcv[1] == ' ') && (isdigit(msgRcv[2]) != 0))
+      {
+        dData = (msgRcv[2] - '0');
+        
+        if (dData <= 3)
+            {
+            hts_camera_sim_set(4, dData);
+        
+            if (dData == 0)
+                tPrintf("No simulation!\n\r");
+            else if (dData == 1)
+                tPrintf("Temperatura in salita!\n\r");
+            else if (dData == 2)
+                tPrintf("Temperatura in discesa!\n\r");
+            else if (dData == 3)
+                tPrintf("Temperatura stabile!\n\r");
+            }
+        else
+        {
+          tPrintf("Wrong command!\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+
+    default:
+      tPrintf("Wrong command!\n\r");
+      break;
+  }
+}
+
+/**
+*
+* @brief       Set product code 
+*
+* @param [in]  uint8_t*: string with product code    
+*  
+* @retval      none 
+*   
+****************************************************************/
+static void funzioneSetProductCode (uint8_t* msgRcv)
+{
+  uint8_t productCode[24], i;
+
+  switch (msgRcv[0])
+  {
+    case 'r':
+      memset(productCode, 0x00, 24);     
+      setProductCodeString((char*)productCode, 24);
+      tPrintf("All '0' to product code!!\n\r");
+      break;
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    case 'd':                 /* 10-19 caratteri --> 204.CA23B-T2T2W1 */
+      if (msgRcv[1] == ' ')
+      {
+        for (i = 0; i < 24; i++)
+        {
+          if ((msgRcv[2 + i] == '\n') || (msgRcv[2 + i] == '\r'))
+          {
+            break;
+          }
+        }
+        if ((i >= 10) && (i <= 19))
+        {
+          memcpy(productCode, &msgRcv[2], i);
+          productCode[i] = '\0';
+          setProductCodeString((char*)productCode, strlen((char*)productCode)); 
+          tPrintf("Product code stored!!\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Error in data format\n\r");
+      }
+      break;
+  }
+}
+
+
+/**
+*
+* @brief       Set fake product code 
+*
+* @param [in]  uint8_t*: string with fake product code    
+*  
+* @retval      none 
+*  
+****************************************************************/
+static void funzioneSetFakeCode (uint8_t* msgRcv)
+{
+  uint8_t fakeCode[16], i;
+
+  switch (msgRcv[0])
+  {
+    case 'r':
+      memset(fakeCode, 0x00, 20);     
+      setTecnProductCode((char*)fakeCode, sizeof(fakeCode));
+      tPrintf("All '0' to fake product code!!\n\r");
+      break;
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    case 'f':                    /* Famiglia.Tipo.Versione.Uscite --> 204.CA.23.BBBB */
+      if (msgRcv[1] == ' ')
+      {
+        for (i = 0; i < 16; i++)
+        {
+          if ((msgRcv[2 + i] == '\n') || (msgRcv[2 + i] == '\r'))
+          {
+            break;
+          }
+        }
+        if ((i >= 12) && (i <= 14))
+        {
+          memcpy(fakeCode, &msgRcv[2], i);
+          fakeCode[i] = '\0';
+          setTecnProductCode((char*)fakeCode, (uint8_t)strlen((char *)fakeCode)); 
+          tPrintf("Fake product code stored!!\n\r");
+        }
+        else
+        {
+          tPrintf("Error in data format\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Error in data format\n\r");
+      }
+      break;
+  }
+}
+
+/**
+*
+* @brief       View Connector number 
+*
+* @param [in]  uint8_t*: console selecion    
+*  
+* @retval      none 
+*  
+****************************************************************/
+static void funzioneViewConnNumber (uint8_t* msgRcv)
+{
+  
+  uint8_t  scuNumb;
+  uint16_t ConnNumb;
+  scuRwMapRegister_st*  pRwRegs;
+
+  switch (msgRcv[0])
+  {
+    case 'v':
+      
+      if (msgRcv[3] == ' ') break;
+      
+      scuNumb = (msgRcv[2] - 0x30) * 10 + (msgRcv[3] - 0x30);
+      
+      if ((msgRcv[1] == ' ') && ((scuNumb <= 16) && (scuNumb > 0)))
+      {
+        pRwRegs = getRwMdbRegs(scuNumb - 1);
+        ConnNumb = pRwRegs->scuSetRegister.connNumb;
+        tPrintf("Connector number for SCU %d is 0x%x \n\r", scuNumb, ConnNumb);
+      }
+      break;
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+  }
+  
+}
+
+/**
+*
+* @brief       View Connector number 
+*
+* @param [in]  uint8_t*: console selecion    
+*  
+* @retval      none 
+*  
+****************************************************************/
+static void funzioneViewFWVersions (uint8_t* msgRcv)
+{
+  
+  switch (msgRcv[0])
+  {
+    
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+      
+    default:
+      break;
+
+  }
+  
+}
+
+
+/**
+*
+* @brief       Set user pin from console 
+*
+* @param [in]  uint8_t*: string with user pin 
+*        
+* @retval      none 
+*  
+****************************************************************/
+static void funzioneSetUserPin (uint8_t* msgRcv)
+{
+  uint8_t cnt, esito, userPin[5];
+
+  switch (msgRcv[0])
+  {
+    case 'r':
+      AppEmobTask_setUserPin( 0 );
+      tPrintf("All '0' to user pin!!\n\r");
+      break;
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    case 'u':
+      if (msgRcv[1] == ' ')
+      {
+        for (cnt = 0, esito = (uint8_t)1; cnt < 5; cnt++)
+        {
+          if (isdigit(msgRcv[2 + cnt]) == 0) 
+          {
+            esito = (uint8_t)0;
+          }
+        }
+        if (esito)
+        {
+          userPin[4] = msgRcv[6];
+          userPin[3] = msgRcv[5]; 
+          userPin[2] = msgRcv[4];
+          userPin[1] = msgRcv[3];
+          userPin[0] = msgRcv[2];
+          AppEmobTask_setUserPin( strtoul( ( char* )userPin, NULL, 10 ) );
+          setUserPin((char*)userPin, 5); 
+          tPrintf("User pin stored!!\n\r");
+        }
+        else
+        {
+          tPrintf("Error in data format\n\r");
+        }
+      }
+      break;
+  }
+}
+
+
+/**
+*
+* @brief       Transactions management
+*
+* @param [in]  uint8_t*: string with installer pin 
+*        
+* @retval      none 
+*  
+****************************************************************/
+
+static void  funzioneTransactionsMng   (uint8_t* msgRcv)
+{
+  
+  uint8_t RetVal, cnt;
+  uint32_t Address;
+  
+  switch (msgRcv[0])
+  {
+    
+    case 'e':                   /* Erase all the transactions */
+      /* Set the starting location to erase at the beginning of the transaction block */
+      Address = sFLASH_Information.transactionAddress;
+      /* Erase all the transaction block */
+      for (cnt = 0; cnt < FLASH_TRANSACTION_NUM_SEC; cnt++, Address += BLOCK_SIZE)
+      {
+        RetVal = raw_sFLASH_Erase_SubBlock(Address);
+        if (RetVal != HAL_OK)
+          tPrintf("Erase failed! page%d \n\r", cnt + 1);     /* Erase failed */
+        else 
+          tPrintf("Erase Executed! page%d \n\r", cnt + 1);   /* Erase executed */          
+      }
+            
+      break;
+      
+    case 'm':                   /* Back to main menu */
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+      
+  }
+  
+}
+
+static void funzioniLCD (uint8_t* msgRcv)
+{
+  uint8_t       strName[22], i, row, brightnessLevel, align;
+  uint32_t      contrastLevel;
+  uint8_t*      pStr;
+#ifdef ROW_COL
+  uint8_t     col;
+#endif
+
+  switch (msgRcv[0])
+  {
+    case 's':
+      if (((msgRcv[1] != ' ') || (msgRcv[3] != ' ') || (msgRcv[6] != ' ')) || ((msgRcv[7] != '1') && (msgRcv[7] != '2')) ||
+          ((msgRcv[4] != '0') && (msgRcv[4] != '1') && (msgRcv[4] != '2')) || (isdigit(msgRcv[5]) == 0) || 
+          ((msgRcv[2] != 'l') && (msgRcv[2] != 'c') && (msgRcv[2] != 'r')))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        memset((void*)strName, 0, (size_t)(sizeof(strName)));
+        row = msgRcv[7] - '0'; 
+#ifdef ROW_COL
+        col = (msgRcv[4] - '0') * 10 + (msgRcv[5] - '0');
+#endif
+        pStr = &msgRcv[9];
+        while (*pStr == ' ') pStr++;
+        i = 0;
+        while (((*pStr != '\r') && (*pStr != '\n')) && (i < 20))
+        {
+          strName[i] = *pStr;
+          pStr++;
+          i++;
+        }
+        strName[i] = 1;  // print also the second char in stored in CGRAM
+        strName[i + 1] = '\0';
+        if (msgRcv[2] == 'l') align = WLEFT;
+        else if (msgRcv[2] == 'c') align = WCENTER;
+        else if (msgRcv[2] == 'r') align = WRIGHT;
+
+        if (row == 1)
+        {
+          DispUpdate(strName, align, NULL, (uint8_t)0);
+        }
+        else
+        {
+          DispUpdate(NULL, (uint8_t)0, strName, align);
+        }
+#ifdef ROW_COL
+        putsxy_c(col, row, (char *)strName);
+        //tPrintf("LCD print executed!\n\r");
+#endif
+      }
+      break;
+
+      
+    case 'b': // b xx set PWM at xx%
+      i = 0;
+      while (((msgRcv[i] != '\r') && (msgRcv[i] != '\n')) && (i < 6))
+      {
+        i++;
+      }
+
+      if ((msgRcv[1] != ' ') || (isdigit(msgRcv[2]) == 0) || (isdigit(msgRcv[3]) == 0) || ((i == 5) && (isdigit(msgRcv[4]) == 0)))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        if (i == 5)
+        {
+          brightnessLevel = (msgRcv[2] - '0') * 100 + (msgRcv[3] - '0') * 10 + (msgRcv[4] - '0');
+        }
+        else
+        {
+          brightnessLevel = (msgRcv[2] - '0') * 10 + (msgRcv[3] - '0');
+        }
+        if (brightnessLevel > 100)
+        {
+          tPrintf("Wrong brigthness level!\n\r");
+        }
+        else
+        {
+          setBacklightPWMlcd4x20(brightnessLevel);
+          tPrintf("Brigthness level set!\n\r");
+        }
+      }
+      break;
+
+    case 'c':
+      i = 0;
+      while (((msgRcv[i] != '\r') && (msgRcv[i] != '\n')) && (i < 6))
+      {
+        i++;
+      }
+
+      if ((msgRcv[1] != ' ') || (isdigit(msgRcv[2]) == 0) || (isdigit(msgRcv[3]) == 0) || (isdigit(msgRcv[4]) == 0) || (i > 5))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        contrastLevel = (uint32_t)((msgRcv[2] - '0') * 100 + (msgRcv[3] - '0') * 10 + (msgRcv[4] - '0'));
+        if ((contrastLevel > MAX_CONTRAST_LEV) || (contrastLevel < MIN_CONTRAST_LEV))
+        {
+          tPrintf("Wrong cintrast level!\n\r");
+        }
+        else
+        {
+          LcdUpDownContrast(contrastLevel);
+          tPrintf("Contrast level set!\n\r");
+        }
+      }
+      break;
+
+    case 'l':  // l n xx [yyyy] set PWM at xx%
+      i = 0;
+      while (((msgRcv[i] != '\r') && (msgRcv[i] != '\n')) && (i < 8))
+      {
+        i++;
+      }
+
+      if ((msgRcv[1] != ' ') || (msgRcv[3] != ' ') || ((msgRcv[2] != 'r') && (msgRcv[2] != 'g') && (msgRcv[2] != 'b')) || 
+          (isdigit(msgRcv[4]) == 0) || (isdigit(msgRcv[5]) == 0) || ((i == 5) && (isdigit(msgRcv[6]) == 0)))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        if (i == 7)
+        {
+          brightnessLevel = (msgRcv[4] - '0') * 100 + (msgRcv[5] - '0') * 10 + (msgRcv[6] - '0');
+        }
+        else
+        {
+          brightnessLevel = (msgRcv[4] - '0') * 10 + (msgRcv[5] - '0');
+        }
+        if ((brightnessLevel > 100) || (brightnessLevel < 10))
+        {
+          tPrintf("Wrong brigthness level!\n\r");
+        }
+        else
+        {
+          if (msgRcv[2] == 'r') i = (uint8_t)LED_C_RED; 
+          else 
+            if (msgRcv[2] == 'g') i = (uint8_t)LED_B_GREEN;
+            else 
+              if (msgRcv[2] == 'b') i = (uint8_t)LED_A_BLU;
+
+          setLed((ledIdx_e)i,LED_EVENT_ON, (uint16_t)0, brightnessLevel);
+//          setLed((ledIdx_e)i,LED_EVENT_BLINK, (uint16_t)1000, brightnessLevel);
+//          setLedSoft((ledIdx_e)i,LED_EVENT_SOFT_LIGHT, (uint16_t)1000, brightnessLevel, (uint16_t)160, (uint16_t)320);
+          tPrintf("PWM level set!\n\r");
+        }
+      }
+      break;
+
+    case 'f':  // f n xxxx set flashing at xxxx msec 
+      i = 0;
+      while (((msgRcv[i] != '\r') && (msgRcv[i] != '\n')) && (i < 9))
+      {
+        i++;
+      }
+
+      if ((i != 8) || (msgRcv[1] != ' ') || (msgRcv[3] != ' ') || ((msgRcv[2] != 'r') && (msgRcv[2] != 'g') && (msgRcv[2] != 'b')) || 
+          (isdigit(msgRcv[4]) == 0) || (isdigit(msgRcv[5]) == 0) || (isdigit(msgRcv[6]) == 0) || (isdigit(msgRcv[7]) == 0))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        contrastLevel = (msgRcv[4] - '0') * 1000 + (msgRcv[5] - '0') * 100 + (msgRcv[6] - '0') * 10 + (msgRcv[7] - '0');
+        if (msgRcv[2] == 'r') i = (uint8_t)LED_C_RED; 
+        else 
+          if (msgRcv[2] == 'b') i = (uint8_t)LED_A_BLU;
+          else 
+            if (msgRcv[2] == 'g') i = (uint8_t)LED_B_GREEN;
+
+        setLed((ledIdx_e)i, LED_EVENT_BLINK, (uint16_t)contrastLevel, (uint8_t)0);
+        tPrintf("Blinking send!\n\r");
+      }
+      break;
+
+    case 'o':  // o all led off 
+      setLed((ledIdx_e)0, LED_EVENT_OFF_ALL, (uint16_t)0, (uint8_t)0);
+      tPrintf("LEDs OFF!\n\r");
+      break;
+
+    case 'p': // p xx send picture xx
+      i = 0;
+      while (((msgRcv[i] != '\r') && (msgRcv[i] != '\n')) && (i < 6))
+      {
+        i++;
+      }
+
+      if ((msgRcv[1] != ' ') || (isdigit(msgRcv[2]) == 0) || (isdigit(msgRcv[3]) == 0))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        i = (msgRcv[2] - '0') * 10 + (msgRcv[3] - '0');
+        test_pic(i);
+        if (i == PULS1)
+        {
+          row = 4;
+          /* simulazione gig pulsante lingua */ 
+          for (row = 4; row > 0; row--)
+          {
+            osDelay(500);
+            if ((i == PULS1))
+            {
+              i = PULS2;
+            }
+            else
+            {
+              i = PULS1;
+            }
+            test_pic(i);
+          }
+        }
+        if (i == RCBO1)
+        {
+          row = (uint8_t)4;
+          /* simulazione RCBO riarmo */ 
+          for (row = 1; row < (uint8_t)4; row++)
+          {
+            osDelay(1500);
+            test_pic(i + row);
+          }
+        }
+      }
+      break;
+
+    case 'e':
+      if (isdigit(msgRcv[2]) == 0)
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        if (msgRcv[2] == '1')
+        {
+          setUpgradeLcd(UPG_LCD_ENABLED);
+        }
+        else
+        {
+          if (msgRcv[2] == '0')
+          {
+            setUpgradeLcd(UPG_LCD_DISABLED);
+          }
+        }
+      }
+      break;
+
+    case 'w': //w n ll
+      if ((msgRcv[1] != ' ') || (msgRcv[3] != ' ') || ((msgRcv[2] != 'r') && (msgRcv[2] != 'g') && (msgRcv[2] != 'b')) || 
+          (isdigit(msgRcv[4]) == 0) || (isdigit(msgRcv[5]) == 0))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      if (msgRcv[2] == 'r') i = (uint8_t)LED_C_RED; 
+        else 
+          if (msgRcv[2] == 'g') i = (uint8_t)LED_B_GREEN;
+          else 
+            if (msgRcv[2] == 'b') i = (uint8_t)LED_A_BLU;
+
+      brightnessLevel = (msgRcv[4] - '0') * 10 + (msgRcv[5] - '0');
+
+      setLedSoft((ledIdx_e)i, LED_EVENT_SOFT_LIGHT, (uint16_t)1000, brightnessLevel, (uint16_t)160, (uint16_t)320);
+      break;
+
+    case 'i':
+      /* init code for display 2x20 */
+      Lcd2x20Init((uint8_t)TRUE, AS_STANDARD_MODE);
+      break;
+
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    default:
+      break;
+  }
+}
+
+static void funzioniStation (uint8_t* msgRcv)
+{
+  uint32_t    BKP_val;
+  uint16_t    val, dutyLevel;
+  uint8_t     tmp, edata;
+
+  ioMngMsg_st ioExpMsg;
+
+  switch (msgRcv[0])
+  {
+    case 'p':
+      if ((msgRcv[1] != ' ') || (isdigit(msgRcv[2]) == 0) || (isdigit(msgRcv[3]) == 0)) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        dutyLevel = (uint16_t)(((msgRcv[2] - '0') * 10 + (msgRcv[3] - '0')) * 10);  // [0..100] --> 0...1000msec
+        startPwmOnCP(dutyLevel);
+        tPrintf("CP pwm at %d\n\r", dutyLevel);
+      }
+      break;
+#ifdef HW_MP28947
+    case 'P':
+      if ((msgRcv[1] != ' ') || (isdigit(msgRcv[2]) == 0) || (isdigit(msgRcv[3]) == 0)) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        dutyLevel = (uint16_t)((msgRcv[2] - '0') * 10 + (msgRcv[3] - '0'));  // [0..100] --> 0...1000msec
+        PWM_On_CNTCT_Modify (dutyLevel);
+        tPrintf("CNTCT pwm at %d% \n\r", dutyLevel);
+      }
+      break;
+#endif
+    case 'l':
+      if ((msgRcv[1] != ' ') || (msgRcv[2] != '0') && (msgRcv[2] != '1')) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        if (msgRcv[2] == '0')
+        {
+          stopPwmOnLevel(GPIO_PIN_RESET);
+        }
+        else
+        {
+          stopPwmOnLevel(GPIO_PIN_SET);
+        }
+      }
+      break;
+
+    case 'a':
+      if ((msgRcv[1] != ' ') || (msgRcv[2] != '0') && (msgRcv[2] != '1') && (msgRcv[2] != '2') && (msgRcv[2] != '3') && 
+          (msgRcv[2] != '4') && (msgRcv[2] != '5')) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        /********************
+        VIN_ADC_IN,                // PB1 = ADC1_IN9 lettura analogica della tensione di ingresso
+        PP_ADC_IN,                 // PB0 = ADC1_IN8 lettura analogica del PP
+        SW_ADC_IN,                 // PC2 = ADC1_IN12 lettura analogica dello switch rotativo di corrente   
+        UP_TEMP_IN,                // Internal temperature 
+        TEMP_ADC_IN,               // PC3 = ADC1_IN13 lettura analogica della temperatura con NTC esterno
+        ******* */
+        tmp = msgRcv[2] - (uint8_t)'0'; 
+        if ((msgRcv[2] != '5'))
+        {
+          val = getADCmV((adcIn_e)tmp);
+          if (msgRcv[2] == '0')
+          {
+            val  = (val * 16);  // per Vin abbiamo un partitore resistivo che attenua 16
+          }
+        }
+        else
+        {
+          tmp = 0;
+          val = vinPwrValue();
+        }
+        tPrintf("%s value = %d[mV]\n\r", AdcOrigin[tmp], val);
+      }
+      break;
+
+    case 'C':
+      val = getCPvalue();
+      tPrintf("CP_ADC value = %d[mV]\n\r", val);
+      break;
+
+    case 'r':
+      tPrintf("Rotary position is: %d\n\r", (uint16_t)getRotarySwitchPos());
+      break;
+
+    case 'b':  // b x - x=0: block OFF x=1=block ON
+      if ((msgRcv[1] != ' ') || (isdigit(msgRcv[2]) == 0)) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        switch (msgRcv[2])
+        {
+          case '0':
+#ifndef HW_MP28947            
+            setOutBL1_M();
+            for (val = 1; val < 20; val++)
+            {
+              osDelay(10);
+              if (getADCmV(IM_ADC_IN) > 1100) break;
+            }
+            brakePhase();
+#endif            
+            break;
+
+          case '1':
+#ifndef HW_MP28947            
+            setOutBL1_P();
+            for (val = 1; val < 20; val++)
+            {
+              osDelay(10);
+              if (getADCmV(IM_ADC_IN) > 1100) break;
+            }
+            brakePhase();
+#endif            
+            break;
+
+          default:
+            break;
+        }
+      }
+      break;
+    
+    case 'B':
+      if ((msgRcv[1] != ' ') || ((msgRcv[2] != 'r')  && (msgRcv[2] != 'c') && (msgRcv[2] != 'z'))) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else if (msgRcv[2] == 'r')
+      {
+        /* reset backup registers */
+        BKP_ResetRegisters();
+        tPrintf("BACKUP registers reset done!\n\r");
+      }
+      else if (msgRcv[2] == 'c')
+      {
+        /* Read value stored in BKP register 10 */
+        BKP_val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO);   
+        /* Get counter value */
+        tmp = (BKP_val & CNT_TRAP_CHK_EE_DATA_MASK) >> CNT_TRAP_CHK_EE_DATA_Pos;
+        /* Show counter value */
+        tPrintf("Counter value = %d\n\r", tmp);        
+      }
+      else if (msgRcv[2] == 'z')
+      {
+        /* Read value stored in BKP register 10 */
+        BKP_val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO);   
+        /* Reset counter */
+        BKP_val = (BKP_val & ~CNT_TRAP_CHK_EE_DATA_MASK);
+        /* Save the new value */
+        HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO, BKP_val);                 
+        /* Show counter value */
+        tPrintf("Reset of the counter done!\n\r");        
+      }
+      break;
+      
+    case 'c':
+      if ((msgRcv[1] != ' ') || (msgRcv[2] != 'v')) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else if (msgRcv[2] == 'v')
+      {        
+        tPrintf("RFID Version %s\n\r", rfid_sl030_fw_get());
+      }
+      break;
+
+    case 'd':
+      if ((msgRcv[1] != ' ') || (msgRcv[2] != '0') && (msgRcv[2] != '1') && (msgRcv[2] != '2')) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        if (msgRcv[2] == '0')
+        {
+          /* disattivazione diff riarmabile */
+          ioExpMsg.val = 1;
+          ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+          ioExpMsg.outRegId = REM_ACT_OFF;
+          while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+          {
+            ; // no message sent within 100msec; retry
+          }
+          osDelay(200);
+          ioExpMsg.val = 0;
+          while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+          {
+            ; // no message sent within 100msec; retry
+          }
+        }
+        else
+        {
+          if (msgRcv[2] == '1')
+          {
+            /* disattivazione diff riarmabile */
+            ioExpMsg.val = 1;
+            ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+            ioExpMsg.outRegId = REM_ACT_ON;
+            while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+            {
+              ; // no message sent within 100msec; retry
+            }
+            osDelay(200);
+            ioExpMsg.val = 0;
+            while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+            {
+              ; // no message sent within 100msec; retry
+            }
+          }
+          else
+          {
+            if (msgRcv[2] == '2')
+            {
+              tmp = 1;
+              if (REM_ACT_STATUS_INPUT == GPIO_PIN_RESET)
+              {
+                tmp = 0;
+              }
+              tPrintf("Diff Status = %d\n\r", tmp);
+            }
+          }
+        }
+      }
+      break;
+
+    case 't': // t 0 or t 1 
+      if ((msgRcv[1] != ' ') || (msgRcv[2] != '0') && (msgRcv[2] != '1') && (msgRcv[2] != '2')) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        if (msgRcv[2] == '1')
+        {
+          /* start measure on signal coming from TA   */
+          sendMsgStartTa();
+        }
+        else
+        {
+          if (msgRcv[2] == '2')
+          {
+            /* print RMS value coming from TA   */
+            tPrintf("RMS detected on TA: %d mVrms\n\r", getTAcurrent());
+          }
+          else
+          {
+            /* start measure on signal coming from TA   */
+            sendMsgStopTa();
+          }
+        }
+      }
+      break;
+
+    case 'T': // micro temperature 
+      val = (uint16_t)getUpTemp();
+      tPrintf("uP Temperature: %d.%d [°C]\n\r", val/10, val%10);
+      break;
+
+    case 'k':
+      if ((msgRcv[1] == ' ') && ((msgRcv[2] == '0') || (msgRcv[2] == '1')))
+      {
+        if ((msgRcv[2] == '1'))
+        {
+          setOutputState(CNTCT, GPIO_PIN_SET);  // eccito bobina contattore
+        }
+        else
+        {
+          setOutputState(CNTCT, GPIO_PIN_RESET);  // diseccito bobina contattore
+        }
+      }
+      else
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      break;
+
+    case 'R':
+      if ((msgRcv[1] != ' ') || (msgRcv[2] != '0') && (msgRcv[2] != '1')) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        switch (msgRcv[2])
+        {
+          case '0':
+            /* attivazione/disattivazione relè 1 207Vrms */
+            setPollingFlag((uint8_t)DISABLED);
+            break;
+
+          case '1':
+            /* attivazione/disattivazione relè 1 207Vrms */
+            setPollingFlag((uint8_t)ENABLED);
+            break;
+
+          default:
+            break;
+        }
+      }
+      break;
+#ifdef MANAGE_IRC16M_OSC
+    case 'X':
+      console.stato = COMANDO_SET_OSC_TYPE;      
+      PrintMenu ();
+      break;
+#endif      
+    case 'y':
+      resetCodeInfo();      
+      PrintMenu ();
+      break;
+
+    case 'w':  // w x - x=0: secondi primi del power down 
+      if ((msgRcv[1] != ' ') || (isdigit(msgRcv[2]) == 0)) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        setNewCntDownLP ((msgRcv[2] - '0'));
+      }
+      break;
+      
+    case 'Q': // o 0 or t 1..9 
+      if ((msgRcv[1] != ' ') || ((msgRcv[2] < '0') && (msgRcv[2] > '6'))) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        if ((msgRcv[2] >= '0') && (msgRcv[2] <= '9'))
+        {
+        edata = msgRcv[2] - '0';
+        //eeprom_array_set(POST_SUSP_TIME_EADD, (uint8_t *)&edata, 1);
+        eeprom_param_set(POST_SUSP_TIME_EADD, (uint8_t *)&edata, 1);
+        
+        if (msgRcv[2] > '0')
+            tPrintf("post suspension ACTIVE!\n\r");
+        else
+            tPrintf("post suspension DISABLED!\n\r");
+        }
+      }
+      break;
+
+    case 'o': // o 0 or t 1 
+      if ((msgRcv[1] != ' ') || ((msgRcv[2] != '0') && (msgRcv[2] != '1'))) 
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        //powerDownPin((statusFlag_e)(msgRcv[2] -'0'));
+        if (msgRcv[2] == '1')
+        {
+          vTaskSuspendAll();
+          __disable_irq();
+          SystemClock_PowerConfig(ENABLED);
+          /** SBC and router OFF  OSC OFF **/
+          HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, GPIO_PIN_RESET);
+          for (val = 0; val < 0xFFF0; val++)
+          {
+            ;
+          }
+          for (val = 0; val < 0xFFF0; val++)
+          {
+            ;
+          }
+          //HAL_Delay(3000);
+          /** SBC and router OFF  OSC OFF **/
+          HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, GPIO_PIN_SET);
+          //HAL_Delay(30);
+          SystemClock_PowerConfig(DISABLED);
+          __enable_irq();
+          xTaskResumeAll();
+        }
+        else
+        {
+          SystemClock_PowerConfig(DISABLED);
+        }
+      }
+      break;
+
+            
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    default:
+      break;
+  }
+
+}
+
+/**
+*
+* @brief        Permettere di inviari comandi alla EEPROM (24C64 = 64Kbits = 4KB -> 0000...1FFF --> A0...A12)
+*
+* @param [in]   uint8_t *: stringa del comando da decifrare
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static void funzioniEEPROM (uint8_t* msgRcv)
+{
+  uint8_t     hexAdd[5], wVal[35];
+  uint16_t    add, tmp;
+  uint16_t    val;
+
+  switch (msgRcv[0])
+  {
+    
+    case 'c':
+      /* Check if backup of SCU data is in eeprom or not */
+      /* Read signature */
+      ReadFromEeprom(EDATA_BKP_SCU_EE_ADDRESS + sizeof (infoStation_t), (uint8_t *)&tmp, sizeof (uint16_t));
+      /* Check if BKP image for SCU data is present or not */
+      if (tmp == EDATA_BKP_SCU_SIGNATURE)
+        tPrintf("PRESENT\n\r");
+      else
+        tPrintf("NOT PRESENT\n\r");                
+      break;
+      
+    case 'r':
+      if ((msgRcv[1] != ' ') || (isxdigit(msgRcv[2]) == 0) || (isxdigit(msgRcv[3]) == 0) || ((isxdigit(msgRcv[4]) == 0) ||
+          isxdigit(msgRcv[5]) == 0))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = msgRcv[4]; hexAdd[3] = msgRcv[5]; hexAdd[4] = '\0';
+        add = (uint16_t)strtol ((char*)hexAdd, NULL, 16);
+        if (ReadFromEeprom(add, (uint8_t*)&val, (uint16_t)sizeof(val)) == 0)
+        {
+          tPrintf("Add 0x%04X = 0x%04X\n\r", add, val);
+        }
+        else
+        {
+          tPrintf("Error reading EEPROM!\n\r");
+        }
+      }
+      break;
+
+    case 'w':
+      if ((msgRcv[1] != ' ') || (isxdigit(msgRcv[2]) == 0) || (isxdigit(msgRcv[3]) == 0) || ((isxdigit(msgRcv[4]) == 0) ||
+          isxdigit(msgRcv[5]) == 0) || (msgRcv[6] != ' ') || (isxdigit(msgRcv[7]) == 0) || (isxdigit(msgRcv[8]) == 0) || 
+          (isxdigit(msgRcv[9]) == 0) || (isxdigit(msgRcv[10]) == 0))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        hexAdd[4] = wVal[4] = '\0';  // set del fine stringa
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = msgRcv[4]; hexAdd[3] = msgRcv[5];
+        add = (uint16_t)strtol ((char*)hexAdd, NULL, 16);
+        wVal[0] = msgRcv[7]; wVal[1] = msgRcv[8]; wVal[2] = msgRcv[9]; wVal[3] = msgRcv[10];
+        val = (uint16_t)strtol ((char*)wVal, NULL, 16);
+        if (WriteOnEeprom(add, (uint8_t*)&val, (uint16_t)sizeof(val)) == 0)
+        {
+          tPrintf("Written at add 0x%04X the value 0x%04X\n\r", add, val);
+        }
+        else
+        {
+          tPrintf("Error writing EEPROM!\n\r");
+        }
+      }
+      break;
+
+    case 'W':
+      if ((msgRcv[1] != ' ') || (isxdigit(msgRcv[2]) == 0) || (isxdigit(msgRcv[3]) == 0) || ((isxdigit(msgRcv[4]) == 0) ||
+          isxdigit(msgRcv[5]) == 0) || (msgRcv[6] != ' ') || (isxdigit(msgRcv[7]) == 0))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        hexAdd[4] = wVal[4] = '\0';  // set del fine stringa
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = msgRcv[4]; hexAdd[3] = msgRcv[5];
+        add = (uint16_t)strtol ((char*)hexAdd, NULL, 16);
+        tmp = msgRcv[7] -(uint8_t)'0';
+        for (val = tmp; val < tmp + sizeof(wVal); val++)
+        {
+          wVal[val-tmp] = (uint8_t)val;
+        }
+        if (WriteOnEeprom(add, (uint8_t*)wVal, (uint16_t)sizeof(wVal)) == 0)
+        {
+          tPrintf("Written at add 0x%04X the value %d..%d\n\r", add, tmp, tmp + sizeof(wVal) - 1);
+          for (val = 0; val < sizeof(wVal); val++)
+          {
+            wVal[val] = 0;
+          }
+          osDelay(100);
+          if (ReadFromEeprom(add, (uint8_t*)wVal, (uint16_t)sizeof(wVal)) == 0)
+          {
+            tPrintf("Add 0x%04X => 0x%02X 0x%02X 0x%02X 0x%02X 0x%02X ... 0x%02X 0x%02X 0x%02X\n\r", add, wVal[0], wVal[1], wVal[2], wVal[3], wVal[4], wVal[32], wVal[33], wVal[34]);
+          }
+          else
+          {
+            tPrintf("Error reading EEPROM!\n\r");
+          }
+        }
+        else
+        {
+          tPrintf("Error writing EEPROM!\n\r");
+        }
+      }
+      break;
+
+    case 'v':
+      break;
+
+    case 'e':
+      restoreFactoryDefault();
+      break;
+
+    case 'B':
+      restoreFactoryDefaultForAll();
+      break;
+
+    case 'E':
+      eeprom_board_default();
+      break;
+
+    case 'a':
+      if ((msgRcv[1] != ' ') || (isdigit(msgRcv[2]) == 0) || (isxdigit(msgRcv[3]) == 0))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = hexAdd[3] = hexAdd[4] = '\0';
+        add = (uint16_t)strtol ((char*)hexAdd, NULL, 10);
+        if ((add > 16) && (add != 99))
+        {
+          tPrintf("Wrong command!\n\r");
+        }
+        else
+        {
+          eeprom_param_get(RS485_ADD_EADD, (uint8_t*)&hexAdd[0], 1);
+          if (add == 99)
+          {
+            setFlagHwInfo(KEY_FOR_RS485_ADD, MASK_FOR_RS485_ADD_SET);
+          }
+          else
+          {
+            add--;
+            if (hexAdd[0] != add)
+            {
+              setFlagHwInfo((RS485_ADD_SET | KEY_FOR_RS485_ADD), MASK_FOR_RS485_ADD_SET);
+              /* a new address must be set */
+              eeprom_param_set(RS485_ADD_EADD, (uint8_t*)&hexAdd[0], 1);
+              send_to_lcd(LCD_CURRENT_UPDATE);
+            }
+          }
+        }
+      }
+      break;
+
+    case 'l':
+      if ((msgRcv[1] != ' ') || (((msgRcv[2]) != '0') && ((msgRcv[2]) != '1')))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        hexAdd[0] = msgRcv[2] - '0';
+        if (hexAdd[0] == 0)
+        {
+          hexAdd[0] =(uint8_t)LCD_MODE_OPEN_DRAIN;
+          tPrintf("LCD open drain mode!\n\r");
+        }
+        else
+        {
+          hexAdd[0] =(uint8_t)LCD_MODE_FULL_BIDIR;
+          tPrintf("LCD bidirectional mode!\n\r");
+        }
+        setFlagHwInfo(((uint32_t)hexAdd[0] | KEY_FOR_LCD_MODE), MASK_FOR_LCD_MODE);
+      }
+      break;
+
+    case 'R':
+      resetEEpromAll();
+      break;
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    default:
+      break;
+  }
+}
+
+/**
+*
+* @brief        Permettere di inviari comandi sulla RS485 dedicata all'Energy meter 
+*
+* @param [in]   uint8_t *: stringa del comando da decifrare
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static void funzioniEm (uint8_t* msgRcv)
+{
+  uint8_t         hexAdd[5];
+  uint8_t*        tmp, cnt;
+  uint16_t        add, val, FW_ver_Major, FW_ver_Minor, FW_ver_Sub;
+  int32_t         value;
+  emModelInfo_st* pEmModelInfo;
+  emError_e       error;
+
+  switch (msgRcv[0])
+  {
+    case 'r':
+      if ((msgRcv[1] != ' ') || (isxdigit(msgRcv[2]) == 0) || (isxdigit(msgRcv[3]) == 0) || ((isxdigit(msgRcv[4]) == 0) ||
+          isxdigit(msgRcv[5]) == 0))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        hexAdd[0] = msgRcv[2]; hexAdd[1] = msgRcv[3]; hexAdd[2] = msgRcv[4]; hexAdd[3] = msgRcv[5];
+        add = (uint16_t)strtol ((char*)hexAdd, NULL, 16);
+        if (getEmRegister(add, (uint8_t)1, bufferTmp, EM_DEF_ADDR, (uint8_t)FALSE) == EM_NO_ERROR)
+        {
+          val = swapW(*((uint16_t*)&bufferTmp[3]));
+
+          tPrintf(" Add=%d\n\r Func=%d\n\r data=0x%04X\n\r", bufferTmp[0], bufferTmp[1], val);
+        }
+        else
+        {
+          tPrintf("Error reading EM!\n\r");
+        }
+      }
+      break;
+
+    case 'd':
+      pEmModelInfo = discoveryEm(EM_DEF_ADDR);
+      if (pEmModelInfo != NULL)
+      {
+        switch (pEmModelInfo->type)
+        {
+          case EM_ALGO:
+           tPrintf("EM AlgoDue Num. Fasi=%d ModelCode=0x%04X Model Name=%s\n\r", pEmModelInfo->emPhase, pEmModelInfo->modelVal, pEmModelInfo->modelName);
+           break;
+
+          case EM_GAVAZZI:
+            tPrintf("EM Gavazzi Num. Fasi=%d ModelCode=%d Model Name=%s\n\r", pEmModelInfo->emPhase, pEmModelInfo->modelVal, pEmModelInfo->modelName);
+            break;
+            
+          case EM_LOVATO:
+            tPrintf("EM Lovato Num. Fasi=%d ModelCode=%d Model Name=%s\n\r", pEmModelInfo->emPhase, pEmModelInfo->modelVal, pEmModelInfo->modelName);            
+            break;
+
+          case EM_SCAME:
+            tPrintf("EM Scame Num. Fasi=%d ModelCode=%d Model Name=%s\n\r", pEmModelInfo->emPhase, pEmModelInfo->modelVal, pEmModelInfo->modelName);            
+            break;
+            
+          default:
+            break;
+        }
+      }
+      else
+      {
+        tPrintf("EM not present!\n\r");
+      }
+      break;
+
+    case 'p':
+      if ((msgRcv[1] == ' ') && ((isxdigit(msgRcv[2]) == 0) || (isxdigit(msgRcv[2]) == 1)))
+      {
+        if (get_emeter_type(EXTERNAL_EM) == (uint8_t)EMETER_SINAPSI)
+        {
+          setSinapsiM1PdDefault(((uint16_t)1000 *(msgRcv[2] -'0')));
+        }
+      }
+      break;
+
+    case 'q':
+      if ((msgRcv[1] == ' ') && ((isxdigit(msgRcv[2]) == 0) || (isxdigit(msgRcv[2]) == 1)))
+      {
+        if (get_emeter_type(EXTERNAL_EM) == (uint8_t)EMETER_SINAPSI)
+        {
+          setSinapsiChain2Status(((uint16_t)(msgRcv[2] -'0')));
+        }
+      }
+      break;
+
+    case 'g':
+      if ((msgRcv[1] != ' ') || ((msgRcv[2] != 'p') && (msgRcv[2] != 'e') && (msgRcv[2] != 'r') && (msgRcv[2] != 's') && 
+                                 (msgRcv[2] != 'v') && (msgRcv[2] != 'V') && (msgRcv[2] != 'a') && (msgRcv[2] != 'A')))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        switch (msgRcv[2])
+        {
+          case 'v': 
+            tPrintf("Voltage = %d [Vrms]\n\r", getEmRegisterValue(EM_SYS_VOLTAGE, EMETER_TYPE_NULL));
+            break;
+
+          case 'V': 
+            tPrintf("System Voltage for 3ph = %d [Vrms]\n\r", getEmRegisterValue(EM_SYS_PH1_VOLTAGE, EMETER_TYPE_NULL));
+            break;
+            
+          case 'a':
+            tPrintf("Current = %d [Arms]\n\r", getEmRegisterValue(EM_CURRENT_L, EMETER_TYPE_NULL));
+            break;
+
+          case 'A':
+            if (msgRcv[3] != ' ')
+            {
+                tPrintf("Wrong command!\n\r");
+            }
+            else
+            {
+              /* Select the right phase */
+              switch (msgRcv[4])
+              {
+                case '1':
+                  tPrintf("Current for L1 phase = %d [Arms]\n\r", getEmRegisterValue(EM_CURRENT_L1, EMETER_TYPE_NULL));
+                  break;
+                case '2':
+                  tPrintf("Current for L2 phase = %d [Arms]\n\r", getEmRegisterValue(EM_CURRENT_L2, EMETER_TYPE_NULL));
+                  break;
+                case '3':
+                  tPrintf("Current for L3 phase = %d [Arms]\n\r", getEmRegisterValue(EM_CURRENT_L3, EMETER_TYPE_NULL));
+                  break;              
+              }
+            }
+            break;
+            
+          case 'p':
+            value = getEmRegisterValue(EM_ACTIVE_POWER, EMETER_TYPE_NULL);
+            tPrintf("ActivePower = %d [mW]\n\r", value);
+            break;
+
+          case 'e':
+            //value = getEmRegisterValue(EM_TOT_ACTIVE_ENERGY, EMETER_TYPE_NULL);
+            value = getTotalActiveEnergyFromModbusReg();
+            tPrintf("Active Energy = %d [Wh]\n\r",  value);
+            break;
+
+          case 'r':
+            if (initEmParameter(EVT_START_ENRG_ACT_SESS_MEAS) == 0)
+            {
+              tPrintf("Set Initial value for active Energy!!!\n\r");
+            }
+            break;
+
+          case 's':
+            value = getEmRegisterValue(EM_SES_ACTIVE_ENERGY, EMETER_TYPE_NULL);
+            tPrintf("Session Active Energy = %d [Wh]\n\r",  value);
+            break;
+
+        }
+      }
+      break;
+
+    case 'G':
+      if ((msgRcv[1] != ' ') || ((msgRcv[2] != 'p') && (msgRcv[2] != 'P')))
+      {
+        tPrintf("Wrong command!\n\r");
+      }
+      else
+      {
+        switch (msgRcv[2])
+        {            
+          case 'p':
+            value = getEmRegisterValue(EM_EXT_ACTIVE_POWER, EMETER_TYPE_NULL);
+            tPrintf("Total activePower = %d [W]\n\r", value);
+            break;
+          case 'P':
+            if (msgRcv[3] != ' ')
+            {
+                tPrintf("Wrong command!\n\r");              
+            }
+            else
+            {
+                /* Select the right phase */
+                switch (msgRcv[4])
+                {
+                  case '1':
+                    tPrintf("Active power for L1 phase = %d [mW]\n\r", getEmRegisterValue(EM_EXT_L1_ACTIVE_POWER, EMETER_TYPE_NULL));
+                    break;
+                  case '2':
+                    tPrintf("Active power for L2 phase = %d [mW]\n\r", getEmRegisterValue(EM_EXT_L2_ACTIVE_POWER, EMETER_TYPE_NULL));
+                    break;
+                  case '3':
+                    tPrintf("Active power for L3 phase = %d [mW]\n\r", getEmRegisterValue(EM_EXT_L3_ACTIVE_POWER, EMETER_TYPE_NULL));
+                    break;              
+                }
+            }
+            break;
+         }
+      }
+      break;
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+#ifdef HW_MP28947      
+    case 'R':
+      /* Reinit internal energy meter */
+      METRO_Init ();
+      METRO_Init_p2 ();
+      tPrintf("Energy meter reinitilized\n\r");      
+      break;
+#endif
+      
+    case 'v':
+       tPrintf("FW version of INTERNAL EM --> v%d.%d.%d\n\r", (EM_INT_SCAME_FWver & 0x0F00) >> 8, (EM_INT_SCAME_FWver & 0x00F0) >> 4, (EM_INT_SCAME_FWver & 0x000F));      
+      break;
+
+    case 'V':
+      tPrintf("FW version of EXTERNAL em --> v%d.%d.%d\n\r", (EM_EXT_SCAME_FWver & 0x0F00) >> 8, (EM_EXT_SCAME_FWver & 0x00F0) >> 4, (EM_EXT_SCAME_FWver & 0x000F));      
+      break;
+      
+    default:
+        tPrintf("Wrong command!\n\r");
+      break;
+  }
+}
+
+/**
+*
+* @brief        Gestione dei comandi dedicati al settaggio del tipo di oscillatore
+*
+* @param [in]   uint8_t *: stringa del comando da decifrare
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+
+static void funzioniOscType (uint8_t* msgRcv)
+{
+ 
+  uint32_t val;
+
+  /* read BACKUP_HW_INFO from backup registers */
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*) getHandleRtc(), BACKUP_HW_INFO);
+  
+  switch (msgRcv[0])
+  {
+    case 'e':                   /* enable external 50MHz osc */
+      val &= ~IRC16M_OSC_ENABLE_FLAG;
+      tPrintf("External oscillator at 50MHz selected\n\r");      
+      /* write setting in BKP registers */
+      HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO, val);       
+      break;
+      
+    case 'i':                   /* enable internal 16MHz osc */
+      val |= IRC16M_OSC_ENABLE_FLAG;   
+      /* write setting in BKP registers */
+      HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO, val);       
+      tPrintf("Internal oscillator at 16MHz selected\n\r");
+      break;
+      
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+      
+    default:
+      
+      break;
+  }
+}
+
+/**
+*
+* @brief        Permettere di inviari comandi dedicati al modulo Wifi
+*
+* @param [in]   uint8_t *: stringa del comando da decifrare
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static void funzioniWifi (uint8_t* msgRcv)
+{
+  
+  switch (msgRcv[0])
+  {
+    case 'n':
+      console.stato = COMANDO_SHOW_NET_PAGE;
+      PrintMenu();
+    break;
+      
+    case 'a':
+      console.stato = COMANDO_SHOW_ACT_KEY;
+      PrintMenu();
+      break;
+
+   case 't':
+    console.stato = COMANDO_TRANSACTIONS_MNG;
+    PrintMenu ();
+    break;
+    
+   case 'c':
+    console.stato = COMANDO_SET_PRODUCT_SN;
+    PrintMenu ();
+    break;
+    
+   case 'd':
+    console.stato = COMANDO_SET_PRODUCT_CODE;
+    PrintMenu ();
+    break;
+    
+   case 'f':
+    console.stato = COMANDO_SET_FAKE_CODE;
+    PrintMenu ();
+    break;
+    
+   case 'u':
+    console.stato = COMANDO_SET_USER_PIN;      
+    PrintMenu ();
+    break;
+    
+   case 'm':
+    console.stato = CONSOLE_IDLE;      
+    PrintMenu ();
+    break;
+    
+   case 'x':
+    {
+      int32_t res = AppEmobTask_updateModule();
+      if( res != 1 )
+      {
+         setFlagForNvic();
+         NVIC_SystemReset();
+      }
+      PrintMenu ();
+    }
+    break;
+    
+   default:
+    break;
+  }
+  
+}
+
+static int32_t getStringBetweenQuote( char *dst, char *src )
+{
+  int32_t i = 0, len = 0;
+  char c;
+  uint8_t flag = 0;
+  
+  while( ( c = src[ i ] ) != 0 )
+  {
+    if( c == '"' )
+    {
+      flag ^= 1U;
+      if( flag == 0)
+      {
+        dst[ len ] = 0;
+        return i;
+      }
+    }
+    if( ( flag == 1U ) && ( c != '"' ) )
+    {
+      dst[ len ] = c;
+      len++;
+    }
+    i++;
+  }
+    
+  return -1;
+}
+
+static void funzioniNet(uint8_t* msgRcv)
+{
+  char c;
+  char ssid[32], pass[64];
+  int32_t res;
+  
+  c = msgRcv[ 0 ];
+  switch( c )
+  {
+  case 'a':
+    if( AppEmobTask_getWifiRssi() == 0 )
+    {
+      res = getStringBetweenQuote( ssid, (char*)&msgRcv[ 1 ] );
+      if( res > 0 )
+      {
+        res = getStringBetweenQuote( pass, (char*)&msgRcv[ res + 2 ] );
+        if( res > 0 )
+        {
+          if( AppEmobTask_connectToWiFi( ssid, pass ) == 0 )
+          {
+            tPrintf( "Connected to \"%s\"\n\r", ssid );
+            AppEmobTask_saveApNetwork( ssid, pass );
+          }
+          else
+          {
+            tPrintf( "Error during connection to \"%s\"\n\r", ssid );
+          }
+        }
+      }
+      if( res <= 0 )
+        tPrintf( "Format error!\n\r" );
+    }
+    else
+    {
+      AppEmobTask_disconnectFromWiFi();
+      AppEmobTask_clearApNetwork();
+    }
+    console.stato = COMANDI_WIFI;
+    PrintMenu();
+    break;
+  case 'm':
+    console.stato = COMANDI_WIFI;
+    PrintMenu();
+    break;
+  default:
+    break;
+  }
+}
+
+static void funzioniActivationKey(uint8_t* msgRcv)
+{
+  char c;
+  
+  c = msgRcv[ 0 ];
+  switch( c )
+  {
+  case 'm':
+    console.stato = COMANDI_WIFI;
+    PrintMenu();
+    break;
+  default:
+    break;
+  }
+}
+
+
+/**
+*
+* @brief        Permettere di inviari comandi dedicati all'ambiente SEM
+*
+* @param [in]   uint8_t *: stringa del comando da decifrare
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static void funzioniSem (uint8_t* msgRcv)
+{
+  
+  switch (msgRcv[0])
+  {
+   case 'e':
+    console.stato = COMANDO_VIEW_CONN_NUMBER;
+    PrintMenu ();
+    break;
+
+   case 'f':
+    console.stato = COMANDO_VIEW_FW_VERSIONS;
+    PrintMenu ();
+    break;
+    
+    case 'a':
+     Print_Slave_Assigned();
+     break;
+
+   case 'm':
+    console.stato = CONSOLE_IDLE;      
+    PrintMenu ();
+    break;
+    
+   default:
+    break;
+  }
+  
+}
+
+/**
+*
+* @brief        Permettere di inviari comandi MODBUS lato SBC ed SCU 
+*
+* @param [in]   uint8_t *: stringa del comando da decifrare
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static void funzioniModbus (uint8_t* msgRcv)
+{
+  uint8_t         hexAdd[8];
+  uint16_t        add;
+  frameScu_st     frameScuMng;
+  uint8_t         *pSrc;
+
+  switch (msgRcv[0])
+  {
+    case 'M':
+    case 'U':
+//          if ((msgRcv[1] != ' ') || (isxdigit(msgRcv[(CARD_UID_DIM + 1)]) == 0))
+          if (msgRcv[1] != ' ')
+          {
+            tPrintf("Wrong command!\n\r");
+          }
+          else
+          {
+          if (msgRcv[0] == 'M')
+            modbus_uid_write(UID_MASTER, &msgRcv[2], ASCII_UID);
+          else if (msgRcv[0] == 'U')
+            modbus_uid_write(UID_USER, &msgRcv[2], ASCII_UID);
+          else
+            tPrintf("Wrong command!\n\r");
+          }
+      break;
+
+    case 'r':
+      switch (msgRcv[1])
+      {
+        case 's':
+          if ((msgRcv[2] != ' ') || (msgRcv[4] != ' ') || (isxdigit(msgRcv[3]) == 0) || 
+              (isxdigit(msgRcv[5]) == 0) || (isxdigit(msgRcv[6]) == 0) || ((isxdigit(msgRcv[7]) == 0) || isxdigit(msgRcv[8]) == 0))
+          {
+            tPrintf("Wrong command!\n\r");
+          }
+          else
+          {
+            frameScuMng.idSCU = getDigit(msgRcv[3]);
+            if (frameScuMng.idSCU > 1)
+            {
+              hexAdd[0] = msgRcv[5]; hexAdd[1] = msgRcv[6]; hexAdd[2] = msgRcv[7]; hexAdd[3] = msgRcv[8]; hexAdd[3] = 0x00;
+              add = (uint16_t)strtol ((char*)hexAdd, NULL, 16);
+              frameScuMng.scuEvents = SCU_EVENT_MSG_INTERNAL_RD;
+              frameScuMng.reqRegAddr = add;
+              frameScuMng.scuRegIdx = SCU_SBC_DUMMY;
+              frameScuMng.totalLen = 0;
+              configASSERT(xQueueSendToBack(getScuQueueHandle(), (void *)&frameScuMng, portMAX_DELAY) == pdPASS);
+            }
+          }
+          break;
+
+        case 'v':
+          if ((msgRcv[2] != ' ') || (isxdigit(msgRcv[3]) == 0))
+          {
+            tPrintf("Wrong command!\n\r");
+          }
+          else
+          {
+            frameScuMng.scuEvents = SCU_EVENT_MSG_INTERNAL_RD;
+            frameScuMng.reqRegAddr = ADDR_UNDEF;
+            frameScuMng.scuRegIdx = BOARD_FW_VERSION_RO; //LPO_BMS_VERSION;
+            frameScuMng.idSCU = (uint16_t)getDigit(msgRcv[3]);
+            frameScuMng.totalLen = 0;
+            configASSERT(xQueueSendToBack(getScuQueueHandle(), (void *)&frameScuMng, portMAX_DELAY) == pdPASS);
+            osDelay(1000);
+            //pSrc = getRegInfoFromIdx(frameScuMng.idSCU, LPO_BMS_VERSION, &add);
+            pSrc = getRegInfoFromIdx(frameScuMng.idSCU, BOARD_FW_VERSION_RO, &add);
+            /*      destination        source      length */
+            memcpy((void*)hexAdd, (void*)pSrc, (size_t)add);
+            hexAdd[add] = '\0';
+            tPrintf("Version SCU#%d is %s\n\r", frameScuMng.idSCU, hexAdd);
+          }
+          break;
+      }
+      break;
+
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    default:
+      break;
+  }
+}
+
+static void funzioniIP (uint8_t* msgRcv)
+{
+  char*         pStr;
+  char*         pStrIp;
+  uint8_t       ix, dig;
+  int           ip[4];
+  unsigned char TempMAC[6], TempXORChecksum;
+
+  switch (msgRcv[0])
+  {
+    case 'm':
+      console.stato = CONSOLE_IDLE;      
+      PrintMenu ();
+      break;
+
+    case 'e':
+#ifdef MODBUS_TCP_EM_LOVATO
+      readEmValuesFromMaster();
+      tPrintf("Invio richiesta misure V & P verso master eseguita!\n\r"); 
+#endif      
+      break;
+
+    case 'i':
+      if ((msgRcv[1] == ' ') && (isdigit(msgRcv[2])))
+      {
+        ix = dig = 0;
+        pStr = pStrIp = (char*)&msgRcv[2];
+        while ((*pStr != '\r') && (*pStr != '\n'))
+        {
+          if (*pStr == '.')
+          {
+            ix++;
+          }
+          else
+          {
+            if(isdigit(*pStr))
+            {
+              dig++;
+            }
+            else
+            {
+              ix = dig = 0;
+              break;
+            }
+          }
+          pStr++;
+        }
+        if ((ix == 3) && ((dig > 8) && (dig <= 12)))
+        {
+          *pStr = '\0';
+          sscanf (pStrIp,"%d.%d.%d.%d", &ip[0], &ip[1], &ip[2], &ip[3]);
+          if ((ip[0] < (int)256 ) && (ip[1] < (int)256 ) && (ip[2] < (int)256 ) && (ip[3] < (int)256 ))
+          {
+            NetworkConfiguration.IpAddress[0] = (uint8_t)ip[0]; 
+            NetworkConfiguration.IpAddress[1] = (uint8_t)ip[1]; 
+            NetworkConfiguration.IpAddress[2] = (uint8_t)ip[2]; 
+            NetworkConfiguration.IpAddress[3] = (uint8_t)ip[3]; 
+            tPrintf("New IP  address  %d.%d.%d.%d\n\r",  NetworkConfiguration.IpAddress[0], NetworkConfiguration.IpAddress[1], 
+                                                        NetworkConfiguration.IpAddress[2], NetworkConfiguration.IpAddress[3]);
+            pStr = (char*)&NetworkConfiguration;
+            for(ix = 0, TempXORChecksum = 0; ix < (sizeof(NetworkConfiguration_t) - 1); ix++)
+            {
+              TempXORChecksum += (uint8_t)pStr[ix];
+            }
+            NetworkConfiguration.cksum = (uint8_t)((uint16_t)0x100 - (uint16_t)TempXORChecksum);
+            WriteOnEeprom(NET_CONFIG_EEPROM_ADDRESS, (uint8_t*)pStr, sizeof(NetworkConfiguration_t));
+
+            setFlagForNvic();
+            /* force a restart to with new MAC */
+            osDelay(100);
+            NVIC_SystemReset();
+          }
+          else
+          {
+            tPrintf("Error in IP value\n\r");
+          }
+        }
+        else
+        {
+          tPrintf("Error in data format\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Error in data format\n\r");
+      }
+      break;
+
+    case 'M':
+      /* string for MAC:  M 02:80:E1 */
+      ix = dig = 0;
+      pStr = pStrIp = (char*)&msgRcv[2];
+      while ((*pStr != '\r') && (*pStr != '\n'))
+      {
+        if (*pStr == ':')
+        {
+          *pStr = ' '; // blank separator 
+          ix++;
+        }
+        if (isxdigit((int)(*pStr)))
+        {
+          *pStr = (char)toupper((int)(*pStr)); 
+          dig++;
+        }
+        pStr++;
+      }
+      *pStr = '\0'; // end string terminator 
+
+      if ((dig == 6) && (ix == 2))
+      {
+        /* MAC string is OK, so set OUI  */
+        TempMAC[0] = (uint8_t)0x02;
+        TempMAC[1] = (uint8_t)0x80;
+        TempMAC[2] = (uint8_t)0xE1;
+        /* now set new MAC value */
+        TempMAC[3] = (uint8_t)strtol ((char* )&msgRcv[2],&pStr,16);
+        TempMAC[4] = (uint8_t)strtol ((char* )pStr, &pStr,16);
+        TempMAC[5] = (uint8_t)strtol ((char* )pStr, &pStr,16);
+        // Calcolo il nuovo checksum
+        pStr = (char*)&NetworkConfiguration;
+        for(ix = 0, TempXORChecksum = 0; ix < (sizeof(NetworkConfiguration_t) - 1); ix++)
+        {
+          TempXORChecksum += (uint8_t)pStr[ix];
+        }
+        NetworkConfiguration.cksum = (uint8_t)((uint16_t)0x100 - (uint16_t)TempXORChecksum);
+        WriteOnEeprom(NET_CONFIG_EEPROM_ADDRESS, (uint8_t*)pStr, sizeof(NetworkConfiguration_t));
+
+        tPrintf("New MAC: 02:80:E1:%02X:%02X:%02X\n\r", TempMAC[3], TempMAC[4], TempMAC[5]);
+        setFlagForNvic();
+        /* force a restart to with new MAC */
+        osDelay(100);
+        NVIC_SystemReset();
+      }
+      else
+      {
+        tPrintf("Error in data format\n\r");
+      }
+      break;
+
+    case 's':
+      if ((msgRcv[1] == ' ') && (isdigit(msgRcv[2])))
+      {
+        ix = dig = 0;
+        pStr = pStrIp = (char*)&msgRcv[2];
+        while ((*pStr != '\r') && (*pStr != '\n'))
+        {
+          if (*pStr == '.')
+          {
+            ix++;
+          }
+          else
+          {
+            if(isdigit(*pStr))
+            {
+              dig++;
+            }
+            else
+            {
+              ix = dig = 0;
+              break;
+            }
+          }
+          pStr++;
+        }
+        if ((ix == 3) && ((dig > 8) && (dig <= 12)))
+        {
+          *pStr = '\0';
+          sscanf (pStrIp,"%d.%d.%d.%d", &ip[0], &ip[1], &ip[2], &ip[3]);
+          if ((ip[0] < (int)256 ) && (ip[1] < (int)256 ) && (ip[2] < (int)256 ) && (ip[3] < (int)256 ))
+          {
+            NetworkConfiguration.SubnetMask[0] = (uint8_t)ip[0]; 
+            NetworkConfiguration.SubnetMask[1] = (uint8_t)ip[1]; 
+            NetworkConfiguration.SubnetMask[2] = (uint8_t)ip[2]; 
+            NetworkConfiguration.SubnetMask[3] = (uint8_t)ip[3]; 
+            tPrintf("New Subnet Mask  %d.%d.%d.%d\n\r",  NetworkConfiguration.SubnetMask[0], NetworkConfiguration.SubnetMask[1], 
+                                                        NetworkConfiguration.SubnetMask[2], NetworkConfiguration.SubnetMask[3]);
+            pStr = (char*)&NetworkConfiguration;
+            for(ix = 0, TempXORChecksum = 0; ix < (sizeof(NetworkConfiguration_t) - 1); ix++)
+            {
+              TempXORChecksum += (uint8_t)pStr[ix];
+            }
+            NetworkConfiguration.cksum = (uint8_t)((uint16_t)0x100 - (uint16_t)TempXORChecksum);
+            WriteOnEeprom(NET_CONFIG_EEPROM_ADDRESS, (uint8_t*)pStr, sizeof(NetworkConfiguration_t));
+
+            setFlagForNvic();
+            /* force a restart to with new MAC */
+            osDelay(100);
+            NVIC_SystemReset();
+          }
+          else
+          {
+            tPrintf("Error in IP value\n\r");
+          }
+        }
+        else
+        {
+          tPrintf("Error in data format\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Error in data format\n\r");
+      }
+      break;
+
+    case 'g':
+      if ((msgRcv[1] == ' ') && (isdigit(msgRcv[2])))
+      {
+        ix = dig = 0;
+        pStr = pStrIp = (char*)&msgRcv[2];
+        while ((*pStr != '\r') && (*pStr != '\n'))
+        {
+          if (*pStr == '.')
+          {
+            ix++;
+          }
+          else
+          {
+            if(isdigit(*pStr))
+            {
+              dig++;
+            }
+            else
+            {
+              ix = dig = 0;
+              break;
+            }
+          }
+          pStr++;
+        }
+        if ((ix == 3) && ((dig > 8) && (dig <= 12)))
+        {
+          *pStr = '\0';
+          sscanf (pStrIp,"%d.%d.%d.%d", &ip[0], &ip[1], &ip[2], &ip[3]);
+          if ((ip[0] < (int)256 ) && (ip[1] < (int)256 ) && (ip[2] < (int)256 ) && (ip[3] < (int)256 ))
+          {
+            NetworkConfiguration.Gateway[0] = (uint8_t)ip[0]; 
+            NetworkConfiguration.Gateway[1] = (uint8_t)ip[1]; 
+            NetworkConfiguration.Gateway[2] = (uint8_t)ip[2]; 
+            NetworkConfiguration.Gateway[3] = (uint8_t)ip[3]; 
+            tPrintf("New Gateway Mask  %d.%d.%d.%d\n\r",  NetworkConfiguration.Gateway[0], NetworkConfiguration.Gateway[1], 
+                                                        NetworkConfiguration.Gateway[2], NetworkConfiguration.Gateway[3]);
+            pStr = (char*)&NetworkConfiguration;
+            for(ix = 0, TempXORChecksum = 0; ix < (sizeof(NetworkConfiguration_t) - 1); ix++)
+            {
+              TempXORChecksum += (uint8_t)pStr[ix];
+            }
+            NetworkConfiguration.cksum = (uint8_t)((uint16_t)0x100 - (uint16_t)TempXORChecksum);
+            WriteOnEeprom(NET_CONFIG_EEPROM_ADDRESS, (uint8_t*)pStr, sizeof(NetworkConfiguration_t));
+
+            setFlagForNvic();
+            /* force a restart to with new MAC */
+            osDelay(100);
+            NVIC_SystemReset();
+          }
+          else
+          {
+            tPrintf("Error in IP value\n\r");
+          }
+        }
+        else
+        {
+          tPrintf("Error in data format\n\r");
+        }
+      }
+      else
+      {
+        tPrintf("Error in data format\n\r");
+      }
+      break;
+
+    case 'h':
+      if ((msgRcv[1] == ' ') && isdigit(msgRcv[2]) && isdigit(msgRcv[3]) && isdigit(msgRcv[4]) && isdigit(msgRcv[5]))
+      {
+        ip[0] = 
+        NetworkConfiguration.portHttp = (unsigned int)((msgRcv[2] -'0') * 1000 + (msgRcv[3] -'0') * 100 + (msgRcv[4] -'0') * 10 + (msgRcv[5] -'0')); 
+        tPrintf("New HTTP port  address  %d\n\r",  NetworkConfiguration.portHttp);
+        pStr = (char*)&NetworkConfiguration;
+        for(ix = 0, TempXORChecksum = 0; ix < (sizeof(NetworkConfiguration_t) - 1); ix++)
+        {
+          TempXORChecksum += (uint8_t)pStr[ix];
+        }
+        NetworkConfiguration.cksum = (uint8_t)((uint16_t)0x100 - (uint16_t)TempXORChecksum);
+        WriteOnEeprom(NET_CONFIG_EEPROM_ADDRESS, (uint8_t*)pStr, sizeof(NetworkConfiguration_t));
+
+        setFlagForNvic();
+        /* force a restart to with new MAC */
+        osDelay(100);
+        NVIC_SystemReset();
+      }
+      else
+      {
+        tPrintf("Error in data format\n\r");
+      }
+      break;
+
+
+    default:
+      break;
+  }
+}
+
+
+/**
+*
+* @brief        Permettere di inviari comandi dedicati all'event LOG
+*
+* @param [in]   uint8_t *: stringa del comando da decifrare
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static void funzioniEVLOG (uint8_t* msgRcv)
+{
+  switch (msgRcv[0])
+  {
+    case 's':   /* Show Event log */
+      EVLOG_Read ();
+    break;
+
+    case 'e':   /* Erase all the event log */
+      EVLOG_Erase_All ();
+    break;
+    
+    case 'm':
+    console.stato = CONSOLE_IDLE;      
+    PrintMenu ();
+    break;
+    
+    default:
+    break;
+  }
+
+}
+
+/**
+*
+* @brief        esegue una printf usando telnet
+*
+* @param [in]   const char * format - lista dei parametri
+*
+* @retval       uint16_t - numero byte trasmessi oppure 0 in caso di errore
+*
+***********************************************************************************************************************/
+uint16_t tPrintf ( const char * format, ... )
+{
+  uint16_t      len, txdBytes;
+  va_list       args;
+  telnetMsg_st  *pTelnetMsg;
+  //telnetMsg_st  tempMsg;
+  frameDbg_st*   pLocFrameDbg;
+  uint16_t       txIdx;
+  
+  txIdx = 0;
+
+  len = 0;
+  if (pcbTelnet != NULL)
+  {
+
+    va_start (args, format);
+
+    pTelnetMsg = calloc(sizeof(telnetMsg_st), 1);
+    if (pTelnetMsg != NULL)
+    {
+      len = (uint16_t)vsprintf ((char *)&pTelnetMsg->bufferMsg[0], format, args);
+      pTelnetMsg->lenMsg = txdBytes = (uint16_t)len;
+      va_end (args);
+
+      // put in the queue UI
+      pTelnetMsg->telnetEv = TELNET_TX;
+      //while(xQueueSendToBack(telenetTxQueue, (void *)pTelnetMsg, ( TickType_t ) 100) != pdPASS)
+      {
+        ; // no message sent within 100msec; retry
+      }
+#ifdef SOSPESA
+      do
+      {
+        len = (uint16_t)uxQueueSpacesAvailable(telenetTxQueue);
+        if (len < (TELNET_MAX_MESSAGE_NUM - 4))
+        {
+          osDelay(100);
+        }
+      } while (len < (TELNET_MAX_MESSAGE_NUM - 4));
+#endif
+      configASSERT(xQueueSendToBack(telenetTxQueue, (void *)pTelnetMsg, portMAX_DELAY) == pdPASS); // telnetProcess()
+      free((void *)pTelnetMsg);  
+    }
+  }
+  else
+  {
+    va_start (args, format);
+    len = txdBytes = (uint16_t)vsprintf ((char *)&bufferTmp, format, args);
+    va_end (args);
+    do
+    {
+      pLocFrameDbg = calloc(sizeof(frameDbg_st), 1);
+      if (pLocFrameDbg != NULL)
+      {
+        memcpy((void*)&pLocFrameDbg->infoRxDbg[0], (void*)&bufferTmp[txIdx], sizeof(pLocFrameDbg->infoRxDbg));
+        if (len > sizeof(pLocFrameDbg->infoRxDbg))
+        {
+          pLocFrameDbg->payloadLen = sizeof(pLocFrameDbg->infoRxDbg);
+          len -= sizeof(pLocFrameDbg->infoRxDbg);
+          txIdx += sizeof(pLocFrameDbg->infoRxDbg);
+        }
+        else
+        {
+          pLocFrameDbg->payloadLen = len;
+          len = 0;
+        }
+        /* start UART transmission only when tx debug queue is empty */
+        // put in the queue UI
+        pLocFrameDbg->dbgMsgDir = TX_TO_HOST;
+        if (getDbgQueueHandle() != NULL)
+        {
+          while(xQueueSendToBack(getDbgQueueHandle(), (void *)pLocFrameDbg, ( TickType_t ) 100) != pdPASS)  // Process_dbg_Request()
+          {
+            ; // no message sent within 100msec; retry
+          }
+        }
+        free((void *)pLocFrameDbg);
+      }
+      else
+      {
+        len = txdBytes = 0;
+      }
+    } while (len != 0);
+  }
+  return txdBytes;
+}
+
+
+
+void startConsole (uint8_t* pBuff)
+{
+  putInConsoleQueueHandle(pBuff);
+}
+
+/*
+*
+* @brief        set in idle console task  
+*
+* @param [in]   none 
+*
+* @retval       uint_8_t: bus speed value
+*
+***********************************************************************************************************************/
+void  setConsoleIdle (void)
+{
+  console.stato = CONSOLE_IDLE;
+}
+
+/*
+*
+* @brief        convert a hex digit in binary value  
+*
+* @param [in]   unsigned char: 
+*
+* @retval       uint_8_t: value
+*
+***********************************************************************************************************************/
+static uint8_t  getDigit (uint8_t digit)
+{
+  uint8_t dig;
+
+  dig = (uint8_t)toupper((int)digit);
+
+  if ((dig >= 'A') && (dig <= 'F'))
+  {
+    return((uint8_t)10 + dig - (uint8_t)'A');
+  }
+  else
+  {
+    return(dig - (uint8_t)'0');
+  }
+}
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Function Definition                           **
+**                                                                          **
+******************************************************************************
+*/
+
+void consoleTask (void * pvParameters)
+{
+  uint32_t       timeTick;
+  consoleMng_st  consoleMngIn;
+
+  /*-------- Creates an empty mailbox for uart  messages --------------------------*/
+  //dbgQueue = xQueueCreate(NUM_BUFF_DBG_RX, sizeof(frameDbg_st));
+  consoleQueue = xQueueCreate(CONSOLE_NUM_RX_MSG, sizeof(consoleMng_st));
+  configASSERT(consoleQueue != NULL);
+
+  //timeTick = pdMS_TO_TICKS(TIMER_TICK_500);
+  timeTick = portMAX_DELAY;
+
+  for (;;)
+  {
+    /* Wait for some event from Rx/Tx uart RS485 (typically UART2 */
+    if (xQueueReceive(consoleQueue, (void *)&consoleMngIn, timeTick) == pdPASS)
+    {
+      consoleMng((uint8_t*)consoleMngIn.consoleMsgRx);
+    }
+    else
+    {
+    }
+  }
+}
+
+/**
+*
+* @brief        Get the pointer to console Rx queue
+*
+* @param [in]   none
+*
+* @retval       xQueueHandle: pointer to defined console queue
+*
+***********************************************************************************************************************/
+xQueueHandle getConsoleQueueHandle(void)
+{
+   return(consoleQueue);
+}
+
+/**
+*
+* @brief        Put a message in console queue 
+*
+* @param [in]   uint8_t*: pointer to message to be sent 
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void putInConsoleQueueHandle(uint8_t* msgIn)
+{
+  consoleMng_st  tempConsoleMng;
+
+  /*             destination                       source            len         */
+  memcpy((void*)&tempConsoleMng.consoleMsgRx[0], (void*)msgIn, CONSOLE_RX_MSG_LEN);
+  configASSERT(xQueueSendToBack(getConsoleQueueHandle(), (void *)&tempConsoleMng, portMAX_DELAY) == pdPASS);  // consoleMng()
+}
+
+
+/*************** END OF FILE ******************************************************************************************/
+

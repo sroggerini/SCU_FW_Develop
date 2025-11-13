@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<!-- saved from url=(0022)http://192.168.30.126/ -->
+<link rel="icon" type="image/png" href="graphics/logoSCAME.png">
+<html lang="it">
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>SCU HW Configuration</title>
+      <link rel="stylesheet" href="./style.css">
+    <script language="JavaScript">
+      function myFunction(x) {
+
+        var formBk = document.getElementById("BatteryBackup");
+        var form = document.getElementById("infoItem"),
+            inputs = form.getElementsByTagName("input");
+            formSk = document.getElementById("socket"),
+            prese = formSk.getElementsByTagName("input"),
+            formEm = document.getElementById("engMeter"),
+            eneM = formEm.getElementsByTagName("input"),
+            formIt = document.getElementById("Typical"),
+            formIs = document.getElementById("Simplified");
+            formAdd = document.getElementById("rs485Add");
+            formLs = document.getElementById("LedStrip"),
+            iLs = document.getElementsByName("radio_Ls"),
+            iSp = document.getElementsByName("skP");
+            arr = [];
+        var check = 0x00000000;
+        var act = 0x00000000;
+        var presa = 0;
+        var emCode = 0;
+        var lsCode = 0;
+        var spCode = 0;
+        var backSt = 0;
+        var moCode = 0;
+        var semFlag = 0;
+        var emClr = 0;
+        var hgtp = 0;
+        var Is, It, IsN, ItN, iAdd, iAddN;
+        for (var i = 0, max = inputs.length, mask = 1; i < max; i += 2, mask = mask << 1) {
+           // Take only those inputs which are checkbox
+           if (inputs[i].type === "checkbox" && inputs[i].checked) {
+              arr.push(i);
+              if (inputs[i].id != "checks_HGTP")
+              check |= mask;
+           }
+        }
+        for (var i = 0, max = inputs.length, mask = 1; i < max; i += 2, mask = mask << 1) {
+           // Take only those inputs which are checkbox
+           if (inputs[i+1].type === "checkbox" && inputs[i+1].checked) {
+              if (inputs[i+1].id == "actuators_PAUT")
+              {
+                act |= 0x10;
+              }
+              else
+              {
+                act |= mask;
+              }
+           }
+        }
+        for (var i = 0, max = prese.length; i < max; i += 1) {
+           // Take only those inputs which are checkbox
+           if (prese[i].type === "radio" && prese[i].checked) {
+              presa = prese[i].value;
+           }
+        }
+        for (var i = 0, max = eneM.length; i < max; i += 1) {
+           // Take only those inputs which are checkbox
+           if (eneM[i].type === "radio" && eneM[i].checked) {
+              emCode = eneM[i].value;
+           }
+        }
+        for (var i = 0, max = iLs.length; i < max; i += 1) {
+           // Take only those inputs which are checkbox
+           if (iLs[i].type === "radio" && iLs[i].checked) {
+              lsCode = iLs[i].value;
+           }
+        }
+        for (var i = 0, max = iSp.length; i < max; i += 1) {
+           // Take only those inputs which are checkbox
+           if (iSp[i].type === "radio" && iSp[i].checked) {
+              spCode = iSp[i].value;
+           }
+        }
+        if (document.getElementById("op_2").checked == true) moCode = 2;
+        if (document.getElementById("op_1").checked == true) moCode = 1;
+        if (document.getElementById("op_0").checked == true) moCode = 0;
+        if (document.getElementById("op_3").checked == true) moCode = 3;
+        if (document.getElementById("op_4").checked == true) moCode = 4;
+
+        if(formBk.checked) backSt = 1; else backSt = 0;
+        if (document.getElementById("aFix").checked == true) semFlag |= 1;
+        if (document.getElementById("checks_HGTP").checked == true) hgtp=1; else hgtp=0;
+        if (document.getElementById("emClear").checked == true) emClr= 1;
+
+        It = formIt.value;  ItN = parseInt(It);
+        Is = formIs.value;  IsN = parseInt(Is);
+        iAdd = formAdd.value;  iAddN = parseInt(iAdd);
+        if ((isNaN(ItN)) || (isNaN(IsN)) || (isNaN(iAdd)))
+        {
+          alert(`Mode 3 current and address must be numeric!`); 
+        }
+        else
+        {
+          if(((ItN < 6) || (ItN > 63)) || ((IsN < 6) || (IsN > 16)) || ((iAdd < 1) || ((iAdd > 16) && (iAdd != 99))))
+          {
+            alert(`Mode 3 current or address out of range`); 
+          }
+          else
+          {
+            var name = "check<" + check + ">act<" + act + ">hgtp<" + hgtp + ">skType<" + presa + ">emCode<" + emCode + ">ITyp<" + It + ">ISem<" + Is 
+                                        + ">Back<" + backSt + ">iAddr<" + iAdd + ">lsCode<" + lsCode + ">moCode<" + moCode + ">wDef<" + x 
+                                        + ">spCode<" + spCode + ">semFlag<" + semFlag + ">emClear<" + emClr + ">";
+            let formData = new FormData(document.forms.person);
+            formData.append("middle", name);
+            let xhr = new XMLHttpRequest();
+            xhr.open("POST", "gsyCheck");
+            xhr.send(formData);
+            xhr.onload = function() {
+              if (xhr.status != 200) { 
+                alert(`Error`); // ad esempio 404: Not Found
+              } else { 
+                alert(`Configurazione eseguita!`); 
+              }
+            };
+          }
+        }
+
+      }
+
+	    function lidMng ()
+      {
+        if ((document.getElementById("Socket_2").checked == false) && (document.getElementById("Socket_8").checked == false))
+        document.getElementById("checks_LIDE").checked = false;
+      }
+      function selModeOp(x, y) {
+        document.getElementById("rs485Add").value = x; sktPos(); document.getElementById("aFix").checked = y;
+
+      }
+      function sktPos() {
+        var x = document.getElementById("rs485Add").value;
+        var prdStr = document.getElementById("prdSubj").value;
+        if ((x == 1) || (x == 11))
+        {
+          if (prdStr.search(/\.A/) != -1) document.getElementById("skP_0").checked = true; else document.getElementById("skP_1").checked = true;
+          if (x == 1)
+          {
+            document.getElementById("aFix").checked = true;  
+          }
+          if (x == 11)
+          {
+            document.getElementById("aFix").checked = false; 
+          }
+        }
+        if ((x == 2) || (x == 12))
+        {
+          if (prdStr.search(/\.A/) != -1) document.getElementById("skP_2").checked = true; else document.getElementById("skP_0").checked = true;
+          if (x == 2)
+          {
+            document.getElementById("aFix").checked = true;
+          }
+          if (x == 12)
+          {
+            document.getElementById("aFix").checked = false; 
+          }
+        }
+        if (document.getElementById("op_1").checked == true)
+        {
+          document.getElementById("aFix").checked = false;
+        }
+      }
+
+    </script>
+   </head>
+   <body>
+       <div>
+          <div class="hwconf">
+             <h2>HW Setup SCU for &nbsp &nbsp</h2><input type="text" id="prdSubj" value="205@01              " style="background-color: GreenYellow; font-weight: bold; text-align: center;" disabled >
+              <FORM id="noSave" name="xButton" action ="mainPage.html" METHOD="get">                    
+                <input type="submit" value="X"><br>
+              </FORM>
+             <div class="panel_container">
+                <div class="panel">
+                   <div class="panel" style="width: 100%;">
+                     <h1>Socket</h1>
+                     <ul>
+                       <FORM id="socket" name="presa" METHOD="post">
+                          <li><input type="radio" name="radio_Socket" id="Socket_0" value="00" style="margin-right: 5px;" check40 ><span style="vertical-align: super;">n/a</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_1" value="D2" style="margin-right: 5px;" check41 ><span style="vertical-align: super;">2b - Type 2 Plug Lock</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_2" value="D8" style="margin-right: 5px;" check42 ><span style="vertical-align: super;">2b_LC - Type 2 Plug Lock and Lid (Closed in Charge)</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_3" value="D4" style="margin-right: 5px;" check43 ><span style="vertical-align: super;">2b_LO - Type 2 Plug Lock and Lid (Open in Charge)</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_4" value="D5" style="margin-right: 5px;" check44 ><span style="vertical-align: super;">3Cb_LO - Type 3C Plug Lock and Lid (Open in Charge)</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_5" value="C0" style="margin-right: 5px;" check45 ><span style="vertical-align: super;">3C - Type 3C</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_6" value="94" style="margin-right: 5px;" check46 ><span style="vertical-align: super;">3Ab_LO - Type 3A Plug Lock and Lid (Open in Charge)</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_7" value="80" style="margin-right: 5px;" check47 ><span style="vertical-align: super;">3A - Type 3A</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_8" value="98" style="margin-right: 5px;" check48 ><span style="vertical-align: super;">Sb_LC - Schuko Plug Lock and Lid (Closed in Charge)</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_9" value="81" style="margin-right: 5px;" check49 ><span style="vertical-align: super;">S - Schuko</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_10" value="E2" style="margin-right: 5px;" check50 ><span style="vertical-align: super;">1_CBL - Tethered Type 1</span></li>
+                          <li><input type="radio" name="radio_Socket" id="Socket_11" value="E0" style="margin-right: 5px;" check51 ><span style="vertical-align: super;">2_CBL - Tethered Type 2</span></li>
+                       </FORM>
+                     </ul>
+                  </div>
+                   <div class="panel" style="width: 100%;">
+                    <table style="width:100%">
+                         <tr>
+                           <td><h1>Led Strip</h1></td>
+                           <td><h1>Socket Position</h1></td>
+                         </tr>
+                        <FORM id="LedStrip" name="radio_Ls" METHOD="post">
+                         <tr>
+                             <td><li><input type="radio" name="radio_Ls" id="Ls_0" value="06" style="margin-right: 5px;" check52 ><span style="vertical-align: super;">6</span> <input type="radio" name="radio_Ls" id="Ls_1" value="12" style="margin-right: 5px;" check54 ><span style="vertical-align: super;">12</span></li></td> 
+                             <td><li><input type="radio" name="skP" id="skP_1" value="64" check62 ><span>H_Sx </span><input type="radio" name="skP" id="skP_0" value="0" check63 ><span>H_Dx</span></li></td>
+                         </tr>
+                         <tr>
+                             <td><li><input type="radio" name="radio_Ls" id="Ls_2" value="09" style="margin-right: 5px;" check53 ><span style="vertical-align: super;">9</span> <input type="radio" name="radio_Ls" id="Ls_3" value="18" style="margin-right: 5px;" check55 ><span style="vertical-align: super;">18</span></li></td> 
+                             <td><li><input type="radio" name="skP" id="skP_3" value="192" check64 ><span>L_Sx </span> <input type="radio" name="skP" id="skP_2" value="128" check65 ><span>L_Dx</span></li></td>
+                         </tr>
+                       </FORM>
+                    </table>
+                   </div>
+                </div>
+                <div class="panel">
+                   <div class="panel" style="width: 100%;">
+                      <h1>EnergyMeter</h1>
+                      <ul>
+                        <FORM id="engMeter" name="em" METHOD="post">
+                       <table style="width:100%">
+                         <tr>
+                          <td><li><input type="radio" name="radio_EnergyMeter" id="EnergyMeter_0" value="00" check30 ><span>n/a</span></li></td>
+                          <td><li></li></td>
+                          <td><li><input type="text" id="hwEmCode" value="@d " style="margin-right: 5px; width: 30px; text-align: center;" disabled ><span>Detected</span></li></td>
+                         </tr>
+                         <tr>
+                             <td><h1>Model</h1></td>
+                             <td><h1>Mono-Phase</h1></td>
+                             <td><h1>Tri-Phase</h1></td>
+                         </tr>
+                         <tr>
+                          <td><span>TA Analogico</span></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="01" check31 ></li></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="81" check37 ></li></td>
+                         </tr>
+                         <tr>
+                          <td><span>Gavazzi (Code: 04/84)</span></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="04" check32 ></li></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="84" check34 ></li></td>
+                         </tr>
+                         <tr>
+                          <td><span>Algo2 (Code: 14/94)</span></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="14" check33 ></li></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="94" check35 ></li></td>
+                         </tr>
+                         <tr>
+                          <td><span>Lovato (Code: 40/C0)</span></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="40" check56 ></li></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="C0" check57 ></li></td>
+                         </tr>
+                         <tr>
+                          <td><span>SCAME (Code: 20/A0)</span></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="20" check58 ></li></td>
+                          <td><li><input type="radio" name="radio_EnergyMeter" value="A0" check59 ></li></td>
+                          <td><li><input type="checkbox" id="emClear" style="margin-right: 5px;" disab#ed ><span style="vertical-align: super;">Clear ENRG</span></li></td>
+                         </tr>
+                       </table>
+                       </FORM>
+                     </ul>
+                   </div>
+                   <div class="panel" style="width: 100%;">
+                       <table style="width:100%">
+                         <tr>
+                             <td><h1>Imax</h1></td>
+                             <td><h1></h1></td>
+                             <td><h1>Battery Backup</h1></td>
+                         </tr>
+                         <tr>
+                          <td><li><input type="text" id="Typical" value="@x" style="margin-right: 5px; width: 30px; text-align: center;"><span>Typical</span></li></td>
+                          <td><li></li></td>
+                          <td><li><input type="checkbox" id="BatteryBackup" value="undefined" style="margin-right: 5px;" check36 ><span style="vertical-align: super;">Battery Backup</span></li></td>
+                         </tr>
+                         <tr>
+                          <td><li><input type="text" id="Simplified" value="@y" style="margin-right: 5px; width: 30px; text-align: center;"><span>Simplified</span></li></td>
+                          <td><li></li></td>
+                          <td><li></li></td>
+                         </tr>
+                       </table>
+                   </div>
+
+                   <div class="panel" style="width: 100%;">
+                      <h1>SCU Address</h1>
+                       <table style="width:85%">
+                         <tr>
+                           <td><li><input type="text" id="rs485Add" value="@a      " style="margin-right: 5px; width: 30px; text-align: center;" onchange="sktPos()"><span>1..16</span></li></td>
+                           <td><li><input type="checkbox" id="aFix" style="margin-right: 5px;" check66 ><span style="vertical-align: super;">Fixed</span></li></td>
+                         </tr>
+                       </table>
+                   </div>
+                   <div class="panel" style="width: 100%;">
+                    <h1>Operative Mode</h1>
+                     <table style="width:100%">
+                         <tr>
+                             <td><h1>MAX0</h1></td>
+                             <td><h1>SEM</h1></td>
+                             <td><h1>SEM</h1></td>
+                             <td><h1>SEM</h1></td>
+                             <td><h1>SEM</h1></td>
+                         </tr>
+                         <tr>
+                          <FORM id="OpMod" name="modeFunc" METHOD="post">
+                             <td><li><input type="radio" name="modeOp" id="op_1" value="1" onclick="selModeOp(16, 0)"check38 ><span>EMUMAX0</span></li></td>
+                             <td><li><input type="radio" name="modeOp" id="op_0" value="0" onclick="selModeOp(1, 1)" check39 ><span>Master  Pri</span></li></td>
+                             <td><li><input type="radio" name="modeOp" id="op_3" value="3" onclick="selModeOp(3, 0)" check61 disabled ><span>Master  Sec</span></li></td>
+                             <td><li><input type="radio" name="modeOp" id="op_4" value="4" onclick="selModeOp(1,  1)" check67 disabled ><span>Master Iso</span></li></td>
+                             <td><li><input type="radio" name="modeOp" id="op_2" value="2" onclick="selModeOp(11, 0)" check60 ><span>Slave</span></li></td>
+                          </FORM>
+                         </tr>
+                     </table>
+                   </div>
+                </div>
+                <div class="panel">
+                   <h1>Checks/Actuators</h1>
+                   <ul>
+                     <FORM id="infoItem" name="person" METHOD="post">
+                      <li><input type="checkbox" id="checks_RCDM" value="undefined" style="margin-right: 5px;" check01 ><input type="checkbox" id="actuators_RCDM" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(RCDM) Residual Current Device Monitor</span></li>
+                      <li><input type="checkbox" id="checks_LIDE" value="undefined" style="margin-right: 5px;" check02 ><input type="checkbox" id="actuators_LIDE" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(LIDE) Lid Presence</span></li>
+                      <li><input type="checkbox" id="checks_VENT" value="undefined" style="margin-right: 5px;" check03 ><input type="checkbox" id="actuators_VENT" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(VENT) Presence Ventilation</span></li>
+                      <li><input type="checkbox" id="checks_BLCK" value="undefined" style="margin-right: 5px;" check04 ><input type="checkbox" id="actuators_BLCK" style="margin-right: 5px;"            check05 ><span style="vertical-align: super;">(BLCK) Latching System Block</span></li>
+                      <li><input type="checkbox" id="checks_RMEN" value="undefined" style="margin-right: 5px;" check06 ><input type="checkbox" id="actuators_RMEN" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(RMEN) Remote Suspension</span></li>
+                      <li><input type="checkbox" id="checks_STOP" value="undefined" style="margin-right: 5px;" check07 ><input type="checkbox" id="actuators_STOP" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(STOP) Stop Charge</span></li>
+                      <li><input type="checkbox" id="checks_MIRR" value="undefined" style="margin-right: 5px;" check08 ><input type="checkbox" id="actuators_MIRR" style="margin-right: 5px;"            check09 ><span style="vertical-align: super;">(MIRR) Mirror Contact</span></li>
+                      <li><input type="checkbox" id="checks_RCBO" value="undefined" style="margin-right: 5px;" check10 ><input type="checkbox" id="actuators_RCBO" style="margin-right: 5px;"            check11 ><span style="vertical-align: super;">(RCBO) Current Protection</span></li>
+                      <li><input type="checkbox" id="checks_CPSE" value="undefined" style="margin-right: 5px;" check12 ><input type="checkbox" id="actuators_CPSE" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(CPSE) Short Circuit Control Pilot</span></li>
+                      <li><input type="checkbox" id="checks_PPSE" value="undefined" style="margin-right: 5px;" check13 ><input type="checkbox" id="actuators_PPSE" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(PPSE) Short Circuit Plug Presence</span></li>
+                      <li><input type="checkbox" id="checks_CPLS" value="undefined" style="margin-right: 5px;" check14 ><input type="checkbox" id="actuators_CPLS" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(CPLS) Lost Control Pilot</span></li>
+                      <li><input type="checkbox" id="checks_PPLS" value="undefined" style="margin-right: 5px;" check15 ><input type="checkbox" id="actuators_PPLS" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(PPLS) Lost Plug Presence</span></li>
+                      <li><input type="checkbox" id="checks_VBUS" value="undefined" style="margin-right: 5px;" check16 ><input type="checkbox" id="actuators_VBUS" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(VBUS) Main Break Down</span></li>
+                      <li><input type="checkbox" id="checks_MFRE" value="undefined" style="margin-right: 5px;" check17 ><input type="checkbox" id="actuators_MFRE" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(MFRE) Mifare Reader</span></li>
+                      <li><input type="checkbox" id="checks_EMTR" value="undefined" style="margin-right: 5px;" check18 ><input type="checkbox" id="actuators_EMTR" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(EMTR) Energy Meter</span></li>
+                      <li><input type="checkbox" id="checks_OVCE" value="undefined" stylrgin-re="margin-right: 5px;" check19 ><input type="checkbox" id="actuators_OVCE" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(OVCE) Over Current Protection</span></li>
+                      <li><input type="checkbox" id="checks_RCTE" value="undefined" style="maight: 5px;" check20 ><input type="checkbox" id="actuators_RCTE" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(RCTE) Presence Rectifier Diode</span></li>
+                      <li><input type="checkbox" id="checks_HGTP" value="undefined" style="margin-right: 5px;" check22 ><input type="checkbox" id="actuators_HGTP" style="margin-right: 5px; visibility: hidden;"><span style="vertical-align: super;">(HGTP) High Temperature Control</span></li>
+                      <li><input type="checkbox" id="checks_PATH" value="undefined" style="margin-right: 5px; visibility: hidden;" ><input type="checkbox" id="actuators_PAUT" style="margin-right: 5px;" onchange="lidMng()" check21><span style="vertical-align: super;">(PAUT) Post Authorization</span></li>
+                     </FORM>
+                   </ul>
+                </div>
+             </div>
+             <form id="uploadReq" action ="/hwConf.html" method="post">
+               <input type="button" value="Write" onclick="myFunction(0)">
+               <input type="button" value="Make As Default" style="margin-right: 20px; background-color:red" onclick="myFunction(1)">
+             </FORM>
+         </div>
+       </div>
+    </form>
+  </body>
+</html>

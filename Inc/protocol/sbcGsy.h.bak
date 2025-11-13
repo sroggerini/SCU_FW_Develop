@@ -1,0 +1,220 @@
+/**
+* @file        sbcGsy.h
+*
+* @brief       Uart for sbc communication  - Definition -
+*
+* @author      Nick
+*
+* @riskClass   C
+*
+* @moduleID
+*
+* @vcsInfo
+*     $Id: sbcGsy.h 408 2024-02-19 09:29:00Z npiergi $
+*
+*     $Revision: 408 $
+*
+*     $Author: npiergi $
+*
+*     $Date: 2024-02-19 10:29:00 +0100 (lun, 19 feb 2024) $
+*
+*
+* @copyright
+*       Copyright (C) 2016 SCAME S.p.A. All rights reserved.
+*       This file is copyrighted and the property of Aesys S.p.A.. It contains confidential and proprietary
+*       information. Any copies of this file (in whole or in part) made by any method must also include a copy of this
+*       legend.
+*       Developed by:  SCAME S.p.A.
+***********************************************************************************************************************/
+
+
+#ifndef _SBCGSY_H
+#define _SBCGSY_H
+
+#include "sbcUart.h"
+#include "PersMng.h"
+
+// -------------------------- global defines ------------------------------------------------------------------------------------------------------------------------- //
+#define BUSY_OUTLET             (uint8_t)(0x01)
+#define POWERED_OUTLET          (uint8_t)(0x02)
+#define ERROR_UPDATE            (uint8_t)(0x04)
+#define PLUGGED_OUTLET          (uint8_t)(0x08)
+#define RFID_PENDING            (uint8_t)(0x10)
+#define REBOOT_REQUIRED         (uint8_t)(0x20)
+#define LOCKED_OUTLET           (uint8_t)(0x40)
+// ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
+#define BOOT_FRAME_START        (uint8_t)(0x24)     // '$' = inizio pacchetto download per MAX0
+#define FW_UPDATE_WRITE_CODE    (uint8_t)(0x6E)     // ACK  download per MAX0
+
+/* ----------- numero buffer nella coda di ricezione  -------------*/
+/**  per il protocollo MODBUS numero massimo di word è 125 = 250 bytes + header = 256 **/
+/**  per il download abbiamo stabilito che saranno inviati 1024byte di dati + header(6) + checksum(2)  **/
+//define   SBC_BUFF_SIZE  ((uint16_t)256)
+#define   PACKET_GSY_FW_LEN     ((uint16_t)1024)                     
+//#define   PACKET_GSY_FW_LEN     ((uint16_t)2048)                     
+#define   PACKET_GSY_FW_DMA_LEN ((uint16_t)16)                     
+#define   PACKET_GSY_FW_OH_LEN  ((uint16_t)6)    /*** 2 bytes for index packet and 4 bytes for checksum */                   
+#define   BUFFER_FW_PAYLOAD_CKS (PACKET_GSY_FW_LEN + PACKET_GSY_FW_OH_LEN)  /*** packet len with header (2 bytes) and checksum (4 bytes) ****/
+#define   BUFFER_FW_PAYLOAD     (PACKET_GSY_FW_LEN + 2)
+#define   SBC_BUFF_SIZE         (PACKET_GSY_FW_LEN + PACKET_GSY_FW_DMA_LEN) /*** packet len with header (2 bytes) without  checksum      ****/
+#define   SBC_BUFF_SIZE_GSY     ((uint16_t)256)
+#define   SBC_MIN_SIZE_GSY      ((uint16_t)4)     /* to be checked !!! */
+
+#define   NUM_BUFF_SBC_RX                   ((uint16_t)2) 
+#define   NUM_BUFF_SBC_RX_TIMEOUT           ((uint16_t)6) 
+     
+#define   NUM_BUFF_SBC_MSG_TX               (SBC_BUFF_SIZE)      
+#define   NUM_BUFF_SBC_MSG_RX               (SBC_BUFF_SIZE)      
+
+#define   GSY_ARRAY_SIZE                    (uint8_t)(64)       // dimensione buffer di ricezione e di trasmissione gsy
+
+#define   GSY_STX                           (uint8_t)(0x02)     // inizio pacchetto: primo byte del pacchetto secondo protocolllo
+#define   GSY_ETX                           (uint8_t)(0x03)     // fine pacchetto: ultimo byte del pacchetto secondo protocolllo
+#define   GSY_ACK                           (uint8_t)(0x00)     // comando impostato correttamente
+
+#define   NUM_BUFF_SCU_TO_SBC_TX            ((uint16_t)2) 
+     
+#define   UART_RX_TIMEOUT                   ((uint16_t)7)      /* ms to wait after an IDLE is detected, to declare the TIMEOUT condition */
+
+#define   GSY_BROADCAST_ADDR                ((uint8_t)0xFF)
+#define   GSY_BROADCAST_PWM                 ((uint8_t)60)
+
+/* ----------- Transmission definition to SBC   -------------*/
+typedef enum
+{
+  UART_RX_OK = 0,
+  UART_RX_KO,
+  UART_RX_IDLE,
+  UART_RX_START_DWLD,
+  UART_RX_START_BRD_DWLD,
+  UART_RX_DWLD,
+  UART_RX_INIT,
+  SLAVE_IN_DWNL,
+  OTHER_SLAVE_IN_DWNL,
+  SLAVE_END_DWNL,
+  DUMMY_EVENT
+}messageEv_e;
+
+/* define to manage the transmission to SBC in the reserved task */
+typedef enum
+{
+  SCU_NEW_TX_MSG = 0,
+  SCU_END_TX_MSG,
+  SCU_DUMMY_EVENT
+}msgScuToSbcTx_e;
+
+typedef enum
+{
+  SCU_TO_SBC_TX_STATE_IDLE = 0,
+  SCU_TO_SBC_TX_STATE_TX_ON,
+  SCU_TO_SBC_TX_STATE_TX_PENDING
+}scuToSbcTxState_e;
+
+typedef enum
+{
+  UART_RX_STATE_IDLE = 0,
+  UART_RX_STATE_ONGOING,
+}UartRxState_e;
+
+typedef __packed struct
+{
+  uint8_t*            pNextData;
+  uint16_t            nextLen;
+  scuToSbcTxState_e   state;
+} scuToSbcTx_st;
+
+/* ***************************************      */
+
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint8_t     payload[NUM_BUFF_SBC_MSG_TX];
+} headerSBC_t;
+
+typedef __packed union
+{
+  headerSBC_t           nodeReadInputReg;
+} messageSbcTx_u;
+
+
+typedef __packed struct
+{
+  uint8_t             startFlag;
+  messageSbcTx_u      messageTx;
+  uint16_t            crc;
+} frameSbcTx_st;
+
+/* ----------- Receive  definition from  SBC   -------------*/
+typedef __packed struct
+{
+  uint8_t     startFrame;
+  uint8_t     address;
+  uint8_t     len;
+  uint8_t     payload[NUM_BUFF_SBC_MSG_RX];
+} reqSbcUser_st;
+
+
+typedef __packed union
+{
+  reqSbcUser_st         reqSbcUser;
+  uint8_t               msgComplete[NUM_BUFF_SBC_MSG_RX];
+} messageSbcRx_u;
+
+
+typedef __packed struct
+{
+  uint16_t            totalLen;
+  messageEv_e         messageEv;
+  messageSbcRx_u      messageRx;
+} frameSbcRx_st;
+
+typedef __packed struct
+{
+  uint16_t            totalLen;
+  messageEv_e         messageEv;
+}headerFrameSbcRx_st;
+
+typedef __packed struct
+{
+  uint16_t            numPacket;
+  uint8_t             dataFw[PACKET_GSY_FW_LEN];
+  uint32_t            codeCheksum;
+}frameFwCode_st;
+
+typedef __packed struct
+{
+  uint16_t            totalLen;
+  uint8_t*            pDataToSend;
+  msgScuToSbcTx_e     msgEv;
+} frameScuToSbcTx_st;
+
+/****************** FUNCTIONS IMPLEMENTATION **************************************************************************/
+uint8_t gsy_connected_get(void);
+void    gsy_connected_set(uint8_t status);
+void gsy_quick_polling_update(uint8_t bit, uint8_t set);
+uint8_t gsy_quick_polling_get(void);
+uint16_t gsy_current_get(void);
+uint8_t gsy_evs_mode_get(void);
+void gsy_enable_set (void);
+
+void            sbcGestTask                   (void * pvParameters);
+void            sbcUartRxTimeoutTask          (void * pvParameters);
+xQueueHandle    getSbcAnswerQueueHandle       (void);
+xQueueHandle    getSbcUartRxTimeoutQueueHandle(void);
+osSemaphoreId   getSbcUartInitSemaphoreHandle (void);
+void            deInitSBCUsart                (void);
+frameSbcRx_st*  pMsgFrameSbcRx                (void);
+void            sendToSbcOnUart               (uint16_t data);
+void            sendToSbcOnRS485              (uint16_t data);
+void            deInitRS485Usart              (void);
+void            startSbcUart                  (void);
+card_auth_en    gsy_auth_neg_type_get         (void);
+xQueueHandle    getScuToSbcTxQueueHandle      (void);
+void            scuTxToSbcTask                (void * pvParameters);
+
+// --------------------------------------------------------------------------------------------------------------------------- //
+#endif // _SBCGSY_H
+
+/*************** END OF FILE ******************************************************************************************/
+

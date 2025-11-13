@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<!-- saved from url=(0022)http://192.168.30.126/ -->
+<link rel="icon" type="image/png" href="graphics/logoSCAME.png">
+<html lang="it">
+   <head>
+      <meta http-equiv="Content-Type" content="text/html; charset=UTF-8">
+      <title>SCU HW Configuration</title>
+      <link rel="stylesheet" href="./style.css">
+    <script language="JavaScript">
+      function myFunction(x) {
+
+        var form = document.getElementById("Lingue"),
+            inputs = form.getElementsByTagName("input"),
+            formGl = document.getElementById("GruppoLingue"),
+            gLingue = formGl.getElementsByTagName("input"),
+            formGsk = document.getElementById("GruppoSocket"),
+            gSocket = formGsk.getElementsByTagName("input"),
+            abPM_vis = document.getElementById("pmVisId"),
+            abPM_abi = document.getElementById("aPM_0"),
+            formPMAX = document.getElementById("PMAX"),
+            formIMIN = document.getElementById("Imin"),
+            formHPWR = document.getElementById("Hpower"),
+            formDSET = document.getElementById("Dset"),
+            formDMAX = document.getElementById("Dmax"),
+            formUnb = document.getElementById("Unb"),
+            formEmx = document.getElementById("Emx"),
+            formSin = document.getElementById("Sin"),
+            formAbRicF = document.getElementById("RicFasce"),
+            formAbCT = document.getElementById("abilCinT"),
+            abCT = formAbCT.getElementsByTagName("input"),
+            formDMR = document.getElementById("durMaxRic");
+            formENRG = document.getElementById("enrgMax");
+            formGMT = document.getElementById("OffGMT"),
+            formMode = document.getElementById("ModeFunc"),
+            inputsMode = formMode.getElementsByTagName("input");
+            formMode = document.getElementById("LcdTipo"),
+            inputsLcd = formMode.getElementsByTagName("input"),
+            formWiFi = document.getElementById("WiFi"),
+            formSinErr = document.getElementById("sinErr"),
+            inputsWiFi = formWiFi.getElementsByTagName("input");
+            formChId = document.getElementById("chId");
+        
+        var lingua = 0x00000000;
+        var grLingue = 0x00000000;
+        var numLingue = 0;
+        var abPMCode = abCTCode = unBal = stEmx = ricF = dMaxRic = gmt = dstCk = det = pmodCk = modeOper = modeLcd = modeWiFi = modeDiRi = pmVsb = ctVsb = enrgLim =  0;
+        var pWm = 3000;
+        var IminA = 6;
+        var hPwr = 1;
+        var dSet = 500;
+        var dMax = 40;
+        var d1 = 0;
+        var dCh = 1;
+
+        for (var i = 0, max = inputs.length, mask = 1; i < max; i += 1, mask = mask << 1) {
+           // Take only those inputs which are checkbox
+           if (inputs[i].type === "radio" && inputs[i].checked) {
+              lingua |= mask;
+              if (!gLingue[i].checked)
+              {
+                alert(`Default languages must be in group languages!`); 
+                return ;
+              }
+           }
+        }
+        for (var i = 0, max = gLingue.length, mask = 1; i < max; i += 1, mask = mask << 1) {
+           // Take only those inputs which are checkbox
+           if (gLingue[i].type === "checkbox" && gLingue[i].checked) {
+              grLingue |= mask;
+              numLingue++;
+           }
+        }
+        if(numLingue > 9)
+        {
+          alert(`Select 9 languages max`); 
+        }
+        else
+        {
+          if (abPM_vis.type === "checkbox") {
+            if (abPM_vis.checked)
+            {
+               pmVsb = 2;
+               if (abPM_abi.checked) abPMCode = 1;
+            }
+            abPMCode += pmVsb;
+            pWm = formPMAX.value * 1000;
+            IminA = formIMIN.value * 10;
+            hPwr = formHPWR.value;
+            dSet = formDSET.value;
+            dMax = formDMAX.value;
+            dCh = formChId.value;
+            if (formUnb.type === "checkbox" && formUnb.checked)
+            {
+              unBal = 1;
+            }
+            if (formEmx.type === "checkbox" && formEmx.checked)
+            {
+              stEmx = 2;
+            }
+            if (formSin.type === "checkbox" && formSin.checked && (abPMCode != 0))
+            {
+              stEmx += 4;
+            }
+            if (formSinErr.value == "0") stEmx += 128;
+
+            if (formAbRicF.type === "checkbox" && formAbRicF.checked)
+            {
+              ricF = 1;
+            }
+            if (document.getElementById("ModePM_1").checked == true) abPMCode |= 32;
+            if (document.getElementById("ModePM_2").checked == true) abPMCode |= 16;
+            if (document.getElementById("pmRemId").checked == true) abPMCode |= 64;
+          }
+          if (formAbCT[0].type === "checkbox" && formAbCT[0].checked) {
+            ctVsb = 2;
+            if (formAbCT[1].type === "checkbox" && formAbCT[1].checked)
+            {
+               abCTCode = 1;
+            }
+          }
+          abCTCode += ctVsb;
+          if (formDMR.value != "")dMaxRic = formDMR.value;
+          if (formENRG.value != "")enrgLim = formENRG.value;
+          
+          gmt = formGMT.value;
+          if (DST.type === "checkbox" && DST.checked)
+          {
+            dstCk = 1;
+          }
+          if (DeT.type === "checkbox" && DeT.checked)
+          {
+            d1 = (Date.parse(new Date) / 1000);
+          }
+
+          for (var i = 0, max = inputsMode.length; i < max; i += 1) {
+             // Take only those inputs which are checkbox
+             if (inputsMode[i].type === "radio" && inputsMode[i].checked) {
+                break;
+             }
+          }
+          modeOper = i;
+
+          for (var i = 0, max = inputsLcd.length; i < max; i += 1) {
+             // Take only those inputs which are checkbox
+             if (inputsLcd[i].type === "radio" && inputsLcd[i].checked) {
+                break;
+             }
+          }
+          modeLcd = i;
+
+          if (WiFiSt.type === "checkbox" && WiFiSt.checked)
+          {
+            modeWiFi = 4;
+          }
+          if (wfSBC.type === "checkbox" && wfSBC.checked)
+          {
+            modeWiFi |= 16;
+          }
+
+          var name = "Lingua<" + lingua + ">gLingue<" + grLingue + ">abPM<" + abPMCode + ">parPMAX<" + pWm + ">parIMIN<" + IminA + ">parHPWR<" + hPwr
+                     + ">parDSET<" + dSet + ">parDMAX<" + dMax + ">parUNB<" + unBal + ">parEMX<" + stEmx + ">parRFAS<" + ricF + ">abCT<" + abCTCode 
+                     + ">parMAXTRIC<" + dMaxRic + ">parGMT<" + gmt + ">parDST<" + dstCk + ">parDeT<" + d1 + ">parPmodeOp<" + modeOper + ">parTypeLcd<" + modeLcd 
+                     + ">parWiFi<" + modeWiFi + ">parDiRi<" + modeDiRi + ">parENRG<" + enrgLim + ">wDef<" + x + ">wChId<" + dCh + ">";
+          let formData = new FormData(document.forms.aPM);
+          formData.append("middle", name);
+          let xhr = new XMLHttpRequest();
+          xhr.open("POST", "gsySpFunc");
+          xhr.send(formData);
+          xhr.onload = function() {
+            if (xhr.status != 200) { 
+              alert(`Error`); // ad esempio 404: Not Found
+            } else { 
+              alert(`Configurazione eseguita!`); 
+            }
+          };
+        }
+
+      }
+      function sinAlm ()
+      {
+        if (Sin.type === "checkbox" && Sin.checked && aPM_0.checked)
+        {
+          Emx.checked = true; 
+        }
+        else
+        {
+          if ((aPM_0.checked == false) && (Sin.checked == false)) Emx.checked = false; 
+          Sin.checked = false;
+        }
+      }
+      function ckPm()
+      {
+        if (pmVisId.type === "checkbox" && pmVisId.checked)
+        {
+          aPM_0.disabled = false; 
+        }
+      }
+      function ckCiT()
+      {
+        if (ctVisId.type === "checkbox" && ctVisId.checked)
+        {
+          aCIT_0.disabled = false; 
+        }
+        else
+        {
+          aCIT_0.checked = false; 
+          aCIT_0.disabled = true; 
+        }
+      }
+      function ckWiFISbc()
+      {
+        if (wfSBC.type === "checkbox" && wfSBC.checked)
+        {
+          WiFiSt.checked = true;
+          WiFiSt.disabled = true; 
+        }
+        else
+        {
+          if (wfSBC.type === "checkbox" && wfSBC.checked == false)
+          {
+            WiFiSt.disabled = false; 
+          }
+        }
+      }
+      function ckPres (sId)
+      {
+        var idS = "l"+sId;
+
+       if (document.getElementById(idS).checked == true) document.getElementById(idS).checked = false;
+      }
+    </script>
+   </head>
+   <body>
+       <div>
+          <div class="hwconf">
+             <h2>SCU Special Functions </h2>
+              <FORM id="noSave" name="xButton" action ="mainPage.html" METHOD="get">
+                <input type="submit" value="X"><br>
+              </FORM>
+             <div class="panel_container">
+                <div class="panel">
+                   <h1>Lingua di default</h1>
+                   <ul>
+                     <FORM id="Lingue" name="presa" METHOD="post">
+                      <table>
+                      <tr>
+                        <td><li><input type="radio" name="radio_Socket" id="Socket_0" value="00" style="margin-right: 5px;" check50 ><span style="vertical-align: super;"><h2>EN</h2></span></li></td>
+                        <td><li><input type="radio" name="radio_Socket" id="Socket_1" value="D2" style="margin-right: 5px;" check51 ><span style="vertical-align: super;"><h2>IT</h2></span></li></td>
+                        <td><li><input type="radio" name="radio_Socket" id="Socket_2" value="D8" style="margin-right: 5px;" check52 ><span style="vertical-align: super;"><h2>FR</h2></span></li></td>
+                      </tr>
+                      <tr>
+                        <td><li><input type="radio" name="radio_Socket" id="Socket_3" value="D4" style="margin-right: 5px;" check53 ><span style="vertical-align: super;"><h2>D</h2></span></li></td>
+                        <td><li><input type="radio" name="radio_Socket" id="Socket_4" value="D5" style="margin-right: 5px;" check54 ><span style="vertical-align: super;"><h2>ES</h2></span></li></td>
+                        <td><li><input type="radio" name="radio_Socket" id="Socket_5" value="C0" style="margin-right: 5px;" check55 ><span style="vertical-align: super;"><h2>P</h2></span></li></td>
+                      </tr>
+                      <tr>
+                        <td><li><input type="radio" name="radio_Socket" id="Socket_6" value="94" style="margin-right: 5px;" check56 ><span style="vertical-align: super;"><h2>RO</h2></span></li></td>
+                        <td><li><input type="radio" name="radio_Socket" id="Socket_7" value="80" style="margin-right: 5px;" check57 ><span style="vertical-align: super;"><h2>PL</h2></span></li></td>
+                        <td><li><input type="radio" name="radio_Socket" id="Socket_8" value="98" style="margin-right: 5px;" check58 ><span style="vertical-align: super;"><h2>SE</h2></span></li></td>
+                      </tr>
+                    </table>
+                     </FORM>
+                   </ul>
+                   <div class="panel" style="width: 100%;">
+                      <h1>Gruppo lingue (Consigliato Max 6)</h1>
+                      <ul>
+                        <FORM id="GruppoLingue" name="GrLingue" METHOD="post">
+                          <table>
+                            <tr>
+                             <td><input type="checkbox" id="len_0" value="undefined" style="margin-right: 5px;" check60 ><span style="vertical-align: super;"><h2>EN</h2></span></td>
+                             <td><input type="checkbox" id="len_1" value="undefined" style="margin-right: 5px;" check61 ><span style="vertical-align: super;"><h2>IT</h2></span></td>
+                             <td> <input type="checkbox" id="len_2" value="undefined" style="margin-right: 5px;" check62 ><span style="vertical-align: super;"><h2>FR</h2></span></td>
+                            </tr>
+                            <tr>
+                             <td><input type="checkbox" id="len_3" value="undefined" style="margin-right: 5px;" check63 ><span style="vertical-align: super;"><h2>D</h2></span></td>
+                             <td><input type="checkbox" id="len_4" value="undefined" style="margin-right: 5px;" check64 ><span style="vertical-align: super;"><h2>ES</h2></span></td>
+                             <td><input type="checkbox" id="len_5" value="undefined" style="margin-right: 5px;" check65 ><span style="vertical-align: super;"><h2>P</h2></span></td>
+                            </tr>
+                            <tr>
+                             <td><input type="checkbox" id="len_6" value="undefined" style="margin-right: 5px;" check66 ><span style="vertical-align: super;"><h2>RO</h2></span></td>
+                             <td><input type="checkbox" id="len_7" value="undefined" style="margin-right: 5px;" check67 ><span style="vertical-align: super;"><h2>PL</h2></span></td>
+                             <td><input type="checkbox" id="len_8" value="undefined" style="margin-right: 5px;" check68 ><span style="vertical-align: super;"><h2>SE</h2></span></td>
+                            </tr>
+                          </table>
+                       </FORM>
+                      </ul>
+                   </div>
+                   <div class="panel" style="width: 100%;">
+                      <h1>LCD Type</h1>
+                      <ul>
+                       <FORM id="LcdTipo" name="lcdPan" METHOD="post">
+                        <table>
+                          <td><li><input type="radio" name="lcdType" id="lcdNone" value="00" style="margin-right: 5px;" check87 ><span style="vertical-align: super;"><h2>None</h2></span></li></td>
+                          <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> 
+                          <td><li><input type="radio" name="lcdType" id="lcd2x20" value="00" style="margin-right: 5px;" check88 ><span style="vertical-align: super;"><h2>LCD 2X20</h2></span></li></td>
+                        </table>
+                       </FORM>
+                      </ul>
+                   </div>
+                   <div class="panel" style="width: 100%; display:chk30">
+                      <h1>Sockets Detected (Device ID to RS485 address)</h1>
+                      <ul>
+                        <FORM id="GruppoSocket" name="GrSocket" METHOD="post">
+                          <table>
+                            <tr>
+                             <td><input id="ad01" type="text" disabl01 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>01</h2></label></td>
+                             <td><input id="ad02" type="text" disabl02 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>02</h2></label></td>
+                             <td><input id="ad03" type="text" disabl03 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>03</h2></label></td>
+                             <td><input id="ad04" type="text" disabl04 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>04</h2></label></td>
+                             <td><input id="ad05" type="text" disabl05 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>05</h2></label></td>
+                             <td><input id="ad06" type="text" disabl06 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>06</h2></label></td>
+                             <td><input id="ad07" type="text" disabl07 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>07</h2></label></td>
+                             <td><input id="ad08" type="text" disabl08 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>08</h2></label></td>
+                            </tr>
+                            <tr></tr>
+                            <tr>
+                             <td><input id="ad09" type="text" disabl09 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>09</h2></label></td>
+                             <td><input id="ad10" type="text" disabl10 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>10</h2></label></td>
+                             <td><input id="ad11" type="text" disabl11 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>11</h2></label></td>
+                             <td><input id="ad12" type="text" disabl12 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>12</h2></label></td>
+                             <td><input id="ad13" type="text" disabl13 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>13</h2></label></td>
+                             <td><input id="ad14" type="text" disabl14 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>14</h2></label></td>
+                             <td><input id="ad15" type="text" disabl15 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>15</h2></label></td>
+                             <td><input id="ad16" type="text" disabl16 value=" "    style="margin-right: 2px; width: 30px; text-align: center;"><label><h2>16</h2></label></td>
+                            </tr>
+                            <tr></tr>
+                            <tr>
+
+                            </tr>
+                            <tr></tr>
+                            <tr>
+
+                            </tr>
+                          </table>
+                       </FORM>
+                      </ul>
+                   </div>
+                </div>
+                <div class="panel">
+                   <div class="panel" style="width: 100%;">
+                      <h1 style="color:green;">POWER MANAGEMENT</h1>
+                      <ul>
+                          <FORM id="abilPM" name="aPM" METHOD="post">
+                           <table style="width:100%">
+                             <tr>
+                                 <td><li><input type="checkbox" name="pmVis" onchange="ckPm()" id="pmVisId" style="margin-right: 5px;" check91 ><span style="vertical-align: super;">Visibile</span></li></td>
+                                 <td><li><input type="checkbox" name="checks_PM" disab#ed id="aPM_0" value="00" style="margin-right: 5px;" check70 ><span style="vertical-align: super;">Abilitazione</span></li></td>
+                                 <td><li><input type="radio" name="radio_ModePM" id="ModePM_0"  check93 ><span>Full</span></li></td>
+                                 <td><li><input type="checkbox" disabled name="pmRem" id="pmRemId" style="margin-right: 5px;" check40 ><span style="vertical-align: super;">Remote</span></li></td>
+                            </tr>
+                             <tr>
+                                 <td></td>
+                                 <td></td>
+                                 <td><li><input type="radio" name="radio_ModePM" id="ModePM_2" check95 ><span>Eco Smart</span></li></td>
+                            </tr>
+                             <tr>
+                                 <td></td>
+                                 <td><input id="RicFasce" type="checkbox" value="undefined" style="margin-right: 5px;" check72 ><span style="vertical-align: super;">Ricarica a fasce</span></td>
+                                 <td><li><input type="radio" name="radio_ModePM" id="ModePM_1" check94 ><span>Eco Plus</span></li></td>
+                            </tr>
+                             <tr>
+                                <td></td>
+                                <td><li><input id="sinErr" type="text" value="@ee" style="margin-right: 5px; width: 30px;"><label for="sinErr">ERRORI SINAPSI</label></li></td>
+                                <td><li><input type="checkbox" name="ckSin" id="Sin" check75 ><span><h2>SINAPSI</h2></span></li></td>
+                            </tr>
+                            <tr>
+                                <td></td>
+                                <td></td>
+                                <td><li><input type="checkbox" name="emxSin" id="Emx" value="00" check73 ><span><h2>EMEX</h2></span></li></td>
+                            </tr>
+                           </table>
+                          </FORM>
+                     </ul>
+                   </div>
+
+                   <div class="panel" style="width: 100%;">
+                      <h1 style="color:green;">Parameters</h1>
+                      <ul>
+                        <li><input id="PMAX" type="number" min="3" max="99.9"   value="@x"     step="0.1" style="margin-right: 5px; width: 60px;  text-align: left;"><label for="PMAX"> <h2>PMAX [KW]</h2></label></li>
+                        <br>
+                        <li><input id="Imin" type="number" min="6" max="25.5"   value="@y"     step="0.1" style="margin-right: 5px; width: 60px;  text-align: left;"><label for="Imin"> <h2>IMIN [A]</h2></label></li>
+                        <br>
+                        <li><input id="Hpower" type="number" min="1" max="10"   value="@z"     step="1" style="margin-right: 5px; width: 60px;  text-align: left;"><label for="Hpower"> <h2>HPOWER [%]</h2></label></li>
+                        <br>
+                        <li><input id="Dset" type="number" min="0" max="2000"   value="@r"     step="100" style="margin-right: 5px; width: 60px;  text-align: left;"><label for="Dset"> <h2>DSET [W]</h2></label></li>
+                        <br>
+                        <li><input id="Dmax" type="number" min="0" max="100"    value="@w"     step="5" style="margin-right: 5px; width: 60px;  text-align: left;"><label for="Dmax"> <h2>DMAX [%]</h2></label></li>
+                        <br>
+                        <li><input id="Unb" type="checkbox" value="undefined" style="margin-right: 5px;" check71 ><span style="vertical-align: super;"><h2>UNBALANCE</h2></span></li>
+                     </ul>
+                   </div>
+                </div>
+                <div class="panel">
+                   <h1 style="color:blue;">CHARGE BY TIME / ENRG</h1>
+                      <ul>
+                        <table>
+                        <FORM id="abilCinT" name="aCiT" METHOD="post">
+                          <tr>
+                            <td><li><input type="checkbox" name="ctVis" onchange="ckCiT()" id="ctVisId" style="margin-right: 5px;" check92 ><span style="vertical-align: super;">Visibile</span></li></td>
+                            <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> 
+                            <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> 
+                            <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> 
+                            <td><li><input type="checkbox" name="checks_ACIT" disa#led id="aCIT_0" value="00" style="margin-right: 5px;" check80 ><span style="vertical-align: super;">Abilitazione</span></li></td>
+                          </tr>
+                        </FORM>
+                        </table>
+                     </ul>
+                   <div class="panel" style="width: 100%;">
+                      <h1 style="color:blue;">Parameters</h1>
+                      <ul>
+                        <table>
+                          <tr>
+                            <td><li><input id="durMaxRic" type="number" min="0" max="360" value="@t " step="30" style="margin-right: 5px; width: 60px;  text-align: left;"><label for="durMaxRic"> <h2>Durata Massima [min]</h2></label></li></td>
+                            <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> 
+                            <td><li><input id="enrgMax" type="number" min="0" max="100" value="@v " step="5" style="margin-right: 5px; width: 60px;  text-align: left;"><label for="enrgMax"> <h2>Energia Max [KWh]</h2></label></li></td>
+                          </tr>
+                        </table>
+                      </ul>
+                   </div>
+                   <div class="panel" style="width: 100%;">
+                      <h1>Date&Time, Time zone and Daylight saving</h1>
+                      <ul>
+                        <table>
+                          <td><li><input id="OffGMT" type="number" min="-12" max="12" value="@g"     step="1" style="margin-right: 5px; width: 40px;  text-align: left;"><label for="OffGMT"> <h2>Offset to GMT [h]</h2></label></li></td>
+                          <td> </td> <td> </td> <td> </td> 
+                          <td><li><input type="checkbox" name="n_DST" id="DST" value="00" style="margin-right: 5px; text-align: left;" check81 ><h2>DayLight Saving Time</h2></span></li></td>
+                          <td> </td>
+                          <td><li><input type="checkbox" name="D_T" id="DeT" value="00" style="margin-right: 5px; text-align: left;" check82 ><h2>Set Data Time</h2></span></li></td>
+                        </table>
+                      </ul>
+                   </div>
+                   <div class="panel" style="width: 100%;">
+                      <h1>Current data and time</h1>
+                      <ul>
+                        <table>
+                          <td><li><h2>Www Mmm dd hh:mm:ss yyyy</h2></li></td>
+                          <td><li><input id="D_" type="text" value="Wed Feb 13 15:46:11 2013" style="margin-right: 5px; width: 170px;"></li></td>
+                        </table>
+                      </ul>
+                   </div>
+
+                   <div class="panel" style="width: 100%;">
+                      <h1>Operative Mode</h1>
+                      <ul>
+                       <FORM id="ModeFunc" name="Mdf" METHOD="post">
+                        <table>
+                          <td><li><input type="radio" name="opFunc" id="opFree" value="00" style="margin-right: 5px;" check83 ><span style="vertical-align: super;"><h2>Free</h2></span></li></td>
+                          <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> 
+                          <td><li><input type="radio" name="opFunc" id="opPers" value="00" style="margin-right: 5px;" check84 ><span style="vertical-align: super;"><h2>Personal</h2></span></li></td>
+                          <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> <td> </td> 
+                          <td><li><input type="radio" name="opFunc" id="opNet" value="00" style="margin-right: 5px;" check85 ><span style="vertical-align: super;"><h2>Net</h2></span></li></td>
+                        </table>
+                       </FORM>
+                      </ul>
+                   </div>
+                   <div class="panel" style="width: 100%;">
+                      <h1>WIFI</h1>
+                      <ul>
+                       <FORM id="WiFi" name="WiFi_Ena" METHOD="post">
+                        <table>
+                          <td><li><label> <h2>Fw Ver.</h2></label></li></td>
+                          <td><li><input id="E_V" type="text" value="@WiFiVe " style="margin-right: 10px; width: 50px;"></li></td>
+                          <td><li><input id="chId" type="number" min="1" max="13"    value="@c"     step="1" style="margin-right: 5px; width: 40px;  text-align: vertical;"><label for="chId"><h2>ch WiFi</h2></label></li></td>
+                          <td><li><input type="checkbox" name="WiFiType" onchange="ckWiFISbc()" id="WiFiSt" value="00" style="margin-right: 5px;" check89 ><span style="vertical-align: super;"><h2>WiFi</h2></span></li></td>
+                          <td> </td>
+                          <td><li><input type="checkbox" name="wfSBCType" onchange="ckWiFISbc()" id="wfSBC" value="00" style="margin-right: 5px;" check96 ><span style="vertical-align: super;"><h2>WiFi&SBC</h2></span></li></td>
+                          <td> </td>
+                          <td><li><input id="SLev" type="text" value="@db " style="width: 30px;"></li></td>
+                          <td><li><label> <h2>db</h2></label></li></td>
+                        </table>
+                       </FORM>
+                      </ul>
+                   </div>
+                </div>
+             </div>
+             <br>
+             <form id="uploadReq" action ="/hwConf.html" method="post">
+               <input type="button" value="Write" onclick="myFunction(0)">
+               <input type="button" value="Make As Default" style="margin-right: 20px; background-color:red" onclick="myFunction(1)">
+             </FORM>
+            <form id="wifiUp" action ="./upgWifi.html" method="post" >
+               <input style="margin-right: 180px; display:@tru" type="submit" name="WiFiAgg" value="WiFi Fw Update" >
+            </FORM>
+         </div>
+       </div>
+    </form>
+  </body>
+</html>

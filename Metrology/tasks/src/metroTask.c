@@ -1,0 +1,2952 @@
+/**
+  ******************************************************************************
+  * @file    metroTask.c
+  * @author  AMG/IPC Application Team
+  * @brief   This source code includes Metrology legal task related functions
+  * @brief
+  @verbatim
+  @endverbatim
+
+  ******************************************************************************
+  * @attention
+  *
+  * <h2><center>&copy; COPYRIGHT(c) 2018 STMicroelectronics</center></h2>
+  *
+  * Redistribution and use in source and binary forms, with or without modification,
+  * are permitted provided that the following conditions are met:
+  *   1. Redistributions of source code must retain the above copyright notice,
+  *      this list of conditions and the following disclaimer.
+  *   2. Redistributions in binary form must reproduce the above copyright notice,
+  *      this list of conditions and the following disclaimer in the documentation
+  *      and/or other materials provided with the distribution.
+  *   3. Neither the name of STMicroelectronics nor the names of its contributors
+  *      may be used to endorse or promote products derived from this software
+  *      without specific prior written permission.
+  *
+  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+  * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+  * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  *
+  ******************************************************************************
+  */
+
+/*******************************************************************************
+* INCLUDE FILES:
+*******************************************************************************/
+#include "metroTask.h"
+#include "metrology.h"
+#include "metrology_hal.h"
+#include "handler_metrology.h"
+#include "Em_Task.h"    
+#include "handler_nvram.h"
+#include "wrapper.h"
+
+#include "mnsh_tx.h"
+#include "string.h"
+
+#include <stdint.h>
+#include <stdbool.h>
+#include <math.h>
+#include "st_device.h"
+
+
+/** @addtogroup LEGAL
+  * @{
+  */
+
+/*******************************************************************************
+* CONSTANTS & MACROS:
+*******************************************************************************/
+
+#define FACTOR_POWER_ON_ENERGY      (858)   // (3600 * 16000000 / 0x4000000) = 858.3...
+
+
+
+/*******************************************************************************
+* TYPES:
+*******************************************************************************/
+
+/*******************************************************************************
+* GLOBAL VARIABLES:
+*******************************************************************************/
+metroData_t metroData;
+METRO_Device_Config_t Tab_METRO_Global_Devices_Config[NB_MAX_DEVICE];
+
+extern METRO_Device_Config_t Tab_METRO_internal_Devices_Config[NB_MAX_DEVICE];
+extern IWDG_HandleTypeDef    hiwdg;
+extern emTaskState_st        emTaskState;
+extern infoStation_t         infoStation;
+
+
+/*******************************************************************************
+* LOCAL FUNCTION PROTOTYPES:
+*******************************************************************************/
+static void METRO_UnlockMnsh(void);
+
+static void METRO_HandleMetroDevice(uint32_t *pData);
+static void METRO_HandleMetroSetup(uint32_t *pData);
+static void METRO_HandleMetroMetro(uint32_t *pData);
+static void METRO_HandleMetroCal(uint32_t *pData);
+static void METRO_HandleMetroIRQ(uint32_t *pData);
+static void METRO_HandleMetroSagSwell(uint32_t *pData);
+
+/*******************************************************************************
+* LOCAL VARIABLES:
+*******************************************************************************/
+char text[100];
+LED_t LED;
+/*******************************************************************************
+*
+*                       IMPLEMENTATION: Public functions
+*
+*******************************************************************************/
+
+
+/*******************************************************************************
+*
+*                       IMPLEMENTATION: Private functions
+*
+*******************************************************************************/
+
+/**
+* @brief                __REV32
+* This function swap the HIGH/LOW 16bit part inside a 32bit variable
+*       | HIGH16 | LOW16 | swapped to --> | LOW16 | HIGH16 |
+* @param  uint32_t value to swap
+* @retval uint32_t value swapped
+*/
+
+uint32_t __REV32 (uint32_t Value)
+{
+  
+  uint32_t SwappedVal;
+  
+  SwappedVal = (Value & 0xFFFF0000) >> 16;
+  SwappedVal |= (Value & 0x0000FFFF) << 16;   
+    
+  return SwappedVal;
+}
+
+/**
+  * @brief  This function implements the Metrology init
+  * @param  None
+  * @retval None
+  */
+void METRO_Init()
+{
+
+  MET_Conf();
+  
+  /* initialization device type and number of channel */
+  Metro_Setup(metroData.nvm->config[0],metroData.nvm->config[1]);
+  
+  /* initialization device communication port */ 
+  Metro_com_port_device();
+  
+  /* Enable for STPM device */
+  Metro_power_up_device();
+    
+  /* initialization steps for STPM device */
+  Metro_Init();
+
+#ifndef HW_MP28947 
+  
+  /* In case of PA775, this initialization must be done after the discovery phase */
+  /* Init device info for SCU board */
+  Metro_Init_DeviceInfo();
+  
+#ifdef UART_XFER_STPM3X /* UART MODE */   
+  /* Change UART speed for STPM communication between Host and EXT1*/
+  Metro_UartSpeed(USART_SPEED); 
+#endif
+    
+  /* Reset device status */
+  Metro_Set_DeviceStatus();    
+  
+  MET_RestoreConfigFromNVM();
+
+  /* Initialize the factors for the computation */
+  for(int i=0;i<NB_MAX_CHANNEL;i++)
+  {
+    Metro_Set_Hardware_Factors( (METRO_Channel_t)(CHANNEL_1+i), metroData.nvm->powerFact[EM_CurrSens_type][i], metroData.nvm->powerFact[EM_CurrSens_type][i]/ FACTOR_POWER_ON_ENERGY,metroData.nvm->voltageFact[i],metroData.nvm->currentFact[EM_CurrSens_type][i]);
+  }
+  
+  for (int i=EXT1;i<(NB_MAX_DEVICE);i++)
+  {
+    if(Tab_METRO_internal_Devices_Config[i].device != 0)
+    {
+      /* Set default latch device type inside Metro struct for Ext chips */
+      Metro_Register_Latch_device_Config_type((METRO_NB_Device_t)i, LATCH_SYN_SCS);
+    }
+  }
+  
+#endif
+  
+}
+
+#ifdef HW_MP28947
+
+/**
+  * @brief  This function implements the Metrology init after the discovery phase 
+  * @param  None
+  * @retval None
+  */
+
+void METRO_Init_p2 (void)
+{
+  
+  EM_CurrSens_type_e EM_CurrSens_type;
+
+  /* In case of PA775, this initialization must be done after the discovery phase */
+  /* Init device info for SCU board */
+  Metro_Init_DeviceInfo();
+  
+#ifdef UART_XFER_STPM3X /* UART MODE */   
+  /* Change UART speed for STPM communication between Host and EXT1*/
+  Metro_UartSpeed(USART_SPEED); 
+#endif
+    
+  /* Reset device status */
+  Metro_Set_DeviceStatus();    
+  
+  MET_RestoreConfigFromNVM();
+
+  /* Initialize the factors for the computation */
+  for(int i = 0; i < NB_MAX_CHANNEL; i++)
+  {
+    /* Get Current sensor type */
+    EM_CurrSens_type = EM_Get_TA_Type (i);
+      /* if TA type is NULL, do not proceed */
+    if (EM_CurrSens_type != EM_TA_NULL)
+      Metro_Set_Hardware_Factors( (METRO_Channel_t)(CHANNEL_1+i), metroData.nvm->powerFact[EM_CurrSens_type][i], metroData.nvm->powerFact[EM_CurrSens_type][i]/ FACTOR_POWER_ON_ENERGY,metroData.nvm->voltageFact[i],metroData.nvm->currentFact[EM_CurrSens_type][i]);
+  }
+  
+  for (int i=EXT1;i<(NB_MAX_DEVICE);i++)
+  {
+    if(Tab_METRO_internal_Devices_Config[i].device != 0)
+    {
+      /* Set default latch device type inside Metro struct for Ext chips */
+      Metro_Register_Latch_device_Config_type((METRO_NB_Device_t)i, LATCH_SYN_SCS);
+    }
+  }
+    
+}
+
+#endif
+
+void METRO_Task()
+{
+  uint32_t data[2];
+
+  switch (mnshVars.msg.id)
+  {
+    case X_METRO_FACTOR:
+      {
+        /* Get Payload pointer from Payload[0] */
+        /* *pData      = Channel Id  */
+        /* *(pData+1)  = Power factor for channel  */
+        /* *(pData+2)  = Energy Factor for channel  */
+
+        uint32_t * pData = (uint32_t*)(*mnshVars.msg.payload);
+
+        /* Set power, nrj, voltage , current  factors depending of channel requested */
+        Metro_Set_Hardware_Factors((METRO_Channel_t)*pData,*(pData+1),*(pData+2), *(pData+3),*(pData+4));
+      }
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_RST:
+      {
+        /* Get Payload pointer from Payload[0] */
+        /* (*pData) = 1 : HW_SYN_reset, 2: SW_Reset   */
+        uint32_t * pData = (uint32_t*)(*mnshVars.msg.payload);
+         
+        if ((uint8_t)(*pData)==RESET_SYN_SCS)
+         {
+           Metro_Config_Reset(RESET_SYN_SCS);
+         }
+         else if((uint8_t)(*pData)==RESET_SW)
+         {
+           Metro_Config_Reset(RESET_SW);
+         }
+      }
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_DEVICE:
+      METRO_HandleMetroDevice((uint32_t*)(*mnshVars.msg.payload));
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_METRO:
+      METRO_HandleMetroMetro((uint32_t*)(*mnshVars.msg.payload));
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_CAL:
+      METRO_HandleMetroCal((uint32_t*)(*mnshVars.msg.payload));
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_IRQ:
+      METRO_HandleMetroIRQ((uint32_t*)(*mnshVars.msg.payload));
+      METRO_UnlockMnsh();
+      break;
+     case X_METRO_SAG_SWELL:
+      METRO_HandleMetroSagSwell((uint32_t*)(*mnshVars.msg.payload));
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_INIT:
+      Metro_Init();
+#ifdef UART_XFER_STPM3X /* UART MODE */   
+    /* Change UART speed for STPM communication between Host and EXT1*/
+      Metro_UartSpeed(USART_SPEED); 
+#endif
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_SW_RELEASE:
+      {
+        data[0] = Metro_Get_SW_Rev();
+        MNSH_Printf("Metrology Version :  %08x\n",data[0]);
+      }
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_PING:
+      {
+        if (Metro_Ping_Metro() == 0)
+        {
+           /* Ping is OK, send 0x5A to MNSH print console */
+           data[0] = 0x5A;
+        }
+        else
+        {
+           /* Ping is KO, send 0xFF to MNSH print console */
+           data[0] = 0xFF;
+        }
+
+        MNSH_Printf("Metrology PING :  0x%08x\n",data[0]);
+      }
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_RD_REG:
+      {
+        int i;
+        /* Max Buffer size =  50*U32 MAX ->  GUI or Metrology Application get Config or Status  group not all registers in one read*/
+        uint32_t buffer[70];
+        /* Get Payload pointer from Payload[0] */
+        /* Payload  DATA  : [0] = Device Id, [1] = @ , [2] Size */
+        /* (*pData) = DeviceID, (u8)(*(pData+1)) = Offset @ , (u8)(*(pData+2)) = Nb U32 registers to read */
+        uint32_t * pData = (uint32_t*)(*mnshVars.msg.payload);
+        //strcpy(text, "Metrology REG OFFSET 0x%04x: 0x%08x\n");
+        
+        /* Read the Number of register at Offset address inside the device Requested */
+        if ((*pData < (NB_MAX_DEVICE))&&(Tab_METRO_internal_Devices_Config[*pData].device != 0))
+          Metro_Read_Block_From_Device((METRO_NB_Device_t)(*pData), (uint8_t)(*(pData+1)), (uint8_t)(*(pData+2)), buffer);
+        
+        /* Print inside MNSH  each 32 bit regsiter read from Device  : One line for each register */
+        for (i=0; i< (*(pData+2)); i++)
+        {
+          /* if Device Id is an EXT chip tha address is based on U16 and not on U32 offset */
+          data[0] = (uint8_t)(*(pData+1) + (i<<1));          
+          data[1] = buffer[i];
+
+          MNSH_Printf("Metrology REG OFFSET 0x%04x: 0x%08x\n",data[0],data[1]);       
+        }
+      }
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_WR_REG:
+      {
+        /* Get Payload pointer from Payload[0] */
+        /* Payload  DATA  : [0] = Device Id, [1] = @ , [2] Size  [3 to size] Data to write*/
+        /* (*pData) = DeviceID, (u8)(*(pData+1)) = Offset @ , (u8)(*(pData+2)) = Nb U32 registers to write, (u32)(*(pData+3) pointer of Data to write) */
+        uint32_t * pData = (uint32_t*)(*mnshVars.msg.payload);
+
+        /* Write the Number of register at Offset address inside the device Requested */
+        if ((*pData < (NB_MAX_DEVICE))&&(Tab_METRO_internal_Devices_Config[*pData].device != 0))
+          Metro_Write_Block_to_Device((METRO_NB_Device_t)(*pData), (uint8_t)(*(pData+1)), (uint8_t)(*(pData+2)), pData+3);
+
+        mnshVars.msg.id = (msgId_t)0;
+        mnshVars.lockRXNE = 0;
+
+      }
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_SETUP:
+      METRO_HandleMetroSetup((uint32_t*)(*mnshVars.msg.payload));
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_CLOSE:
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_CONFIG_INIT:
+      MET_RestoreDefaultConfig(mnshVars.msg.payload[0]);
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_CONFIG_REST:
+      MET_RestoreConfigFromNVM();
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_CONFIG_SAVE:
+      MET_SaveConfigToNVM();
+      METRO_UnlockMnsh();
+      break;
+    case X_METRO_PROD_TEST_PARAM:
+      METRO_UnlockMnsh();
+      break;
+    }
+}
+  
+/**
+  * @brief  This function implements the Metrology latch device
+  *         Set the HW latch for next update
+  * @param  None
+  * @retval None
+  */
+void METRO_Latch_Measures()
+{
+  METRO_NB_Device_t i;
+
+  for (i=EXT1;i<(NB_MAX_DEVICE);i++)
+  {
+    if(Tab_METRO_internal_Devices_Config[i].device != 0)
+    {
+      Metro_Set_Latch_device_type(i,LATCH_SYN_SCS);
+    }
+  }
+}
+
+/**
+  * @brief  This function implements the Metrology get DSP data inside device
+  * @param  None
+  * @retval None
+  */
+void METRO_Get_Measures()
+{
+  METRO_NB_Device_t i;
+
+  for (i=EXT1;i<(NB_MAX_DEVICE);i++)
+  {
+    if(Tab_METRO_internal_Devices_Config[i].device != 0)
+    {
+      Metro_Get_Data_device(i);
+    }
+  }
+
+}
+
+/**
+  * @brief  This function unlock minishell after message treatment
+  * @param  None
+  * @retval None
+  */
+
+static void METRO_UnlockMnsh(void)
+{
+  mnshVars.lockRXNE = 0;
+  mnshVars.msg.id = X_MNSH_UNLOCKRX_EVENT;
+}
+
+/**
+  * @brief  This function convert a 32 bit variable to the format for SCU management
+  * @param  uint32_t Value to set
+  * @param  Reg32_u pointer to the register of type unsigned 32
+  * @retval None
+  */
+void METRO_Convert_to_SCU_Format_32 (uint32_t Value, Reg32_t *pReg32)
+{
+  
+/* Prepare the value in the right position, in Algo2 is 3 words lenght (48bits)*/
+/* In the Modbus frame, first you must send the LL word and then the others..  */
+/* So the register must be prepared in order to respect this sequence.         */
+/*            First            Second         Third        Fourth              */  
+/*      |    LL word    |    LH Word    |   HL Word   |   HH Word   |          */  
+/*      |   H   |   L   |    H   |   L  |   H   |  L  |   H   |  L  |          */  
+/*                                                                             */
+/*    Note that HH word is filled with all the bits at 0                       */
+ 
+    pReg32->Reg32_u.Reg32LH_st.Reg16H = swapW (Value & 0x0000FFFF);
+    pReg32->Reg32_u.Reg32LH_st.Reg16L = swapW ((Value & 0xFFFF0000) >> 16); 
+    /* Clear spare register: used to avoid incorrect values read by SCU, since it
+       reads 3 byte instead of 2                                               */
+    pReg32->Spare = 0;
+}
+
+/**
+  * @brief  This function convert a 64 bit variable to the format for SCU management
+  * @param  int64_t Value to set
+  * @param  sReg64_u pointer to the variable of type signed 64
+  * @retval None
+  */
+void METRO_Convert_to_SCU_Format_64 (int64_t Value, sReg64_u *pReg64)
+{
+/* Prepare the value in the right position, in Algo2 is 3 words lenght (48bits)*/
+/* In the Modbus frame, first you must send the LL word and then the others..  */
+/* So the register must be prepared in order to respect this sequence.         */
+/*            First            Second         Third        Fourth              */  
+/*      |    LL word    |    LH Word    |   HL Word   |   HH Word   |          */  
+/*      |   H   |   L   |    H   |   L  |   H   |  L  |   H   |  L  |          */  
+/*                                                                             */
+/*    Note that HH word is filled with all the bits at 0                        */
+
+    pReg64->Reg64LH_st.Reg16HH = 0;
+    pReg64->Reg64LH_st.Reg16HL = swapW (Value & 0xFFFF);
+    pReg64->Reg64LH_st.Reg16LH = swapW ((Value & 0xFFFF0000) >> 16);
+    pReg64->Reg64LH_st.Reg16LL = swapW ((Value & 0xFFFF00000000) >> 32);
+}
+
+/**
+  * @brief  This function set the TA23 type according 
+  *         to TA23 type analog input
+  *         
+  * @param  None
+  * @retval EM_CurrSens_type_e
+  */
+
+EM_CurrSens_type_e EM_Get_TA23_Type (void)
+{  
+   uint16_t ADC_val;
+   
+   /* Get ADC measure from TA23TYPE input */
+   ADC_val = getADCmV (TA23_TYPE_ADC_IN);
+   /* Check which type of TA is mounted for L2 and L3 */
+   if ((ADC_val > TA_TYPE_ITA_SBT002_THRESHOLD_L) &&  (ADC_val < TA_TYPE_ITA_SBT002_THRESHOLD_H))
+      return EM_TA_ITA_SBT002;   /* ITACOIL SBT002 */
+   if ((ADC_val > TA_TYPE_ITA_SBT012_THRESHOLD_L) &&  (ADC_val < TA_TYPE_ITA_SBT012_THRESHOLD_H))
+      return EM_TA_ITA_SBT012;   /* ITACOIL SBT012 */
+   if ((ADC_val > TA_TYPE_HON_HMCT406_THRESHOLD_L) &&  (ADC_val < TA_TYPE_HON_HMCT406_THRESHOLD_H))     
+      return EM_TA_HON_HMCT406; /* HONGFA HMCT406 --> IS EQUIVALENT TO SBT002 */
+   if ((ADC_val > TA_TYPE_SCT_10_1_200TS_THRESHOLD_L) &&  (ADC_val < TA_TYPE_SCT_10_1_200TS_THRESHOLD_H))     
+      return EM_TA_SCT_10_1_200TS; /* SCT 10-1-200TS-A02 delived by SMEUCO  --> IS EQUIVALENT TO SBT002 */
+   
+   return EM_TA_NULL;   /* TA board NULL */
+}    
+
+/**
+  * @brief  This function set the TA type according 
+  *         to the phase passed
+  *         
+  * @param  None
+  * @retval EM_CurrSens_type_e
+  */
+
+EM_CurrSens_type_e EM_Get_TA_Type (uint8_t nPhase)
+{
+  switch (nPhase)
+  {     
+    case METRO_PHASE_1:       /* L1 phase */
+      return EM_CurrSens_T1_type;
+      break;
+    case METRO_PHASE_2:       /* L2 - L3 phase */
+    case METRO_PHASE_3:
+      return EM_CurrSens_T23_type;
+      break;
+    default:      /* Other */
+      return EM_CurrSens_T1_type;
+  }
+}
+
+/**
+  * @brief  This function set the TA type according to the application.
+  *         if EM is internal --> TA type is SBT002
+  *         if EM is external --> TA type is SDL007
+  * @param  None
+  * @retval None
+  */
+void METRO_Set_TA_Type (void)
+{
+
+    /* Internal EM? */
+    if (em_Config.SlaveAddr == EM_INT_ADDR)
+    {
+        /* Get TA type according to TA1TYPE and T23TYPE input */
+        em_Config.Config &= EM_CURRSENS_CONFIG_MASK;
+        /* For now TA1 type is fixed, but it dipends on the level of the TA1TYPE input */
+        EM_CurrSens_T1_type = EM_TA_ITA_SBT002;      
+        /* TA23 type is given by TA23TYPE analog input */
+        EM_CurrSens_T23_type = EM_Get_TA23_Type ();
+    }
+    
+}
+
+/**
+  * @brief  This function updates the Metro measurements values
+  * @param  None
+  * @retval None
+  */
+void METRO_UpdateData(void)
+{
+     
+  double CosPHI;
+  double PHI_Degree, PHI_Radian;
+  int64_t ActPower_s64_L1;
+  int64_t ActPower_s64_L2;
+  int64_t ActPower_s64_L3;
+  int64_t ActPower_s64_TOT;
+  int64_t ReactPower_s64_L1;
+  int64_t ReactPower_s64_L2;
+  int64_t ReactPower_s64_L3;
+  int64_t ReactPower_s64_TOT;
+  int64_t ActiveEnergy_s64_L1;
+  int64_t ActiveEnergy_s64_L2;
+  int64_t ActiveEnergy_s64_L3;
+  int64_t ActiveEnergy_s64_TOT;
+  int64_t ReactiveEnergy_s64_L1;
+  int64_t ReactiveEnergy_s64_L2;
+  int64_t ReactiveEnergy_s64_L3;
+  int64_t ReactiveEnergy_s64_TOT;
+  
+  metroData.powerActive    = 0;
+  metroData.powerReactive  = 0;
+  metroData.powerApparent  = 0;
+
+  for(int i=0;i<metroData.nbPhase;i++)
+  {
+    metroData.rawEnergyExt[METRO_DATA_ACTIVE  ][METRO_PHASE_1+i] = Metro_Read_energy((METRO_Channel_t)(CHANNEL_1+i), E_W_ACTIVE);
+    metroData.rawEnergyExt[METRO_DATA_REACTIVE  ][METRO_PHASE_1+i] = Metro_Read_energy((METRO_Channel_t)(CHANNEL_1+i), E_REACTIVE);
+    metroData.rawEnergyExt[METRO_DATA_APPARENT  ][METRO_PHASE_1+i] = Metro_Read_energy((METRO_Channel_t)(CHANNEL_1+i), E_APPARENT);
+
+    metroData.chanPower[METRO_DATA_ACTIVE  ][METRO_PHASE_1+i] = Metro_Read_Power((METRO_Channel_t)(CHANNEL_1+i), W_ACTIVE);
+    metroData.chanPower[METRO_DATA_REACTIVE][METRO_PHASE_1+i] = Metro_Read_Power((METRO_Channel_t)(CHANNEL_1+i), REACTIVE);
+    metroData.chanPower[METRO_DATA_APPARENT][METRO_PHASE_1+i] = Metro_Read_Power((METRO_Channel_t)(CHANNEL_1+i), APPARENT_RMS);
+    metroData.powerActive    += metroData.chanPower[METRO_DATA_ACTIVE  ][METRO_PHASE_1+i];
+    metroData.powerReactive  += metroData.chanPower[METRO_DATA_REACTIVE][METRO_PHASE_1+i];
+    metroData.powerApparent  += metroData.chanPower[METRO_DATA_APPARENT][METRO_PHASE_1+i];
+  }
+  
+  /*******************************************************************************************************************************/
+  /*                                    Detect Power sign reading DSP live events                                                */
+  /*******************************************************************************************************************************/
+  
+  /* Sign for Active power */
+// REMOVED SINCE board MP28072 v1.1 has TA pinout swapped --> em_Measures.L1_ActivePower_Sign = (PowerSign)Metro_HAL_Read_Live_Event_from_Channel(EXT1, INT_CHANNEL_1, LIVE_EVENT_CURRENT_SIGN_CHANGE_ACTIVE_POWER);
+// REMOVED SINCE board MP28072 v1.1 has TA pinout swapped --> em_Measures.L2_ActivePower_Sign = (PowerSign)Metro_HAL_Read_Live_Event_from_Channel(EXT2, INT_CHANNEL_1, LIVE_EVENT_CURRENT_SIGN_CHANGE_ACTIVE_POWER);
+// REMOVED SINCE board MP28072 v1.1 has TA pinout swapped --> em_Measures.L3_ActivePower_Sign = (PowerSign)Metro_HAL_Read_Live_Event_from_Channel(EXT2, INT_CHANNEL_2, LIVE_EVENT_CURRENT_SIGN_CHANGE_ACTIVE_POWER);  
+// REMOVED SINCE board MP28072 v1.1 has TA pinout swapped --> /* Sign for Reactive power */
+// REMOVED SINCE board MP28072 v1.1 has TA pinout swapped --> em_Measures.L1_ReactivePower_Sign = (PowerSign)Metro_HAL_Read_Live_Event_from_Channel(EXT1, INT_CHANNEL_1, LIVE_EVENT_CURRENT_SIGN_CHANGE_REACTIVE_POWER);
+// REMOVED SINCE board MP28072 v1.1 has TA pinout swapped --> em_Measures.L2_ReactivePower_Sign = (PowerSign)Metro_HAL_Read_Live_Event_from_Channel(EXT2, INT_CHANNEL_1, LIVE_EVENT_CURRENT_SIGN_CHANGE_REACTIVE_POWER);
+// REMOVED SINCE board MP28072 v1.1 has TA pinout swapped --> em_Measures.L3_ReactivePower_Sign = (PowerSign)Metro_HAL_Read_Live_Event_from_Channel(EXT2, INT_CHANNEL_2, LIVE_EVENT_CURRENT_SIGN_CHANGE_REACTIVE_POWER);  
+  
+  /* Fix a POSITIVE sign for active power */
+  em_Measures.L1_ActivePower_Sign = POSITIVE_POWER;
+  em_Measures.L2_ActivePower_Sign = POSITIVE_POWER;
+  em_Measures.L3_ActivePower_Sign = POSITIVE_POWER;
+  /* Fix a POSITIVE sign for reactive power */
+  em_Measures.L1_ReactivePower_Sign = POSITIVE_POWER;
+  em_Measures.L2_ReactivePower_Sign = POSITIVE_POWER;
+  em_Measures.L3_ReactivePower_Sign = POSITIVE_POWER;
+    
+  /*******************************************************************************************************************************/
+  /*                                    Voltage / Current measures                                                               */
+  /*******************************************************************************************************************************/
+  
+  /* Update the Voltage/Current RMS measure to share with SCU board */
+  
+  // Read EXT1 device @ CHANNEL 1 (L1)
+  Metro_Read_RMS_Device(EXT1, INT_CHANNEL_1, (uint32_t *)&metroData.rmsvoltage[METRO_PHASE_1], (uint32_t *)&metroData.rmscurrent[METRO_PHASE_1]);  
+  // Read EXT2 device @ CHANNEL 1 (L2)
+  Metro_Read_RMS_Device(EXT2, INT_CHANNEL_1, (uint32_t *)&metroData.rmsvoltage[METRO_PHASE_2], (uint32_t *)&metroData.rmscurrent[METRO_PHASE_2]);  
+  // Read EXT2 device @ CHANNEL 2 (L3)
+  Metro_Read_RMS_Device(EXT2, INT_CHANNEL_2, (uint32_t *)&metroData.rmsvoltage[METRO_PHASE_3], (uint32_t *)&metroData.rmscurrent[METRO_PHASE_3]); 
+
+  /* Check the current sign looking at the power */
+  /* For L1 */
+  if (em_Measures.L1_ActivePower_Sign == NEGATIVE_POWER)
+    metroData.rmscurrent[METRO_PHASE_1] |= ALGO2_NEGATIVE_S32_MASK;
+  /* For L2 */
+  if (em_Measures.L2_ActivePower_Sign == NEGATIVE_POWER)
+    metroData.rmscurrent[METRO_PHASE_2] |= ALGO2_NEGATIVE_S32_MASK;
+  /* For L3 */
+  if (em_Measures.L3_ActivePower_Sign == NEGATIVE_POWER)
+    metroData.rmscurrent[METRO_PHASE_3] |= ALGO2_NEGATIVE_S32_MASK;
+       
+  /* Update variables for SCU board */
+  /* These registers must follow the format used in SCU, so the HIGH part first and then the LOW part */
+  /* Current for L1 */
+  METRO_Convert_to_SCU_Format_32 (metroData.rmscurrent[METRO_PHASE_1], (Reg32_t *)&emTaskState.emUserReg[INTERNAL_EM][EM_CURRENT_L1]);   
+  /* Current for L2 */
+  METRO_Convert_to_SCU_Format_32 (metroData.rmscurrent[METRO_PHASE_2], (Reg32_t *)&emTaskState.emUserReg[INTERNAL_EM][EM_CURRENT_L2]); 
+  /* Current for L3 */  
+  METRO_Convert_to_SCU_Format_32 (metroData.rmscurrent[METRO_PHASE_3], (Reg32_t *)&emTaskState.emUserReg[INTERNAL_EM][EM_CURRENT_L3]); 
+  /* Update also current value read for monophase (L1) */
+  emTaskState.emUserReg[INTERNAL_EM][EM_CURRENT_L] = emTaskState.emUserReg[INTERNAL_EM][EM_CURRENT_L1];   
+  
+  /* Update Voltage value, check the energy meter version to update the right variable */
+  switch (metroData.nbPhase)
+  {
+    case 1:
+      METRO_Convert_to_SCU_Format_32 (metroData.rmsvoltage[METRO_PHASE_1], (Reg32_t *)&emTaskState.emUserReg[INTERNAL_EM][EM_SYS_VOLTAGE]);              
+      break;
+    case 3:
+      METRO_Convert_to_SCU_Format_32 (metroData.rmsvoltage[METRO_PHASE_1], (Reg32_t *)&emTaskState.emUserReg[INTERNAL_EM][EM_SYS_PH1_VOLTAGE]);        
+      break;
+    default:
+      break;
+  }
+
+  /*******************************************************************************************************************************/
+  /*                                           Power measures                                                                    */
+  /*******************************************************************************************************************************/
+  
+  /* Get Active power for L1 phase (ph1_reg5 on EXT1) */
+  ActPower_s64_L1 = (int64_t)Metro_Read_Power_Device(EXT1, INT_CHANNEL_1, W_ACTIVE);
+  /* Get Active power for L2 phase (ph1_reg5 on EXT2) */
+  ActPower_s64_L2 = (int64_t)Metro_Read_Power_Device(EXT2, INT_CHANNEL_1, W_ACTIVE);
+  /* Get Active power for L3 phase (ph2_reg5 on EXT2) */
+  ActPower_s64_L3 = (int64_t)Metro_Read_Power_Device(EXT2, INT_CHANNEL_2, W_ACTIVE);
+  /* Negative value for L1? */
+  if (em_Measures.L1_ActivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Put as negative value */
+    ActPower_s64_L1 = -ActPower_s64_L1;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of the measure */
+    ActPower_s64_L1 |= ALGO2_NEGATIVE_S64_MASK;
+  }
+  /* Negative value for L2? */
+  if (em_Measures.L2_ActivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Put as negative value */
+    ActPower_s64_L2 = -ActPower_s64_L2;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ActPower_s64_L2 |= ALGO2_NEGATIVE_S64_MASK;
+  }
+  /* Negative value for L3? */
+  if (em_Measures.L3_ActivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Put as negative value */
+    ActPower_s64_L3 = -ActPower_s64_L3;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ActPower_s64_L3 |= ALGO2_NEGATIVE_S64_MASK;
+  }
+  // Calculate the TOTAL
+#ifndef SIMULATE_MEASURES  
+  ActPower_s64_TOT = ActPower_s64_L1 + ActPower_s64_L2 + ActPower_s64_L3;  
+#else  
+  ActPower_s64_TOT = 1800000; 
+#endif  
+  /* Update metro data structure with the TOTAL active power */
+  metroData.powerActive = (int32_t)ActPower_s64_TOT;
+  
+  /* Prepare the value in the right position, in Algo2 is 3 words lenght (48bits)*/
+  /* In the Modbus frame, first you must send the LL word and then the others..*/
+  /* So the register must be prepared in order to respect this sequence.       */
+  /*            First            Second         Third        Fourth           */  
+  /*      |    LL word    |    LH Word    |   HL Word   |   HH Word   |       */  
+  /*      |   H   |   L   |    H   |   L  |   H   |  L  |   H   |  L  |       */  
+  /*                                                                          */
+  /*    Note that HH wordis filled with all the bits at 0                     */
+
+  /* Update internal variable */  
+  METRO_Convert_to_SCU_Format_64 (ActPower_s64_TOT, (sReg64_u *)&emTaskState.emUserReg[INTERNAL_EM][EM_ACTIVE_POWER]);
+  
+  /* Get Reactive power for L1 (ph1_Reg7) */
+  ReactPower_s64_L1 = (int64_t)Metro_Read_Power_Device(EXT2, INT_CHANNEL_1, REACTIVE);
+  /* I ignore why there is a factor of 10 for this measure                    */
+  ReactPower_s64_L1 /= 10;
+  /* Negative value for L1? */
+  if (em_Measures.L1_ReactivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Put as negative value */
+    ReactPower_s64_L1 = -ReactPower_s64_L1;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ReactPower_s64_L1 |= ALGO2_NEGATIVE_S64_MASK;
+  } 
+  /* Get Reactive power for L2 (ph1_Reg7 on EXT2)*/
+  ReactPower_s64_L2 = (int64_t)Metro_Read_Power_Device(EXT2, INT_CHANNEL_1, REACTIVE);
+  /* I ignore why there is a factor of 10 for this measure                    */
+  ReactPower_s64_L2 /= 10;
+  /* Negative value for L2? */
+  if (em_Measures.L2_ReactivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Put as positive value */
+    ReactPower_s64_L2 = -ReactPower_s64_L2;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ReactPower_s64_L2 |= ALGO2_NEGATIVE_S64_MASK;
+  } 
+  /* Get Reactive power for L3 (ph2_reg7 on EXT2)*/
+  ReactPower_s64_L3 = (int64_t)Metro_Read_Power_Device(EXT2, INT_CHANNEL_2, REACTIVE);
+  /* I ignore why there is a factor of 10 for this measure                    */
+  ReactPower_s64_L3 /= 10; 
+  /* Negative value for L3? */
+  if (em_Measures.L3_ReactivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Put as positive value */
+    ReactPower_s64_L3 = -ReactPower_s64_L3;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ReactPower_s64_L3 |= ALGO2_NEGATIVE_S64_MASK;
+  }    
+  /* Calculate the TOTAL */
+  ReactPower_s64_TOT = ReactPower_s64_L1 + ReactPower_s64_L2 + ReactPower_s64_L3;  
+  /* Update metro data structure */
+  metroData.powerReactive = (int32_t)ReactPower_s64_TOT;
+  /* Update internal variable */  
+  METRO_Convert_to_SCU_Format_64 (ReactPower_s64_TOT, (sReg64_u *)&emTaskState.emUserReg[INTERNAL_EM][EM_REACTIVE_POWER]);
+
+  /*******************************************************************************************************************************/ 
+  /*                                           Cosfi measure                                                                     */
+  /*******************************************************************************************************************************/
+  
+  /* Get PHI in degrees */
+  PHI_Degree = (double)Metro_Read_PHI(CHANNEL_1);
+  /* Convert to radian  */
+  PHI_Radian = PHI_Degree * (M_PI / 180.0);
+  /* Get the Cosfi value */
+  CosPHI = cos(PHI_Radian);
+  /* Fit the scaling */
+  CosPHI *= 1000;
+  /* Check the sign */
+  if (CosPHI < 0)
+  {
+    /* Make this positive */
+    CosPHI = -CosPHI;
+    /* Mark the sign */
+    CosPHI = (int16_t)CosPHI | ALGO2_NEGATIVE_S16_MASK;
+  }
+  // Fill the measure like Algo2 want (0.001 scaling) */
+  em_Measures.CosPhi_1PH.Reg16 = (int16_t)CosPHI;
+  /* Update internal variable */  
+  emTaskState.emUserReg[INTERNAL_EM][EM_COS_PHI] = swapW (em_Measures.CosPhi_1PH.Reg16);
+  
+  /*******************************************************************************************************************************/
+  /*                                   Energy measures                                                                           */
+  /*******************************************************************************************************************************/
+  
+  /* Get Active Energy for L1 (ph1_reg1 for channel 1 on EXT1) */
+  ActiveEnergy_s64_L1 = (int64_t)Metro_Read_energy_Device(EXT1, INT_CHANNEL_1, E_W_ACTIVE);
+  /* Energy measures are given as 10*mWh, so I have to divide by 100  to have Wh */
+  ActiveEnergy_s64_L1 /= 100;
+  /* Negative value ? */
+  if (em_Measures.L1_ActivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Change the sign */
+    ActiveEnergy_s64_L1 = - ActiveEnergy_s64_L1;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ActiveEnergy_s64_L1 |= ALGO2_NEGATIVE_S64_MASK;
+  }
+  /* Get Active Energy for L2 (ph2_reg1 for channel 1 on EXT1) */
+  ActiveEnergy_s64_L2 = (int64_t)Metro_Read_energy_Device(EXT2, INT_CHANNEL_1, E_W_ACTIVE);
+  /* Energy measures are given as 10*mWh, so I have to divide by 100 to have Wh */
+  ActiveEnergy_s64_L2 /= 100;
+  /* Negative value ? */
+  if (em_Measures.L2_ActivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Change the sign */
+    ActiveEnergy_s64_L2 = - ActiveEnergy_s64_L2;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ActiveEnergy_s64_L2 |= ALGO2_NEGATIVE_S64_MASK;
+  }  
+  /* Get Active Energy for L3  (ph2_reg1 for channel 2 on EXT2) */
+  ActiveEnergy_s64_L3 = (int64_t)Metro_Read_energy_Device(EXT2, INT_CHANNEL_2, E_W_ACTIVE);
+  /* Energy measures are given as 10*mWh, so I have to divide by 100  to have Wh */
+  ActiveEnergy_s64_L3 /= 100;
+  /* Negative value ? */
+  if (em_Measures.L3_ActivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Change the sign */
+    ActiveEnergy_s64_L3 = - ActiveEnergy_s64_L3;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ActiveEnergy_s64_L3 |= ALGO2_NEGATIVE_S64_MASK;
+  }
+  
+  /* Calculate the TOTAL */
+  ActiveEnergy_s64_TOT = (int32_t)ActiveEnergy_s64_L1 + (int32_t)ActiveEnergy_s64_L2 + (int32_t)ActiveEnergy_s64_L3;
+  /* Update metro data structure */ 
+  metroData.energyActive = ActiveEnergy_s64_TOT;  
+  /* Update internal variable */  
+  /* Fill the value in the right position */
+  METRO_Convert_to_SCU_Format_64 (ActiveEnergy_s64_TOT, (sReg64_u *)&emTaskState.emUserReg[INTERNAL_EM][EM_TOT_ACTIVE_ENERGY]);
+
+  /* Get Reactive Energy for L1 (ph1_reg3 for Channel_1 on EXT1) */
+  ReactiveEnergy_s64_L1 = (int64_t)Metro_Read_energy_Device(EXT1, INT_CHANNEL_1, E_REACTIVE);
+  /* Negative value ? */
+  if (em_Measures.L1_ReactivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Change the sign */
+    ReactiveEnergy_s64_L1 = - ReactiveEnergy_s64_L1;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ReactiveEnergy_s64_L1 |= ALGO2_NEGATIVE_S64_MASK;
+  } 
+  /* Get Reactive Energy for L1 (ph1_reg3 for Channel_1 on EXT2) */
+  ReactiveEnergy_s64_L2 = (int64_t)Metro_Read_energy_Device(EXT2, INT_CHANNEL_1, E_REACTIVE);
+  /* Negative value ? */
+  if (em_Measures.L2_ReactivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Change the sign */
+    ReactiveEnergy_s64_L2 = - ReactiveEnergy_s64_L2;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ReactiveEnergy_s64_L2 |= ALGO2_NEGATIVE_S64_MASK;
+  } 
+  /* Get Reactive Energy for L1 (ph2_reg3 for Channel_2 on EXT2) */
+  ReactiveEnergy_s64_L3 = (int64_t)Metro_Read_energy_Device(EXT2, INT_CHANNEL_2, E_REACTIVE);
+  /* Negative value ? */
+  if (em_Measures.L3_ReactivePower_Sign == NEGATIVE_POWER)
+  {
+    /* Change the sign */
+    ReactiveEnergy_s64_L3 = - ReactiveEnergy_s64_L3;
+    /* Algo 2 need the MSB bit at 1 to mark the negative value of a measure */
+    ReactiveEnergy_s64_L3 |= ALGO2_NEGATIVE_S64_MASK;
+  } 
+  
+  /* Calculate the TOTAL */
+  ReactiveEnergy_s64_TOT = (int32_t)ReactiveEnergy_s64_L1 + (int32_t)ReactiveEnergy_s64_L2 + (int32_t)ReactiveEnergy_s64_L3; 
+  /* Update metro data structure */
+  metroData.energyReactive = (int32_t)ReactiveEnergy_s64_TOT;
+  /* Update internal variable */  
+  /* Fill the value in the right position */
+  METRO_Convert_to_SCU_Format_64 (ReactiveEnergy_s64_TOT, (sReg64_u *)&emTaskState.emUserReg[INTERNAL_EM][EM_TOT_REACT_ENERGY]);
+    
+  /*******************************************************************************************************************************/
+  
+}
+
+
+/**
+  * @brief  This function is used to calibrate the STPM34 according to the TA used
+            The calibration is done to EXT1 CHANNEL 1 is case of Monophase system
+            and for EXT2 CHANNEL 1 and 2 in case of Threephase.
+  * @param  None
+  * @retval CALIB_FAILED / SUCCESS / DISABLED
+  */
+uint8_t METRO_Calibrate(void)
+{
+  
+  uint8_t cnt;
+  uint64_t VRMS_Sum = 0, IRMS_Sum = 0;
+  uint32_t VRMS_Average, IRMS_Average;
+  uint32_t tmp_addr;
+  
+  /* If the Calibration procedure is ongoing */
+  if (metroData.Calib.Flags.bit._ON == true)
+  {
+    /* if the Calibration procedure has to proceed */
+    if (metroData.Calib.Flags.bit.Start == true)
+    {
+      /* Stop the calibration procedure */
+      metroData.Calib.Flags.bit.Start = false; 
+      /* Reset the calibration result */
+      em_Status.Flags.CalibOK = false;
+      em_Status.Flags.CalibFailed = false;
+      
+      /*******************************************************  Calibration process for L1 phase  ************************************************/
+      
+      /* Acquire some current and voltage samples for L1 */
+      for (cnt = 0; cnt < NBR_OF_SAMPLES_FOR_CALIB; cnt++)
+      {
+        /* Acquire the samples */
+        Metro_Read_RMS_Device(EXT1, INT_CHANNEL_1, (uint32_t *)&metroData.rmsvoltage[METRO_PHASE_1], (uint32_t *)&metroData.rmscurrent[METRO_PHASE_1]);
+        /* Bufferize the samples acquired */
+        VRMS_Sum += metroData.rmsvoltage[METRO_PHASE_1];
+        /* Bufferize the samples acquired */
+        IRMS_Sum += metroData.rmscurrent[METRO_PHASE_1];
+        /* Refresh IWDG timer */
+        HAL_IWDG_Refresh(&hiwdg);        
+        /* Make a delay between the acquisitions (20ms) */
+        HAL_Delay(20);
+      }
+      
+      /* Calculate the averaged RMS voltage */
+      VRMS_Average = VRMS_Sum / NBR_OF_SAMPLES_FOR_CALIB;
+      /* Adjust endianness */
+      metroData.Calib.Vrms_Ref = __REV32(metroData.Calib.Vrms_Ref);
+      /* Calculate the voltage calib factor: see STPM34 doc. DS10272 rev.8 Table 38 for details */      
+      metroData.nvm->V_CalibFact[METRO_PHASE_1] = (uint16_t)(((float)14336 * ((float)metroData.Calib.Vrms_Ref / (float)VRMS_Average)) - (float)12288);
+      
+      /* Check if the calculated value is over the limits */
+      if ((metroData.nvm->V_CalibFact[METRO_PHASE_1] < 0) || (metroData.nvm->V_CalibFact[METRO_PHASE_1] > 4095))
+      /* Over the limits, Calibration procedure could not be performed */
+        return CALIB_FAILED;                   
+      
+      /* Calculate the averaged RMS current */
+      IRMS_Average = IRMS_Sum / NBR_OF_SAMPLES_FOR_CALIB; 
+      /* Adjust endianness */
+      metroData.Calib.Irms_Ref = __REV32(metroData.Calib.Irms_Ref);
+      /* Calculate the current calib factor */              
+      metroData.nvm->I_CalibFact[METRO_PHASE_1] = (uint16_t)(((float)14336 * ((float)metroData.Calib.Irms_Ref / (float)IRMS_Average)) - (float)12288);
+      
+      /* Check if the calculated value is over the limits: see STPM34 doc. DS10272 rev.8 Table 38  */
+      if ((metroData.nvm->I_CalibFact[METRO_PHASE_1] < 0) || (metroData.nvm->I_CalibFact[METRO_PHASE_1] > 4095))
+      /* Over the limits, calibration procedure could not be performed */
+        return CALIB_FAILED;
+
+      /* Update the value of Dsp_cr5 and Dsp_cr6 according to the calculated factors (for EXT1 device) */
+      metroData.nvm->data1[4] &= 0xFFFFF000; 
+      metroData.nvm->data1[4] |= metroData.nvm->V_CalibFact[METRO_PHASE_1];  /* dsp_cr5 = Voltage adjustment */    
+      metroData.nvm->data1[5] &= 0xFFFFF000;
+      metroData.nvm->data1[5] |= metroData.nvm->I_CalibFact[METRO_PHASE_1];  /* dsp_cr6 = Current adjustment */    
+
+      /* Set the device register */
+      /* Now send data to the external chip */
+      /* the address should be provided in 2 bytes format (16 bits by 16 bits) for STPM */
+      tmp_addr = STPM_DSPCTRL5;
+      /* Now Write the 2 U32 registers inside EXT1 for DSPCR5 to 7  */
+      Metro_HAL_Stpm_write(EXT1, (uint8_t*)&tmp_addr, 2, (uint32_t *)&metroData.nvm->data1[4], STPM_WAIT);
+      
+      /* 3 phases device? */
+      if (metroData.nbPhase > 1)
+      {
+      /*************************************************************************************************************************************************/
+      
+      /*******************************************************  Calibration process for L2 phase  ******************************************************/
+      
+        /* Acquire some current and voltage samples for L2 */
+        for (cnt = 0, VRMS_Sum = 0, IRMS_Sum = 0; cnt < NBR_OF_SAMPLES_FOR_CALIB; cnt++)
+        {
+          /* Acquire the samples */
+          Metro_Read_RMS_Device(EXT2, INT_CHANNEL_1, (uint32_t *)&metroData.rmsvoltage[METRO_PHASE_2], (uint32_t *)&metroData.rmscurrent[METRO_PHASE_2]);
+          /* Bufferize the samples acquired */
+          VRMS_Sum += metroData.rmsvoltage[METRO_PHASE_2];
+          /* Bufferize the samples acquired */
+          IRMS_Sum += metroData.rmscurrent[METRO_PHASE_2];
+          /* Refresh IWDG timer */
+          HAL_IWDG_Refresh(&hiwdg);
+          /* Make a delay between the acquisitions (20ms) */
+          HAL_Delay(20);
+        }
+  
+        /* Calculate the averaged RMS voltage */
+        VRMS_Average = VRMS_Sum / NBR_OF_SAMPLES_FOR_CALIB;
+        /* Calculate the voltage calib factor */      
+        metroData.nvm->V_CalibFact[METRO_PHASE_2] = (uint16_t)(((float)14336 * ((float)metroData.Calib.Vrms_Ref / (float)VRMS_Average)) - (float)12288);
+  
+        /* Check if the calculated value is over the limits */
+        if ((metroData.nvm->V_CalibFact[METRO_PHASE_2] < 0) || (metroData.nvm->V_CalibFact[METRO_PHASE_2] > 4095))
+          /* Over the limits, Calibration procedure could not be performed */
+          return CALIB_FAILED;                   
+  
+        /* Calculate the averaged RMS current */
+        IRMS_Average = IRMS_Sum / NBR_OF_SAMPLES_FOR_CALIB; 
+        /* Calculate the current calib factor */              
+        metroData.nvm->I_CalibFact[METRO_PHASE_2] = (uint16_t)(((float)14336 * ((float)metroData.Calib.Irms_Ref / (float)IRMS_Average)) - (float)12288);
+  
+        /* Check if the calculated value is over the limits */
+        if ((metroData.nvm->I_CalibFact[METRO_PHASE_2] < 0) || (metroData.nvm->I_CalibFact[METRO_PHASE_2] > 4095))
+          /* Over the limits, calibration procedure could not be performed */
+          return CALIB_FAILED;
+  
+        /* Update the value of Dsp_cr5 and Dsp_cr6 according to the calculated factors (for EXT2 device) */
+        metroData.nvm->data2[4] &= 0xFFFFF000; 
+        metroData.nvm->data2[4] |= metroData.nvm->V_CalibFact[METRO_PHASE_2];  /* dsp_cr5 = Voltage adjustment */    
+        metroData.nvm->data2[5] &= 0xFFFFF000;
+        metroData.nvm->data2[5] |= metroData.nvm->I_CalibFact[METRO_PHASE_2];  /* dsp_cr6 = Current adjustment */    
+        
+      /*************************************************************************************************************************************************/
+      /*******************************************************  Calibration process for L3 phase  ******************************************************/
+      
+        /* Acquire some current and voltage samples for L3 */
+        for (cnt = 0, VRMS_Sum = 0, IRMS_Sum = 0; cnt < NBR_OF_SAMPLES_FOR_CALIB; cnt++)
+        {
+          /* Refresh IWDG timer */
+          HAL_IWDG_Refresh(&hiwdg);
+          /* Acquire the samples */
+          Metro_Read_RMS_Device(EXT2, INT_CHANNEL_2, (uint32_t *)&metroData.rmsvoltage[METRO_PHASE_3], (uint32_t *)&metroData.rmscurrent[METRO_PHASE_3]);
+          /* Bufferize the samples acquired */
+          VRMS_Sum += metroData.rmsvoltage[METRO_PHASE_3];
+          /* Bufferize the samples acquired */
+          IRMS_Sum += metroData.rmscurrent[METRO_PHASE_3];
+          /* Refresh WWDG timer */
+          /* Refresh IWDG timer */
+          HAL_IWDG_Refresh(&hiwdg);
+          /* Make a delay between the acquisitions (20ms) */
+          HAL_Delay(20);
+        }
+  
+        /* Calculate the averaged RMS voltage */
+        VRMS_Average = VRMS_Sum / NBR_OF_SAMPLES_FOR_CALIB;
+        /* Calculate the voltage calib factor */      
+        metroData.nvm->V_CalibFact[METRO_PHASE_3] = (uint16_t)(((float)14336 * ((float)metroData.Calib.Vrms_Ref / (float)VRMS_Average)) - (float)12288);
+  
+        /* Check if the calculated value is over the limits */
+        if ((metroData.nvm->V_CalibFact[METRO_PHASE_3] < 0) || (metroData.nvm->V_CalibFact[METRO_PHASE_3] > 4095))
+          /* Over the limits, Calibration procedure could not be performed */
+          return CALIB_FAILED;                   
+  
+        /* Calculate the averaged RMS current */
+        IRMS_Average = IRMS_Sum / NBR_OF_SAMPLES_FOR_CALIB; 
+        /* Calculate the current calib factor */              
+        metroData.nvm->I_CalibFact[METRO_PHASE_3] = (uint16_t)(((float)14336 * ((float)metroData.Calib.Irms_Ref / (float)IRMS_Average)) - (float)12288);
+  
+        /* Check if the calculated value is over the limits */
+        if ((metroData.nvm->I_CalibFact[METRO_PHASE_3] < 0) || (metroData.nvm->I_CalibFact[METRO_PHASE_3] > 4095))
+          /* Over the limits, calibration procedure could not be performed */
+          return CALIB_FAILED;
+  
+        /* Update the value of Dsp_cr6 and Dsp_cr7 for CHANNEL 2 according to the calculated factors (for EXT2 device) */
+        metroData.nvm->data2[6] &= 0xFFFFF000; 
+        metroData.nvm->data2[6] |= metroData.nvm->V_CalibFact[METRO_PHASE_3];  /* dsp_cr5 = Voltage adjustment */    
+        metroData.nvm->data2[7] &= 0xFFFFF000;
+        metroData.nvm->data2[7] |= metroData.nvm->I_CalibFact[METRO_PHASE_3];  /* dsp_cr6 = Current adjustment */    
+  
+        /* Set the device register */
+        /* Now send data to the external chip */
+        /* the address should be provided in 2 bytes format (16 bits by 16 bits) for STPM */
+        tmp_addr = STPM_DSPCTRL5;
+        /* Now Write the 4 U32 registers inside EXT2 for DSPCR5 to 9  */
+        Metro_HAL_Stpm_write(EXT2, (uint8_t*)&tmp_addr, 4, (uint32_t *)&metroData.nvm->data2[4], STPM_WAIT);
+      
+      /*************************************************************************************************************************************************/
+      }
+      
+      /* Mark calibration status */
+      metroData.nvm->CalibStatus = DEVICE_CALIBRATED;
+      /* Mark as device calibrated */
+      em_Status.Flags.Calibrated = true;
+      /* Adjust the model type according to this status */
+      em_Config.EC_Model |= EM_SCAME_CALIBRATED_TYPE;
+      
+      /* Store the new values inside the flash */
+      NVM_Write(NVM_SAVE_LEG);
+      
+      /* Calibration procedure succesfully executed */
+      return CALIB_SUCCESS;
+      
+    }
+  }  
+  
+  /* Calibration procedure DISABLED */  
+  return CALIB_DISABLED;
+  
+}
+/**
+  * @brief  This function check the status of EXT1 and EXT2 devices and if 
+  *         needed, reconfigure them.
+  * @param  None
+  * @retval None
+  */
+METRO_STPM_LINK_IRQ_Status_Type_t METRO_CheckStatus(void)
+{
+  uint8_t cnt;
+  
+  static uint8_t Error_cnt= 0;
+      
+  /* check status of metro devices */  
+  for (cnt = 0; cnt < METRO_MAX_PHASES; cnt++)
+  {
+    /* Check if there is an anomaly condition */
+    if (metroData.rmscurrent[cnt] > infoStation.max_current * 2)
+      /* if for 1s the device gives this value from DSPEVENT register it means that there is an anomaly */
+      if (Error_cnt++ == MAX_ERRORS_FOR_ANOMALY)
+      {
+        /* Reset counter */
+        Error_cnt = 0; 
+        return STATUS_STPM_LINK_READ_ERROR;
+      }
+  }
+ 
+  return ALL_STPM_LINK_STATUS;
+    
+}
+
+static void METRO_HandleMetroDevice(uint32_t *pData)
+{
+  /* Get Payload pointer from Payload[0] */
+  /* Payload  DATA  : [0] = Device service, [1] = set (0) or get(1)   , [2]...[N] params */
+  /* Device service (*pData) :   */
+  /*   - 0 :  Set baude rate service      */
+  /*   - 1 :  Config latch service      */
+  /*   - 2 :  Trig Latch ALL devices At the same time   */
+  /*   - 3 :  Set/Get ZCR Config and ZCR Enable/Disable bit*/
+  /*   - 4 :  Set/Get CLK Config and CLK Enable/Disable bit*/
+  /*   - 5 :  Set/Get LEd Configs and LED Enable/Disable bit*/
+  /*   - 6 :  Set/Get STPM  LINK IRQ management */
+  /*   - 7 :  Set(Clear) STPM LINK  IRQ / Get IRQ Status */
+
+  uint32_t data[2] = {0,0};
+  METRO_NB_Device_t i;
+
+  switch (*pData)
+  {
+    /* UART baud rate device service */
+  case (0):
+    {
+      /* test set or get request */
+      if (*(pData+1) == 0)
+      {
+        /* it is a set baud rate service requested */
+        /* get the two next params in the cmd line : (*pData+2) = Device Id , (*pData+3) = baudrate */
+        /* (*pData+2) : Device Id :   HOST=0, EXT1 = 1,  EXT2 = 2,  EXT3 = 3,  EXT4 = 4 */
+        /* (*pData+3) : baud rate :   U32 value : */
+        Metro_Set_uart_baudrate_to_device((METRO_NB_Device_t)*(pData+2), *(pData+3));
+      }
+      else if (*(pData+1) == 1)
+      {
+        /* it is a get */
+        /* no get service for the moment */
+      }
+    }
+    break;
+
+     /* Config Latch device service */
+  case (1):
+    {
+      /* test set or get request */
+      /* it is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a set latch service requested */
+        /* get the two next params in the cmd line : (*pData+2) = Device Id , (*pData+3) = Lact type requested */
+        /* *(pData+2) : Device Id :   HOST=0, EXT1 = 1,  EXT2 = 2,  EXT3 = 3,  EXT4 = 4 */
+        /* *(pData+3) : Latch type :   LATCH_SYN_SCS = 1,  LATCH_SW = 2, LATCH_AUTO = 3 */
+
+         /* Save latch device type inside Metro struct */
+        Metro_Register_Latch_device_Config_type((METRO_NB_Device_t)(*(pData+2)), (METRO_Latch_Device_Type_t)(*(pData+3)));
+
+      }
+    }
+    break;
+     /* Trig Latch ALL devices At the same time */
+  case (2):
+    {
+        /* it is a trig latch  service requested */
+        /* latch all devices on the system */
+        for(i=EXT1;i<(NB_MAX_DEVICE);i++)
+        {      
+          if(Tab_METRO_internal_Devices_Config[i].device != 0)
+          {
+            Metro_Set_Latch_device_type(i, Tab_METRO_internal_Devices_Config[i].latch_device_type);
+          }
+        }
+
+        for(i=EXT1;i<(NB_MAX_DEVICE);i++)
+        {      
+          if(Tab_METRO_internal_Devices_Config[i].device != 0)
+          {
+            Metro_Get_Data_device(i);
+          }
+        }
+
+    }
+    break;
+
+      /*  Set/Get ZCR Config and ZCR Enable/Disable bit*/
+  case (3):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set  ZCR config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Device */
+        /* get the  next param in the cmd line : *(pData+3) = ZCR Config change : 1 , ZCR enable change = 2*/
+
+        /* get the  next param in the cmd line : *(pData+4) = ZCR sel value  = ZCR_SEL_V1 = 0,  ZCR_SEL_C1, ZCR_SEL_V2, ZCR_SEL_C2  */
+        /*or */
+        /* get the  next param in the cmd line : *(pData+4) = ZCR  Enable Bit  = 0 or 1 */
+
+        /* ZCR change requested */
+        if ( *(pData+3) == 1)
+        {
+          /* Ask Metro driver to set the new ZCR  config */
+          Metro_Set_ZCR((METRO_NB_Device_t)*(pData+2), (METRO_ZCR_Sel_t) *(pData+4),NO_CHANGE);
+
+        }
+        /* Enable/Disable ZCR requested */
+        else if ( *(pData+3) == 2)
+        {
+          /* Ask Metro driver to set the new ZCR enable bit config*/
+          Metro_Set_ZCR((METRO_NB_Device_t)*(pData+2),NO_CHANGE_ZCR,(METRO_CMD_Device_t) *(pData+4));
+        }
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /*  it is a metro Get ZCR config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Device   */
+        /* get the  next param in the cmd line : *(pData+3) = ZCR config requested : 1 , ZCR enable bit Requested = 2*/
+
+        /*  ZCR config requested */
+        if (*(pData+3) == 1)
+        {
+          /* GEt and Display ZCR config  */
+          strcpy(text, "Metro ZCR config  = 0x%02x \n");
+          data[1] = Metro_Get_ZCR((METRO_NB_Device_t)*(pData+2),(METRO_ZCR_Sel_t*)&data[0]);
+        }
+        /*  Get Enable ZCR bit  requested*/
+        else if (*(pData+3) == 2)
+        {
+          /* Display ZCR Enable bit */
+          strcpy(text, "Metro ZCR Config Enable bit = 0x%02x \n");
+          data[0] = Metro_Get_ZCR((METRO_NB_Device_t)*(pData+2),(METRO_ZCR_Sel_t*)&data[1]);
+        }
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+
+      /*  Set/Get CLK Config and CLK Enable/Disable bit*/
+  case (4):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set  CLK config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Device */
+        /* get the  next param in the cmd line : *(pData+3) = CLK Config change : 1 , CLK enable change = 2*/
+
+        /* get the  next param in the cmd line : *(pData+4) = CLK sel value  ->  CLK_SEL_7KHz = 0,  CLK_SEL_4MHz, CLK_SEL_4MHz_50,CLK_SEL_16MHz  */
+        /*or */
+        /* get the  next param in the cmd line : *(pData+4) = CLK  Enable Bit  = 0 or 1 */
+
+        /* CLK change requested */
+        if ( *(pData+3) == 1)
+        {
+          /* Ask Metro driver to set the new CLK  config */
+          Metro_Set_CLK((METRO_NB_Device_t)*(pData+2), (METRO_CLK_Sel_t) *(pData+4),NO_CHANGE);
+
+        }
+        /* Enable/Disable CLK requested */
+        else if ( *(pData+3) == 2)
+        {
+          /* Ask Metro driver to set the new CLK enable bit config*/
+          Metro_Set_CLK((METRO_NB_Device_t)*(pData+2),NO_CHANGE_CLK,(METRO_CMD_Device_t) *(pData+4));
+        }
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /*  it is a metro Get CLK config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Device   */
+        /* get the  next param in the cmd line : *(pData+3) = CLK config requested : 1 , CLK enable bit Requested = 2*/
+
+        /*  CLK config requested */
+        if (*(pData+3) == 1)
+        {
+          /* GEt and Display CLK config  */
+          strcpy(text, "Metro CLK config  = 0x%02x \n");
+          data[1] = Metro_Get_CLK((METRO_NB_Device_t)*(pData+2),(METRO_CLK_Sel_t*)&data[0]);
+        }
+        /*  Get Enable CLK bit  requested*/
+        else if (*(pData+3) == 2)
+        {
+          /* Display CLK Enable bit */
+          strcpy(text, "Metro CLK Config Enable bit = 0x%02x \n");
+          data[0] = Metro_Get_CLK((METRO_NB_Device_t)*(pData+2),(METRO_CLK_Sel_t*)&data[1]);
+        }
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+      /*  Set/Get LEd Configs and LED Enable/Disable bit*/
+  case (5):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set  LEds config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Device */
+        /* get the  next param in the cmd line : *(pData+3) = Led Number : 1 or 2  */
+        /* get the  next param in the cmd line : *(pData+4) = LEd Set Config =
+                                                                Power  =  1 ,
+                                                                Channel = 2 ,
+                                                                Speed_Divisor = 3,
+                                                                ON_OFF  = 4*/
+
+
+        /* get the  next param in the cmd line : *(pData+5) = Power value  ->  LED_W_ACTIVE = 0,  LED_F_ACTIVE, LED_REACTIVE, LED_APPARENT_RMS   */
+
+        /*or */
+
+        /* get the  next param in the cmd line : *(pData+5) = Channel  value  ->  PRIMARY = 0,  SECONDARY, ALGEBRIC, SIGMA_DELTA   */
+
+        /*or */
+
+        /* get the  next param in the cmd line : *(pData+5) = Speed divisor  value  -> u8 :  0 to 15   */
+
+        /* Or */
+
+        /* get the  next param in the cmd line : *(pData+5) = LEd  Enable Bit  = 0 or 1 */
+
+        /* Power change requested */
+        if ( *(pData+4) == 1)
+        {
+           Metro_Set_Led_Power_Config((METRO_NB_Device_t)*(pData+2), (METRO_LED_Selection_t) *(pData+3),(METRO_LED_Power_selection_t) *(pData+5));
+        }
+        /* Channel change requested */
+        else if ( *(pData+4) == 2)
+        {
+           Metro_Set_Led_Channel_Config((METRO_NB_Device_t)*(pData+2), (METRO_LED_Selection_t) *(pData+3),(METRO_LED_Channel_t) *(pData+5));
+        }
+        /* Led Divisor change requested */
+        else if ( *(pData+4) == 3)
+        {
+          Metro_Set_Led_Speed_divisor((METRO_NB_Device_t)*(pData+2), (METRO_LED_Selection_t) *(pData+3),(uint8_t) *(pData+5));
+        }
+        /* Enable/Disable Led requested */
+        else if ( *(pData+4) == 4)
+        {
+          Metro_Set_Led_On_Off((METRO_NB_Device_t)*(pData+2), (METRO_LED_Selection_t) *(pData+3),(METRO_CMD_Device_t) *(pData+5));
+        }
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /*  it is a metro Get LED config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Device   */
+        /* get the  next param in the cmd line : *(pData+3) = Led Number : 1 or 2  */
+        /* get the  next param in the cmd line : *(pData+4) = LEd Set Config =
+                                                                Power  =  1 ,
+                                                                Channel = 2 ,
+                                                                Speed_Divisor = 3,
+                                                                ON_OFF  = 4  */
+
+        uint32_t Led_Power = 0;
+        uint32_t Led_Channel = 0;
+
+         /* Power change requested */
+        if ( *(pData+4) == 1)
+        {
+          strcpy(text, "Metro Led Power config  = 0x%02x \n");
+          Metro_Get_Led_Power_Config((METRO_NB_Device_t)(*(pData+2)), (METRO_LED_Selection_t) (*(pData+3)),(METRO_LED_Power_selection_t*) (&Led_Power));
+          data[0] = Led_Power;
+        }
+        /* Channel change requested */
+        else if ( *(pData+4) == 2)
+        {
+          strcpy(text, "Metro Led Channel config  = 0x%02x \n");
+          Metro_Get_Led_Channel_Config((METRO_NB_Device_t)*(pData+2), (METRO_LED_Selection_t) *(pData+3),(METRO_LED_Channel_t*) &Led_Channel);
+          data[0] = Led_Channel;
+        }
+        /* Led Divisor change requested */
+        else if ( *(pData+4) == 3)
+        {
+          strcpy(text, "Metro Led Divider config  = 0x%02x \n");
+          data[0] = Metro_Get_Led_Speed_divisor((METRO_NB_Device_t)*(pData+2), (METRO_LED_Selection_t) *(pData+3));
+        }
+        /* Enable/Disable Led requested */
+        else if ( *(pData+4) == 4)
+        {
+          strcpy(text, "Metro Led On / Off  config  = 0x%02x \n");
+          data[0]= Metro_Get_Led_On_Off((METRO_NB_Device_t)*(pData+2), (METRO_LED_Selection_t) *(pData+3));
+        }
+
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+    /* Set/Get STPM  LINK IRQ management*/
+    case (6):
+    {
+      /* test set or get request */
+
+      /* Set IRQ mask*/
+      if (*(pData+1) == 0)
+      {
+        /* it is a  Set IRQ mask */
+        /* get the  next param in the cmd line : *(pData+2) = Device */
+        /* get the  next param in the cmd line : *(pData+3) = u32 Metro_IT_Mask */
+
+        /* Ask Metro driver to set the new IRQ STPM mask value */
+        Metro_Set_IRQ_Mask_for_STPM_device((METRO_NB_Device_t)*(pData+2), (uint16_t) *(pData+3));
+
+      }
+      /* Get IRQ Mask*/
+      else if (*(pData+1) == 1)
+      {
+        /* it is a cal  Get  IRQ mask */
+        /* get the  next param in the cmd line : *(pData+2) = device */
+
+        strcpy(text, "Get  LINK IRQ mask from device %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_IRQ_Mask_from_STPM_device((METRO_NB_Device_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+
+    /* Set(Clear) STPM LINK IRQ / Get IRQ Status*/
+    case (7):
+    {
+      /* test set or get request */
+
+      /* Set (Clear IRQ) */
+      if (*(pData+1) == 0)
+      {
+        /* it is a  Clear IRQ  service */
+        /* get the  next param in the cmd line : *(pData+2) = Device */
+        /* get the  next param in the cmd line : *(pData+3) = METRO_STPM_LINK_IRQ_Status_Type_t Metro_Status_requested*/
+        /*
+            METRO_STPM_LINK_IRQ_Status_Type_t  =
+
+            ALL_STPM_LINK_STATUS = 0,
+            STATUS_STPM_UART_LINK_BREAK,
+            STATUS_STPM_UART_LINK_CRC_ERROR,
+            STATUS_STPM_UART_LINK_TIME_OUT_ERROR,
+            STATUS_STPM_UART_LINK_FRAME_ERROR,
+            STATUS_STPM_UART_LINK_NOISE_ERROR,
+            STATUS_STPM_UART_LINK_RX_OVERRUN,
+            STATUS_STPM_UART_LINK_TX_OVERRUN,
+            STATUS_STPM_SPI_LINK_RX_FULL,
+            STATUS_STPM_SPI_LINK_TX_EMPTY,
+            STATUS_STPM_LINK_READ_ERROR,
+            STATUS_STPM_LINK_WRITE_ERROR,
+            STATUS_STPM_SPI_LINK_CRC_ERROR,
+            STATUS_STPM_SPI_LINK_UNDERRUN,
+            STATUS_STPM_SPI_LINK_OVERRRUN */
+
+        /* Ask Metro driver to clear the IRQ status requested */
+        Metro_Clear_Status_for_STPM_device((METRO_NB_Device_t)*(pData+2), (METRO_STPM_LINK_IRQ_Status_Type_t) *(pData+3));
+
+      }
+      /* Get IRQ status */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a Get IRQ status service requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Device */
+        /* get the  next param in the cmd line : *(pData+3) = METRO_STPM_LINK_IRQ_Status_Type_t Metro_Status_requested*/
+        /*    METRO_STPM_LINK_IRQ_Status_Type_t  =
+
+            ALL_STPM_LINK_STATUS = 0,
+            STATUS_STPM_UART_LINK_BREAK,
+            STATUS_STPM_UART_LINK_CRC_ERROR,
+            STATUS_STPM_UART_LINK_TIME_OUT_ERROR,
+            STATUS_STPM_UART_LINK_FRAME_ERROR,
+            STATUS_STPM_UART_LINK_NOISE_ERROR,
+            STATUS_STPM_UART_LINK_RX_OVERRUN,
+            STATUS_STPM_UART_LINK_TX_OVERRUN,
+            STATUS_STPM_SPI_LINK_RX_FULL,
+            STATUS_STPM_SPI_LINK_TX_EMPTY,
+            STATUS_STPM_LINK_READ_ERROR,
+            STATUS_STPM_LINK_WRITE_ERROR,
+            STATUS_STPM_SPI_LINK_CRC_ERROR,
+            STATUS_STPM_SPI_LINK_UNDERRUN,
+            STATUS_STPM_SPI_LINK_OVERRRUN */
+
+
+        strcpy(text, "Metrology Read LINK IRQ Status from Device %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_Status_from_STPM_device((METRO_NB_Device_t)*(pData+2),(METRO_STPM_LINK_IRQ_Status_Type_t) *(pData+3));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+  }
+}
+
+static void METRO_HandleMetroSetup(uint32_t *pData)
+{
+  
+  EM_CurrSens_type_e EM_CurrSens_type;
+  
+  /* Get Payload pointer from Payload[0] */
+  /* (*pData) = 0 : set, 1: Get , (u8)(*(pData+1)) = Host Config , (u8)(*(pData+2)) = STPM config */
+
+  /****************/
+  /* STPM Config  */
+  /****************/
+ /*+------------------------------------------------------------------------------------+
+   |                                        U32                                         |
+   |---------------------|-------------------|-------------------|----------------------|
+   |     STPM EXT4       |     STPM EXT3     |     STPM EXT2     |     STPM EXT1        |
+   |---------------------|-------------------|-------------------|----------------------|
+   |    u4   |     u4    |   u4    |   u4    |     u4  |     u4  |      u4   |  u4      |
+   |---------|-----------|--------------------------------------------------------------|
+   |CH masks | STPM type |CH masks |STPM type|CH masks |STPM type|  CH masks |STPM type |
+   |---------|-----------|--------------------------------------------------------------|
+
+  STPM CFG EXTx (u8):
+  -----------------
+  MSB u4 : Channel  Mask :  Channels affected to STPM
+      0 : No Channel affected
+      1 : Channel 1 affected
+      2 : Channel 2 affected
+      4 : Channel 3 affected
+      8 : Channel 4 affected
+
+  LSB u4 :  STPM type : 6 to 8
+      0 : No STPM
+      6 : STPM32
+      7 : STPM33
+      8 : STPM34
+
+  EX : STPM EXT 1: One STPM34 with Channels 2 and 3 affected on it
+  LSB u4 = 8 (STPM34)
+  MSB u4 = 6 ( 4:Channel 3 + 2:Channel 2)
+
+  STPM CONFIG : U32 = 0x00000068
+
+ |---------|-----------|--------------------------------------------------------------|
+  Full SET cmd for this example : met setup 0 0x00000091 0x00000068
+ |---------|-----------|--------------------------------------------------------------| */
+
+
+  /********** SET ************/
+  /* If cmd is set , retreive the 2 followings parameters in Cmd line : Host Config , STPM config */
+  if ((uint8_t)(*(pData)) == 0)
+  {
+     /* update config in RAM */
+    metroData.nvm->config[0] = *(pData+1);
+    metroData.nvm->config[1] = *(pData+2);
+
+    /* setup metrology Driver */
+    Metro_Setup(*(pData+1), *(pData+2));
+    Metro_Init();
+
+#ifdef UART_XFER_STPM3X /* UART MODE */   
+  /* Change UART speed for STPM communication between Host and EXT1*/
+    Metro_UartSpeed(USART_SPEED); 
+#endif
+
+    MET_RestoreConfigFromNVM();
+     
+    /* Initialize the factors for the computation */
+    for(int i=0; i < NB_MAX_CHANNEL; i++)
+    {
+      /* Get Current sensor type according to the different phase */
+      EM_CurrSens_type = EM_Get_TA_Type (i);      
+      /* if TA type is NULL, do not proceed */
+      if (EM_CurrSens_type != EM_TA_NULL)
+        Metro_Set_Hardware_Factors( (METRO_Channel_t)(CHANNEL_1+i), metroData.nvm->powerFact[EM_CurrSens_type][i], metroData.nvm->powerFact[EM_CurrSens_type][i]/ FACTOR_POWER_ON_ENERGY,metroData.nvm->voltageFact[i],metroData.nvm->currentFact[EM_CurrSens_type][i]);
+    }
+
+    for (int i=EXT1;i<(NB_MAX_DEVICE);i++)
+    {
+      if(Tab_METRO_internal_Devices_Config[i].device != 0)
+      {
+        /* Set default latch device type inside Metro struct for Ext chips */
+        Metro_Register_Latch_device_Config_type((METRO_NB_Device_t)i, LATCH_SYN_SCS);
+      }
+    }
+
+  }
+  /********** GET ************/
+  else if ((uint8_t)(*(pData)) == 1)/* It is a get cmd, retreive information from Global table and send the config to mnsh Uart  */
+  {
+    /* Max Buffer size =  50*U32 MAX ->  GUI or Metrology Application get Config or Status  group not all registers in one read*/
+    uint32_t data[2] = {0,0};
+    strcpy(text, "Metrology GET SETUP - HOST CONFIG :0x%08x: STPM CONFIG:0x%08x\n");
+
+    /* Get setup from Metro Driver and save it in the Global Table of Mnsh metro task*/
+    Metro_Get_Setup(&data[0],&data[1]);
+
+    /* Print inside MNSH  the two 32 bit variables : Host Config and STPM config  */
+    MNSH_Printf(text,data[0],data[1]);
+  }
+  /************ CMD ERROR ***********/
+  else /* cmd is not 0 or 1, error !!! Wrong Cmd entered by User */
+  {
+
+  }
+}
+
+static void METRO_HandleMetroMetro(uint32_t *pData)
+{
+  /* Get Payload pointer from Payload[0] */
+  /* Payload  DATA  : [0] = Metro service, [1] = set (0) or get(1)   , [2]...[N] params */
+  /* Metro service (*pData) :   */
+  /*   - 0 :  Read Period      */
+  /*   - 1 :  Read  Power     */
+  /*   - 2 :  Read NRJ      */
+  /*   - 3 :  Set/Get Current Gain      */
+  /*   - 4 : Read Momentary Voltage */
+  /*   - 5 : Read Momentatry Current */
+  /*   - 6 : Read RMS Voltage and RMS Current */
+  /*   - 7 : Read Phase angle */
+  /*   - 8 : Set/Get Temperature Compensation */
+  /*   - 9 : Set/Get Tamper config */
+  /*   - 10 : Set/Get Vref config */
+  /*   - 11 : Set/Get HPF filter */
+  /*   - 12 : Set/Get LPF filter - Removed */
+  /*   - 13 : Set/Get Coil Rogowski integrator */
+  /*   - 14:  Set/Get Ah Accumulation Down Threshold*/
+  /*   - 15 : Set/Get Ah Accumulation Up Threshold*/
+  /*   - 16 : Read AH Acc for channel */
+
+  uint32_t data[2] = {0,0};
+
+  switch (*pData)
+  {
+    /* read period service*/
+  case (0):
+    {
+      /* test set or get request */
+      /* Only Get is implemented */
+      if (*(pData+1) == 1)
+      {
+        /* it is a metro read period service requested */
+        /* get the  next param in the cmd line : (*pData+2) = Channel */
+
+        strcpy(text, "Metrology Read period  for Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_Period((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+
+      }
+     }
+    break;
+    /* read power service*/
+  case (1):
+    {
+      /* test set or get request */
+      /* Only Get is implemented */
+      if (*(pData+1) == 1)
+      {
+        /* it is a metro read power service requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1, 2 , 3 or 4 */
+        /* get the next param in the cmd line  :  *(pData+3) = Power type requested */
+        /* power type : W_ACTIVE = 1 , F_ACTIVE = 2, REACTIVE = 3, APPARENT_RMS = 4, APPARENT_VEC = 5, MOM_WIDE_ACT = 6, MOM_FUND_ACT = 7 )*/
+
+
+        /* build text display according to Power type */
+        switch (*(pData+3))
+        {
+        case (W_ACTIVE):
+          {
+            strcpy(text, "Metrology Read Power W_ACTIVE for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (F_ACTIVE):
+          {
+            strcpy(text, "Metrology Read Power F_ACTIVE for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (REACTIVE):
+          {
+            strcpy(text, "Metrology Read Power REACTIVE for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (APPARENT_RMS):
+          {
+            strcpy(text, "Metrology Read Power APPARENT_RMS for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (APPARENT_VEC):
+          {
+            strcpy(text, "Metrology Read Power  APPARENT_VEC for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (MOM_WIDE_ACT):
+          {
+            strcpy(text, "Metrology Read Power MOM_WIDE_ACT for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (MOM_FUND_ACT):
+          {
+            strcpy(text, "Metrology Read Power MOM_FUND_ACT for Channel %02x :  0x%08x\n");
+          }
+          break;
+        }
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_Power((METRO_Channel_t)*(pData+2),(METRO_Power_selection_t)*(pData+3));
+        MNSH_Printf(text,data[0],data[1]);
+
+      }
+     }
+    break;
+    /* read Nrj service*/
+  case (2):
+    {
+      /* test set or get request */
+      /* Only Get is implemented */
+      if (*(pData+1) == 1)
+      {
+        /* it is a metro read NRJ service requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1, 2 , 3 or 4 */
+        /* get the next param in the cmd line  :  *(pData+3) = NRJ type requested */
+        /* power type : E_W_ACTIVE = 1 , E_F_ACTIVE = 2, E_REACTIVE = 3, E_APPARENT = 4 */
+
+        /* build text display according to Power type */
+        switch (*(pData+3))
+        {
+        case (E_W_ACTIVE):
+          {
+            strcpy(text, "Metrology Read NRJ W_ACTIVE for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (E_F_ACTIVE):
+          {
+            strcpy(text, "Metrology Read NRJ F_ACTIVE for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (E_REACTIVE):
+          {
+            strcpy(text, "Metrology Read NRJ REACTIVE for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (E_APPARENT):
+          {
+            strcpy(text, "Metrology Read NRJ APPARENT for Channel %02x :  0x%08x\n");
+          }
+          break;
+
+        }
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_energy((METRO_Channel_t)*(pData+2),(METRO_Energy_selection_t)*(pData+3));
+        MNSH_Printf(text,data[0],data[1]);
+
+      }
+     }
+    break;
+  /*Current gain */
+  case (3):
+    {
+      /* test set or get request */
+
+      /* Set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set Current gain requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = Gain Value METRO_Gain_t type = 1, 2, 3, 4 (  x2 , x4, x8, x16) */
+
+        /* Ask Metro driver to set the new Current gain */
+        Metro_Set_Current_gain((METRO_Channel_t)*(pData+2), (METRO_Gain_t) *(pData+3));
+      }
+      /* Get */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a metro Get Current gain requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        strcpy(text, "Metrology Read Current Gain  from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_Current_gain((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+
+     }
+    break;
+     /* read Momentary Voltage  service*/
+  case (4):
+    {
+      /* test set or get request */
+      /* Only Get is implemented */
+      if (*(pData+1) == 1)
+      {
+        /* it is a metro read M Voltage service requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1, 2 , 3 or 4 */
+        /* get the next param in the cmd line  :  *(pData+3) = M Voltage type requested */
+        /* M Voltage type : V_WIDE = 1,  V_FUND = 2 */
+
+        /* build text display according to M Voltage type */
+        switch (*(pData+3))
+        {
+        case (V_WIDE):
+          {
+            strcpy(text, "Metro Read M Voltage  V_WIDE for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (V_FUND):
+          {
+            strcpy(text, "Metro Read M Voltage  V_FUND for Channel %02x :  0x%08x\n");
+          }
+          break;
+        }
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_Momentary_Voltage((METRO_Channel_t)*(pData+2), (METRO_Voltage_type_t)*(pData+3));
+        MNSH_Printf(text,data[0],data[1]);
+
+      }
+     }
+    break;
+     /* read Momentary Current   service*/
+  case (5):
+    {
+      /* test set or get request */
+      /* Only Get is implemented */
+      if (*(pData+1) == 1)
+      {
+        /* it is a metro read M Current service requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1, 2 , or tamper */
+        /* get the next param in the cmd line  :  *(pData+3) = M Current type requested */
+        /* M Voltage type : C_WIDE = 1,  C_FUND = 2 */
+
+        /* build text display according to M Voltage type */
+        switch (*(pData+3))
+        {
+        case (V_WIDE):
+          {
+            strcpy(text, "Metro Read M Current  C_WIDE for Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (V_FUND):
+          {
+            strcpy(text, "Metro Read M Current  C_FUND for Channel %02x :  0x%08x\n");
+          }
+          break;
+        }
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_Momentary_Current((METRO_Channel_t)*(pData+2), (METRO_Current_type_t)*(pData+3));
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+
+     /* read RMS current and voltage  service*/
+  case (6):
+    {
+      /* test set or get request */
+      /* Only Get is implemented */
+      if (*(pData+1) == 1)
+      {
+        /* it is a metro read RMS voltage and current service requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1, 2 , 3 */
+        /* get the  next param in the cmd line : *(pData+3) = RMS type : 1 : Current  2: Voltage */
+        /* get the  next param in the cmd line : *(pData+4) = output format : RAW type : 0 : RMS type : 1 */
+
+        uint32_t RMS_V = 0;
+        uint32_t RMS_I = 0;
+
+        data[0] = *(pData+2);
+
+        /* Read RMS v and I from a channel */
+        Metro_Read_RMS((METRO_Channel_t)*(pData+2),&RMS_V,&RMS_I,(uint8_t)*(pData+4));
+
+        /*  Current requested */
+        if (*(pData+3) == 1)
+        {
+          /* Display RMS Current */
+          strcpy(text, "Metro Read RMS Current for Channel %02x :  %08d\n");
+          data[1] = RMS_I;
+        }
+        /*  Voltage  requested*/
+        else if (*(pData+3) == 2)
+        {
+          /* Display RMS voltage */
+          strcpy(text, "Metro Read RMS Voltage for Channel %02x :  %08d\n");
+          data[1] = RMS_V;
+        }
+
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+
+     /* read PHI   service*/
+  case (7):
+    {
+      /* test set or get request */
+      /* Only Get is implemented */
+      if (*(pData+1) == 1)
+      {
+        /* it is a metro read PHI service requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1, 2 or 3 ( channel 4 exlcuded because only TAMPER */
+        strcpy(text, "Metro Read   PHI for Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_PHI((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+     /*  Set/Get temperature compensation service*/
+  case (8):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set Current gain requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = Tempeature Compasation value  = 0 to 7 */
+
+        /* Ask Metro driver to set the new Temperature compensation */
+        Metro_Set_Temperature_Compensation((METRO_Channel_t)*(pData+2), (METRO_Gain_t) *(pData+3));
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a metro read PHI service requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1, 2 or 3 ( channel 4 exlcuded because only TAMPER) */
+        strcpy(text, "Metro Get TC for Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_Temperature_Compensation((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+      /*  Set/Get TAMPER tolerance and Enable/Disable bit*/
+  case (9):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set Channel tamper config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel tamper*/
+        /* get the  next param in the cmd line : *(pData+3) = tolerance change : 1 , Tamper change = 2*/
+
+        /* get the  next param in the cmd line : *(pData+4) = Tamper tolerance value value  = 0 to 3 */
+        /*or */
+        /* get the  next param in the cmd line : *(pData+4) = Tamper Enable Bit  = 0 or 1 */
+
+        /* Tolerance change requested */
+        if ( *(pData+3) == 1)
+        {
+          /* Ask Metro driver to set the new Tamper tolerance config */
+          Metro_Set_Tamper((METRO_Channel_t)*(pData+2), (METRO_Tamper_Tolerance_t) *(pData+4),NO_CHANGE);
+
+        }
+        /* Enable/Disable tamper requested */
+        else if ( *(pData+3) == 2)
+        {
+          /* Ask Metro driver to set the new Tamper enable bit config*/
+          Metro_Set_Tamper((METRO_Channel_t)*(pData+2),NO_CHANGE_TOL,(METRO_CMD_Device_t) *(pData+4));
+        }
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /*  it is a metro Get Channel tamper config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel Tamper ) */
+        /* get the  next param in the cmd line : *(pData+3) = tolerance requested : 1 , Tamper Requested = 2*/
+
+        /*  tolerance requested */
+        if (*(pData+3) == 1)
+        {
+
+          /* Display tolerance  */
+          strcpy(text, "Metro TAMPER config Tolerance = 0x%02x \n");
+          data[1] = Metro_Get_Tamper((METRO_Channel_t)*(pData+2),(METRO_Tamper_Tolerance_t*)&data[0]);
+        }
+        /*  Enable Tamper  requested*/
+        else if (*(pData+3) == 2)
+        {
+          /* Display RMS voltage */
+          strcpy(text, "Metro TAMPER Config Enable bit = 0x%02x \n");
+          data[0] = Metro_Get_Tamper((METRO_Channel_t)*(pData+2),(METRO_Tamper_Tolerance_t*)&data[1]);
+        }
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+      /*  Set/Get Vref */
+    case (10):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set Vref config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = Vref type selected  EXT_VREF = 0, INT_VREF = 1 */
+
+        /* Ask Metro driver to set the new vref config */
+        Metro_Set_Vref((METRO_Channel_t)*(pData+2), (METRO_Vref_t)*(pData+3));
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /*  it is a metro Get Channel Vref config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel  ) */
+
+        strcpy(text, "Metro Get Vref config for Channel = %02x :  Vref = 0x%02x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_Vref((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+    /*  Set/Get HightPass filters config ( DC remover )  for Current and voltage Channel */
+    case (11):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro  HightPass filters config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1 to 4 */
+        /* get the  next param in the cmd line : *(pData+3) = 0 current channel request or 1 : voltage channel requested */
+        /* Get the next param in the cmd line  : *(pData+4) =   DEVICE_DISABLE = 0,  DEVICE_ENABLE = 1 */
+
+        /* Current requested */
+        if ( *(pData+3) == 1)
+        {
+          /* Ask Metro driver to set the HightPass filters config for current channel */
+          Metro_Set_Current_HP_Filter((METRO_Channel_t)(*(pData+2)),(METRO_CMD_Device_t)(*(pData+4)));
+        }
+        /* voltage requested */
+        else if ( *(pData+3) == 2)
+        {
+          /* Ask Metro driver to set the HightPass filters config for Voltage channel */
+          Metro_Set_Voltage_HP_Filter((METRO_Channel_t)*(pData+2), (METRO_CMD_Device_t)*(pData+4));
+        }
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /*  it is a metro Get Channel HightPass filters config  requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel  ) */
+        /* get the  next param in the cmd line : *(pData+3) = 0 current channel requested or 1 : voltage channel requesteded */
+
+        data[0] = *(pData+2);
+
+        /* Current requested */
+        if ( *(pData+3) == 1)
+        {
+          /* Ask Metro driver to Get the HightPass filters config for current channel */
+          data[1] = Metro_Get_Current_HP_Filter((METRO_Channel_t)*(pData+2));
+          strcpy(text, "Metro HightPass filters config for Current Channel = %02x :  Enable = 0x%02x\n");
+
+        }
+        /* voltage requested */
+        else if ( *(pData+3) == 2)
+        {
+          /* Ask Metro driver to Get the HightPass filters config for Voltage channel */
+          data[1] = Metro_Get_Voltage_HP_Filter((METRO_Channel_t)*(pData+2));
+          strcpy(text, "Metro HightPass filters config for Voltage Channel = %02x :  Enable = 0x%02x\n");
+        }
+
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+
+      /*  Set/Get  Coil integrator (Rogowski) for a  channel */
+    case (13):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set Coil integrator config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = DEVICE_DISABLE = 0,  DEVICE_ENABLE = 1, */
+
+        /* Ask Metro driver to set the new Coil integrator config */
+        Metro_Set_Coil_integrator((METRO_Channel_t)*(pData+2), (METRO_CMD_Device_t)*(pData+3));
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /*  it is a metro Get Coil integrator config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel  ) */
+        strcpy(text, "Metro Get Coil integrator config for Channel = %02x :  Enable = 0x%02x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_Coil_integrator((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+
+    /*  Set/Get Ah_Accumulation_Down_Threshold*/
+    case (14):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set Ah_Down_threshold config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = in_Metro_Ah_Down_threshold */
+
+        /* Ask Metro driver to set the new Ah_Down_threshold config */
+        Metro_Set_Ah_Accumulation_Down_Threshold((METRO_Channel_t)*(pData+2), (uint16_t)*(pData+3));
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /*  it is a metro Get Channel Ah Down Threshold config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel  ) */
+
+        strcpy(text, "Metro Get Ah Down Threshold  config for Channel = %02x :  Ah Down Threshold = 0x%02x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_Ah_Accumulation_Down_Threshold((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+
+    /*  Set/Get Ah_Accumulation_Up_Threshold*/
+    case (15):
+    {
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set Ah_Accumulation_Up_Threshold config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = in_Metro_Ah_Up_threshold */
+
+        /* Ask Metro driver to set the new Ah_Accumulation_Up_Threshold config */
+        Metro_Set_Ah_Accumulation_Up_Threshold((METRO_Channel_t)*(pData+2), (uint16_t)*(pData+3));
+      }
+      /* It is a get */
+      else if (*(pData+1) == 1)
+      {
+        /*  it is a metro Get Channel Ah up Threshold config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel  ) */
+
+        strcpy(text, "Metro Get Ah Up Acc Threshold  config for Channel = %02x :  Ah Up Acc Threshold = 0x%02x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_Ah_Accumulation_Up_Threshold((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+      }
+     }
+    break;
+     /* read AH Acc for current channel service*/
+  case (16):
+  {
+      /* test set or get request */
+      /* Only Get is implemented */
+      if (*(pData+1) == 1)
+      {
+        /* it is a metro read AH Acc service requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1, 2, 3 or 4 */
+
+        strcpy(text, "Metro Read AH Acc for Channel %02x :  0x%08x\n");
+
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_AH_Acc((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+
+      }
+   }
+   break;
+
+  }
+}
+
+static void METRO_HandleMetroCal(uint32_t *pData)
+{
+  /* Get Payload pointer from Payload[0] */
+  /* Payload  DATA  : [0] = Cal service, [1] = set (0) or get(1)   , [2]...[N] params */
+  /* Cal  service (*pData) :   */
+  /*   - 0 :  Set/Get V_Calibration      */
+  /*   - 1 :  Set/Get C_Calibration      */
+  /*   - 2 :  Set/Get Phase_V_Calibration      */
+  /*   - 3 :  Set/Get V_Calibration      */
+  /*   - 4 :  Set/Get power Cal Offset compensation config */
+
+  uint32_t data[2] = {0,0};
+
+  switch (*pData)
+  {
+    /* V_Calibration service*/
+    case (0):
+    {
+      /* test set or get request */
+
+      /* Set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a cal  Set  V_Calibration */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u16 V calibration value ( !!! register value under 12 bits  !!!)*/
+
+        /* Ask Metro driver to set the new V calibration value */
+        Metro_Set_V_Calibration((METRO_Channel_t)*(pData+2), (uint16_t) *(pData+3));
+
+      }
+      /* Get */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a cal  Get  V_Calibration */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology Read V Calibration from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_V_Calibration((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+
+    /* C Calibration service*/
+    case (1):
+    {
+      /* test set or get request */
+
+      /* Set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a cal  Set  C_Calibration */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u16 C calibration value ( !!! register value under 12 bits  !!!)*/
+
+        /* Ask Metro driver to set the new C calibration value */
+        Metro_Set_C_Calibration((METRO_Channel_t)*(pData+2), (uint16_t) *(pData+3));
+
+      }
+      /* Get */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a cal  Get  C_Calibration */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology Read C Calibration from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_C_Calibration((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+    /* Phase V_Calibration service*/
+    case (2):
+    {
+      /* test set or get request */
+
+      /* Set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a cal  Set Phase V_Calibration */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u8 Phase V calibration value ( !!! register value under 2 bits  !!!) */
+
+        /* Ask Metro driver to set the new Phase V calibration value */
+        Metro_Set_Phase_V_Calibration((METRO_Channel_t)*(pData+2), (uint8_t) *(pData+3));
+
+      }
+      /* Get */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a cal  Get Phase V_Calibration */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology Read Phase V Calibration from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_Phase_V_Calibration((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+
+    /* Phase C Calibration service*/
+    case (3):
+    {
+      /* test set or get request */
+
+      /* Set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a cal Set  Phase C_Calibration */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u16 Phase C calibration value ( !!! register value under 10 bits  !!!)  */
+
+        /* Ask Metro driver to set the new Phase C calibration value */
+        Metro_Set_Phase_C_Calibration((METRO_Channel_t)*(pData+2), (uint16_t) *(pData+3));
+
+      }
+      /* Get */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a cal  Get  Phase C_Calibration */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology Read Phase C Calibration from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_Phase_C_Calibration((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+     /* Set/Get power Cal Offset compensation config */
+   case (4):
+    {
+
+      /* test set or get request */
+      /* It is a set */
+      if (*(pData+1) == 0)
+      {
+        /* it is a metro set power Offset compensation config requested */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = in_Metro_Power_Selection :  W_ACTIVE = 1, F_ACTIVE = 2, REACTIVE = 3, APPARENT_RMS = 4  */
+        /* get the  next param in the cmd line : *(pData+4) = in_Metro_Power_Offset : offset is coded under 10 bits */
+
+        /* Ask Metro driver to set the new power Offset compensation config */
+        Metro_Set_Power_Offset_Compensation((METRO_Channel_t)*(pData+2), (METRO_Power_selection_t)*(pData+3), (int16_t)*(pData+4));
+
+      }
+
+      /* It is a Get  */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a metro Get power Offset compensation config requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Channel 1, 2 , 3 or 4 */
+        /* get the  next param in the cmd line power type  *(pData+3) : W_ACTIVE = 1, F_ACTIVE = 2, REACTIVE = 3, APPARENT_RMS = 4 */
+
+        /* build text display according to Power type */
+        switch (*(pData+3))
+        {
+        case (W_ACTIVE):
+          {
+            strcpy(text, "Get power W_ACTIVE Offset  config Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (F_ACTIVE):
+          {
+            strcpy(text, " Get power F_ACTIVE Offset  config Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (REACTIVE):
+          {
+            strcpy(text, " Get power REACTIVE Offset  config Channel %02x :  0x%08x\n");
+          }
+          break;
+        case (APPARENT_RMS):
+          {
+            strcpy(text, " Get power APPARENT_RMS Offset config Channel %02x :  0x%08x\n");
+          }
+          break;
+
+        }
+
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_Power_Offset_Compensation((METRO_Channel_t)*(pData+2), (METRO_Power_selection_t) *(pData+3));
+        MNSH_Printf(text,data[0],data[1]);
+
+      }
+
+     }
+    break;
+  }
+}
+
+static void METRO_HandleMetroIRQ(uint32_t *pData)
+{
+  /* Get Payload pointer from Payload[0] */
+  /* Payload  DATA  : [0] = IRQ service, [1] = set (0) or get(1)   , [2]...[N] params */
+  /* IRQ  service (*pData) :   */
+  /*   - 0 :  Set/Get IRQ  Mask    */
+  /*   - 1 :  Set/Get IRQ Status      */
+  /*   - 2 :  Get DSP Event      */
+
+  uint32_t data[2] = {0,0};
+
+  switch (*pData)
+  {
+    /* Set/Get IRQ*/
+    case (0):
+    {
+      /* test set or get request */
+
+      /* Set IRQ mask*/
+      if (*(pData+1) == 0)
+      {
+        /* it is a cal  Set  IRQ mask */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u32 Metro_IT_Mask */
+
+        /* Ask Metro driver to set the new IRQ mask value */
+        Metro_Set_IRQ_Mask_for_Channel((METRO_Channel_t)*(pData+2), (uint32_t) *(pData+3));
+      }
+      /* Get IRQ Mask*/
+      else if (*(pData+1) == 1)
+      {
+        /* it is a cal  Get  IRQ mask */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Get  IRQ mask from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_IRQ_Mask_for_Channel((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+
+    /* Set(Clear) IRQ / Get IRQ Status*/
+    case (1):
+    {
+      /* test set or get request */
+
+      /* Set (Clear IRQ) */
+      if (*(pData+1) == 0)
+      {
+        /* it is a  Clear IRQ  service */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = METRO_Status_Type_t Metro_Status_requested*/
+
+        /* Ask Metro driver to clear the IRQ requested */
+        Metro_Clear_Status_for_Channel((METRO_Channel_t)*(pData+2), (METRO_Status_Type_t) *(pData+3));
+
+      }
+      /* Get IRQ status */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a Get IRQ status service requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = METRO_Status_Type_t Metro_Status_requested*/
+
+        strcpy(text, "Metrology Read IRQ Status from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_Status_from_Channel((METRO_Channel_t)*(pData+2),(METRO_Status_Type_t) *(pData+3));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+    /* Get DSP event*/
+    case (2):
+    {
+      /* test set or get request */
+
+      /* Get Only for this service*/
+      if (*(pData+1) == 1)
+      {
+        /* it is Get DSP event */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = METRO_Live_Event_Type_t Metro_Live_Event_requested*/
+
+        strcpy(text, "Metrology Read DSP Event from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_Live_Event_from_Channel((METRO_Channel_t)*(pData+2),(METRO_Live_Event_Type_t) *(pData+3));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+  }
+}
+
+static void METRO_HandleMetroSagSwell(uint32_t *pData)
+{
+    /* Get Payload pointer from Payload[0] */
+  /* Payload  DATA  : [0] = SAG_SWELL service, [1] = set (0) or get(1)   , [2]...[N] params */
+  /* SAG_SWELL  service (*pData) :   */
+  /*   - 0 :  Set/Get SAG threshold    */
+  /*   - 1 :  Set/Get SAG Detect time    */
+  /*   - 2 :  Set/Get V SWELL config      */
+  /*   - 3 :  Set/Get C SWELL config       */
+  /*   - 4 :  Get SAG time      */
+  /*   - 5 :  Get V SWELL Time      */
+  /*   - 6 :  Get C SWELL Time       */
+  /*   - 7 :  Set/Get SAG and SWELL Clear TimeOut      */
+  /*   - 8 :  Set Clear SAG and SWELL Event       */
+
+  uint32_t data[2] = {0,0};
+
+  switch (*pData)
+  {
+    /* Set/Get SAG threshold*/
+    case (0):
+    {
+      /* test set or get request */
+
+      /* Set SAG threshold */
+      if (*(pData+1) == 0)
+      {
+        /* it is a Set SAG config */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u32 in_Metro_SAG_Threshold */
+
+        /* Ask Metro driver to set the new SAG threshold */
+        Metro_Set_SAG_Config((METRO_Channel_t)*(pData+2), (uint32_t) *(pData+3),0);
+      }
+      /* Get SAG threshold*/
+      else if (*(pData+1) == 1)
+      {
+        /* it is a SAG Get threshold */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Get SAG threshold: 0x%08x\n");
+
+        Metro_Get_SAG_Config((METRO_Channel_t)*(pData+2),&data[0],&data[1]);
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+    /* Set/Get SAG config Detect time*/
+    case (1):
+    {
+      /* test set or get request */
+
+      /* Set SAG Detect time */
+      if (*(pData+1) == 0)
+      {
+        /* it is a Set SAG config */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u32 in_Metro_SAG_detect_time */
+
+        /* Ask Metro driver to set the new SAG Detect time */
+        Metro_Set_SAG_Config((METRO_Channel_t)*(pData+2),0, (uint32_t) *(pData+3));
+      }
+      /* Get SAG Detect time*/
+      else if (*(pData+1) == 1)
+      {
+        /* it is a SAG Get Detect time */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Get SAG detect Time: 0x%08x\n");
+
+        Metro_Get_SAG_Config((METRO_Channel_t)*(pData+2),&data[1],&data[0]);
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+
+    /* Set/Get V SWELL config */
+    case (2):
+    {
+      /* test set or get request */
+
+      /* Set V SWELL config */
+      if (*(pData+1) == 0)
+      {
+        /* it is a  V SWELL config  service */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u16 in_Metro_V_SWELL_Threshold*/
+
+        /* Ask Metro driver to set the new V SWELL config */
+        Metro_Set_V_SWELL_Config((METRO_Channel_t)*(pData+2), (uint16_t) *(pData+3));
+
+      }
+      /* Get V SWELL config */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a Get V SWELL config service requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology V SWELL threshold from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_V_SWELL_Config((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+    /* Set/Get C SWELL config */
+    case (3):
+    {
+      /* test set or get request */
+
+      /* Set C SWELL config */
+      if (*(pData+1) == 0)
+      {
+        /* it is a  C  SWELL config  service */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u16 in_Metro_C_SWELL_Threshold*/
+
+        /* Ask Metro driver to set the new C SWELL config */
+        Metro_Set_C_SWELL_Config((METRO_Channel_t)*(pData+2), (uint16_t) *(pData+3));
+
+      }
+      /* Get C SWELL config */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a Get C SWELL config service requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology C SWELL threshold from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_C_SWELL_Config((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+    /*  Get SAG time */
+    case (4):
+    {
+      /* Only Get SAG time */
+      if (*(pData+1) == 1)
+      {
+        /* it is a SAG time service requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology Get SAG time from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_SAG_Time((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+    /*  Get V SWELL  time */
+    case (5):
+    {
+      /* Only Get V SWELL  time */
+      if (*(pData+1) == 1)
+      {
+        /* it is a V SWELL  time service requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology Get V SWELL  time from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_V_SWELL_Time((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+    /*  Get C SWELL time */
+    case (6):
+    {
+      /* Only Get C SWELL time */
+      if (*(pData+1) == 1)
+      {
+        /* it is a C SWELLtime service requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology C SWELL time from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Read_C_SWELL_Time((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+    /* Set/Get SAG and SWELL Clear TimeOut */
+    case (7):
+    {
+      /* test set or get request */
+
+      /* Set SAG and SWELL Clear TimeOut */
+      if (*(pData+1) == 0)
+      {
+        /* it Set SAG and SWELL Clear TimeOut  service */
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+        /* get the  next param in the cmd line : *(pData+3) = u8 in_Metro_Sag_and_Swell_Clear_Timeout*/
+
+        /* Ask Metro driver to set the new SAG and SWELL Clear TimeOut */
+        Metro_Set_SAG_and_SWELL_Clear_Timeout((METRO_Channel_t)*(pData+2), (uint8_t)*(pData+3));
+
+      }
+      /* Get SAG and SWELL Clear TimeOut  */
+      else if (*(pData+1) == 1)
+      {
+        /* it is a SAG and SWELL Clear TimeOut service requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        strcpy(text, "Metrology Get SAG and SWELL Clear TimeOut from Channel %02x :  0x%08x\n");
+        data[0] = *(pData+2);
+        data[1] = Metro_Get_SAG_and_SWELL_Clear_Timeout((METRO_Channel_t)*(pData+2));
+        MNSH_Printf(text,data[0],data[1]);
+     }
+    }
+    break;
+    /*  Set Clear SAG and SWELL Events service */
+    case (8):
+    {
+      /* Only Set Clear SAG and SWELL Events */
+      if (*(pData+1) == 0)
+      {
+        /* it is a Set Clear SAG and SWELL Event service requested*/
+        /* get the  next param in the cmd line : *(pData+2) = Channel */
+
+        /* Ask Metro driver to Clear SAG and SWELL Events */
+        Metro_Clear_SAG_and_SWELL_Event((METRO_Channel_t)*(pData+2));
+     }
+    }
+    break;
+  }
+}
+
+
+/*********************************** LED MANAGEMENT FUNCTIONS ************************************************/
+
+/**
+  * @brief  is_Current_Consumption_Present
+  * @param  None
+  * @note   This function check if there's a current consumption at least on one 
+  *         phase.
+  * @retval True/False
+  */
+
+bool is_Current_Consumption_Present (void)
+{
+  /* Check if the device is configured in mono o threphase */
+  switch (metroData.nbPhase)
+  {
+    case 1:             /* Monophase */
+      /* at least 1A of consumption on L1 phase */
+      if ((metroData.rmscurrent[0] & CURRENT_VALUE_MASK_32) > 1000)
+        return true;
+    break;
+    
+    case 3:             /* Threephase */
+      /* at least 1A of consumption on L1 or L2 or L3 phase */
+      if (((metroData.rmscurrent[0] & CURRENT_VALUE_MASK_32) > 1000) || 
+          ((metroData.rmscurrent[1] & CURRENT_VALUE_MASK_32) > 1000) ||
+          ((metroData.rmscurrent[2] & CURRENT_VALUE_MASK_32) > 1000))
+        return true;      
+    break;
+    
+    default:
+    break;
+  }
+  /* Current consumption NOT present */
+  return false;
+}
+
+/**
+  * @brief  LED_Generate_Pulse
+  * @param  Duration in ms.
+  * @note   This function generate a pulse on the specified led, the duration is 
+  *         specified by the parameter.
+  * @retval None
+  */
+
+#define LED_OFF  0
+#define LED_ON   1
+
+void LED_Generate_Pulse (uint16_t ms_Duration)
+{
+  
+    static uint16_t PulseTime;
+    static uint8_t State = LED_OFF;
+    static bool TogglePin = LED_OFF;
+
+    /* Generate LED pulse with the specified duration */
+    switch (State)
+    {
+      case LED_OFF:
+          /* Set pulsed blink at 1Hz pin state */
+          if (TogglePin != LED.Blink._at_1Hz)
+          {
+            TogglePin = LED.Blink._at_1Hz;
+            /* Power ON the led  */
+            // LEDs ARE MANAGED BY STM34 --> HAL_GPIO_WritePin(LED_GPIO_Port, LED_Error_Pin, GPIO_PIN_RESET);    
+            Metro_Set_Led_On_Off(EXT1, LED2, DEVICE_DISABLE);            
+            PulseTime = LED.PulseTime + ms_Duration;
+            State = LED_ON;
+          }
+        break;
+      case LED_ON:
+          /* Duration period (ms) is elapsed?*/
+          if (LED.PulseTime > PulseTime)
+          {
+            /* Power OFF the led */
+            // LEDs ARE MANAGED BY STM34 --> HAL_GPIO_WritePin(LED_GPIO_Port, LED_Error_Pin, GPIO_PIN_SET);    
+            Metro_Set_Led_On_Off(EXT1, LED2, DEVICE_ENABLE);            
+            State = LED_OFF;          
+          }            
+        break;
+      default:
+        break;
+    }   
+    
+}
+
+/**
+  * @brief  Manage_LED_Alive_PWM
+  * @param  GPIO Pin State
+  * @note   This function handle the behaviour of the leds according to the 
+  *         scenario: led alive (green) blinks @2Hz when the device is working.
+                      led error (red) blinks @4Hz in case of errors.     
+                      led error (red) is fixed on when the device is in calibration.
+
+  * @retval None
+  */
+
+void Manage_LED_Alive_PWM(GPIO_PinState LED_PinState)
+{
+  
+  static uint8_t cnt = 0;
+  
+  /* Manage LED Alive (GREEN)@2Hz */  
+  /* Generate PWM pulse */  
+  switch (LED_PinState)
+  {
+    case GPIO_PIN_RESET: /* LED on, toggle it in order to have a PWM signal */
+       /* Duty cycle 50% @100Hz */
+       if (cnt++ >= 5)
+       {
+         cnt = 0;
+         // LEDs ARE MANAGED BY STM34 --> HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Alive_Pin);
+         Metro_Set_Led_On_Off(EXT1, LED1, DEVICE_DISABLE);
+       }
+    break;
+    
+    case GPIO_PIN_SET:  /* LED off */
+       // LEDs ARE MANAGED BY STM34 --> HAL_GPIO_WritePin(LED_GPIO_Port, LED_Alive_Pin, LED_PinState);
+       Metro_Set_Led_On_Off(EXT1, LED1, DEVICE_ENABLE);      
+    break;
+    
+    default:
+    break;
+  }
+
+}
+
+/**
+  * @brief  Manage_LED_Error_PWM
+  * @param  GPIO Pin State
+  * @note   This function handle the behaviour of the leds according to the 
+  *         scenario: led alive (green) blinks @2Hz when the device is working.
+                      led error (red) blinks @4Hz in case of errors.     
+                      led error (red) is fixed on when the device is in calibration.
+
+  * @retval None
+  */
+
+void Manage_LED_Error_PWM(GPIO_PinState LED_PinState)
+{
+  
+  static uint8_t cnt = 0;
+  
+  /* Manage LED Alive (GREEN)@2Hz */  
+  /* Generate PWM pulse */    
+    switch (LED_PinState)
+  {
+    case GPIO_PIN_RESET: /* LED on, toggle it in order to have a PWM signal */
+       /* Duty cycle 50% @100Hz */
+       if (cnt++ >= 5)
+       {
+         cnt = 0;
+         // LEDs ARE MANAGED BY STM34 --> HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Error_Pin);         
+         Metro_Set_Led_On_Off(EXT1, LED2, DEVICE_DISABLE);
+       }
+    break;
+    
+    case GPIO_PIN_SET:  /* LED off */
+       // LEDs ARE MANAGED BY STM34 --> HAL_GPIO_WritePin(LED_GPIO_Port, LED_Error_Pin, GPIO_PIN_SET); 
+       Metro_Set_Led_On_Off(EXT1, LED2, DEVICE_ENABLE);
+    break;
+    
+    default:
+    break;
+  }
+
+}
+
+/**
+  * @brief  LED_Handler
+  * @param  none
+  * @note   This function handle the behaviour of the leds according to the 
+  *         scenario: led alive (green) blinks @2Hz when the device is working.
+                      led error (red) blinks @4Hz in case of errors.     
+                      led error (red) is fixed on when the device is in calibration.
+
+  * @retval None
+  */
+
+void LED_Handler (void)
+{
+  
+  GPIO_PinState LED_2Hz_PinState, LED_4Hz_PinState;
+    
+  /* Check 1Hz blinking frequency (1024ms tick) */
+  if ((((uwTick & 0x400) != 0) && (LED.Blink._at_1Hz == false)) || 
+      (((uwTick & 0x400) == 0) && (LED.Blink._at_1Hz == true)))
+  {  
+    LED.Blink._at_1Hz ^= 0x01;
+  }
+  /* Check 2Hz blinking frequency (512ms tick) */
+  if ((((uwTick & 0x200) != 0) && (LED.Blink._at_2Hz == false)) || 
+      (((uwTick & 0x200) == 0) && (LED.Blink._at_2Hz == true)))
+  {  
+    LED.Blink._at_2Hz ^= 0x01;
+  }
+  /* Check 4Hz blinking frequency (256ms tick) */
+  if ((((uwTick & 0x100) != 0) && (LED.Blink._at_4Hz == false)) || 
+      (((uwTick & 0x100) == 0) && (LED.Blink._at_4Hz == true)))
+  {
+      LED.Blink._at_4Hz ^= 0x01;
+  }
+    
+  /************************************************************************/
+  /**********************  LED behaviour  *********************************/
+  /************************************************************************/
+  
+  /* Set blink at 2Hz pin state */
+  LED_2Hz_PinState = LED.Blink._at_2Hz == true ? GPIO_PIN_RESET : GPIO_PIN_SET;
+  /* Set blink at 4Hz pin state */
+  LED_4Hz_PinState = LED.Blink._at_4Hz == true ? GPIO_PIN_RESET : GPIO_PIN_SET;
+  /***********************  LED alive  *********************************/
+  
+  /* Manage LED Alive (GREEN)@2Hz */  
+  /* Generate PWM pulse */  
+  Manage_LED_Alive_PWM(LED_2Hz_PinState);
+  
+  /* Manage LED error (RED) @4Hz */
+  if (em_Status.Flags.CalibFailed)                      /* Calibration FAILED */
+    Manage_LED_Error_PWM(LED_4Hz_PinState);
+  else if (metroData.Calib.Flags.bit._ON)                /* Calibration ON */
+    Manage_LED_Error_PWM(GPIO_PIN_RESET);
+  else if (is_Current_Consumption_Present())            /* at least 1A of consumption is present */
+    LED_Generate_Pulse(100);                            /* Generate 50ms pulse every 1s */
+  else                                                  /* LED OFF */
+    Manage_LED_Error_PWM(GPIO_PIN_SET);      
+  
+}
+
+/*********************** END OF LED MANAGEMENT FUNCTIONS ********************************/
+
+/**
+  * @}
+  */
+
+/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

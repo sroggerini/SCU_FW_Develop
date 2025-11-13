@@ -1,0 +1,5107 @@
+/**
+* @file        sbcSEM.c
+*
+* @brief       manager upgrade notify MDB register for SEM   - Implementation -
+*
+* @author      Nick
+*
+* @riskClass   C
+*
+* @moduleID
+*
+* @vcsInfo
+*     $Id: scuMdb.c 334 2023-11-06 11:11:45Z luca $
+*
+*     $Revision: 334 $
+*
+*     $Author: luca $
+*
+*     $Date: 2023-11-06 12:11:45 +0100 (lun, 06 nov 2023) $
+*
+*
+* @copyright
+*       Copyright (C) 2016 SCAME S.p.A. All rights reserved.
+*       This file is copyrighted and the property of Aesys S.p.A.. It contains confidential and proprietary
+*       information. Any copies of this file (in whole or in part) made by any method must also include a copy of this
+*       legend.
+*       Developed by:  SCAME S.p.A.
+***********************************************************************************************************************/
+
+/************************************************************
+ * Include
+ ************************************************************/
+//#include <main.h>
+#include <stddef.h>
+#include <string.h>
+#include <stdlib.h>
+#include <stdio.h>
+#include <math.h>
+#ifdef GD32F4xx
+#include "stm32f4xx_hal.h"
+#include "stm32f4xx_ll_rcc.h"
+#else
+#include "stm32h5xx_hal.h"
+#include "stm32h5xx_ll_rcc.h"
+#endif
+#include "cmsis_os.h"
+#include "prot_OnUsart.h"
+#include "wrapper.h"
+#include "sbcUart.h"
+#include "scuMdb.h"
+#include "eeprom.h"
+#include "telnet.h"
+#include "sbcGsy.h"
+#include "uart_Legacy.h"
+#include "inputsMng.h"
+#include "rtcApi.h"
+#include "scheduleMng.h"   
+#include "httpserver-socket.h"
+#include "ExtInpMng.h"
+#include "RfidMng.h"
+#include "scuMdb.h"
+#include "sbcSem.h"
+#include "ioExp.h"
+#include "PwmMng.h"
+#include "LcdMng.h"
+#include "monitorMng.h"
+#include "telnet.h"
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**           LOCAL MACROS, TYPEDEF, STRUCTURE, ENUM                         **
+**                                                                          **
+******************************************************************************
+*/
+
+#define   DEFAULT_SBCSEM_TIME             pdMS_TO_TICKS((uint16_t)1000)
+#define   SBCSEM_TIMER_GARD_TIME          pdMS_TO_TICKS((uint16_t)500)
+
+#define   KEY_FULL_CONFIG                 ((uint16_t)0xAA55)
+#define   KEY_LOCAL_CONFIG                ((uint16_t)0xBB66)
+#define   KEY_SCU_SLAVE_LINKED_2          ((uint16_t)0xCC72)
+#define   KEY_SCU_SLAVE_LINKED_4          ((uint16_t)0xCC74)
+#define   KEY_FULL_MASTER_P_S             ((uint16_t)0xDD88)
+#define   KEY_FULL_MASTER_P               ((uint16_t)0x0088)
+#define   KEY_FULL_MASTER_S               ((uint16_t)0xDD00)
+
+#define   FACTOR_FOR_RANDOM_DELAY         ((uint16_t)64)
+// --------------------------------------------------------------------------------------------------------------------------- //
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Local Const                                   **
+**                                                                          **
+****************************************************************************** 
+*/ 
+
+static const uint32_t   sbcSemMaskBit[SCU_NUM] = {
+  0x0001,    0x0002,    0x0004,    0x0008,    0x0010,     0x0020,     0x0040,     0x0080, 
+  0x0100,    0x0200,    0x0400,    0x0800,    0x1000,     0x2000,     0x4000,     0x8000
+};
+
+static const char AddrUidStr[]       = "UID Athorization";
+static const char AddrEventFlag[]    = "Event Flag";
+static const char AddrChargStatus[]  = "Stato->";
+static const char AddrErr1[]         = "Error1";
+static const char AddrErr2[]         = "Error2";
+static const char AddrConnType[]     = "Connector Type";
+static const char AddrSessId[]       = "Session Id";
+static const char AddrEm[]           = "Energy Meter";
+static const char AddrMeasure[]      = "Measure";
+static const char *nameState[]       = {" Initial", " Idle",        " Preparing", " Ev Connected", " Charging", " Suspended Ev", " Suspended EvSe",   " End Charge",
+                                        " Faulted", " Unavailable", " Reserved",  " Bootloader",   "Shutdown",  " Rebooting",    " Suspended NoPower"};
+
+static const socketPresence_t Default_Socket_Presence = {.chainPresence = 0, .livePresence = 0, .keyPresence = KEY_FULL_CONFIG, .activityStatus = 0, 
+                                                        { 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16, 
+                                                         17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
+                                                        { 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16,
+                                                         17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}, 
+                                                        .assignedDeviceId = 0};
+#ifdef NON_SERVE
+/* define a fixed structure where to find the configuration parameters */
+static const allConfPar_st allConfParDef = {
+  (uint16_t)0x0,
+  {(uint32_t)START_EE_ADDRES,             (uint32_t)EEPROM_PARAM_NUM},
+  {(uint32_t)SCU_GENERAL_INFO_EE_ADDRES,  (uint32_t)sizeof(infoStation_t)},
+  {(uint32_t)EDATA_BKP_SCU_EE_ADDRESS,    (uint32_t)sizeof(infoStation_t)},
+  {(uint32_t)PRD_CODE_EE_ADDRES,          (uint32_t)(END_SN_EE_ADDRES - PRD_CODE_EE_ADDRES + 1)},
+  {(uint32_t)EDATA_DEFAULT_ID_CODES,      (uint32_t)(PRODUCT_SN_LENGTH + PRODUCT_CODE_LENGTH + FAKE_CODE_LENGTH)},
+  (uint32_t)0
+};
+#endif                                                    
+
+/* Definitions for SCB (SEM) modbus upgrade register Task   */
+const osThreadAttr_t pollingSlaveTask_attributes = {
+  .name = "POLLING_SLAVE",
+  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = configMINIMAL_STACK_SIZE * 4     // 
+};
+
+/* Definitions for supend / release Task Manager  remoteMngTaskHandle  */
+const osThreadAttr_t remoteMngTask_attributes = {
+  .name = "SUSP_REL_TASK",
+  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = configMINIMAL_STACK_SIZE * 2     // 
+};
+
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Local Variables                               **
+**                                                                          **
+****************************************************************************** 
+*/ 
+EvsMngEvent_en    lastCommandSent;
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Local  Variables                              **
+**                                                                          **
+****************************************************************************** 
+*/ 
+static    TimerHandle_t     xSbcSemTimers[NUM_SBCSEM_TIMER];
+static    uint8_t           numberOnLcd;
+static    uint16_t          prevState[SCU_NUM];
+static    uint32_t          packetStatsCounter;
+static    areaConfPar_st*   ptrAreaConfPar;
+
+
+// --------------------------------------------------------------------------------------------------------------------------- //
+
+
+// --------------------------------------------------------------------------------------------------------------------------- //
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Internal Function prototype                   **
+**                                                                          **
+******************************************************************************
+*/
+
+static  uint32_t          sbcSemMsgProcess          (frameSbcSem_st* pMsg, uint32_t currTick);
+static  uint32_t          rs485SemMsgProcess        (frameSbcSem_st* pMsg);
+static  void              writeMasterModbusRegister (uint8_t* pOriginData, headerReqRWMR_st* pScuRWmR);
+static  uint8_t           getInfoSocket             (uint32_t presenceMask, sbcSemInfoMng_st* pInfo); 
+static  void              readMasterModbusRegister  (headerRHR_t* pScuRIR);
+static  void              semUpdateConfig           (frameSbcSem_st* pMsg); 
+static  bitNotifyResult_e setChangeRegisterBit      (uint16_t ixScu, frameSbcSem_st* pMsg, uint32_t mskBit, uint16_t deviceId); 
+static  uint8_t           resetChangeRegisterBit    (uint16_t ixScu, uint16_t regChanged, uint16_t lenRd); 
+static  void              sbcSemTimCallBack         (TimerHandle_t pxTimer);
+static  nodeMsg           extractSendFirstInList    (nodeMsg head);
+static  nodeMsg           addNode                   (nodeMsg head, frameSbcSem_st *pMessage);
+static  uint32_t          pollingSlaveProcess       (frameSbcSem_st* pMsg);
+static  void              pollingSlaveTask          (void * pvParameters);
+static  uint8_t           getSktNumInFakeCode       (void); 
+static  uint16_t          getTagIdFromPrdSn         (void);
+static  uint8_t           checkAssignNewAddress     (frameSbcSem_st* pMsg); 
+static  sbcSemStates_e    checkToSendReqAddress     (frameSbcSem_st* pMsg); 
+static  void              mngReqAddress             (frameSbcSem_st* pMsg); 
+static  uint32_t          remoteSuspRelProcess      (frameRemote_st* pMsg);
+static  void              remoteMngTask             (void * pvParameters);
+static  void              restartSbcSemTimer        (uint16_t timerId, uint32_t period);
+static  void              forceSBCreadScu           (uint32_t activityMask); 
+static  void              removeSocketFromList      (uint8_t skId); 
+static  uint8_t           getFirstFreeLogicId       (void); 
+static  void              resetPacketStatusNum      (void); 
+#ifdef TRANSLATE_ID_LOGIC
+static  uint8_t           setModbusAddress          (void); 
+#endif
+static  void              saveAllSlaveParameters    (void);
+static  void              setInfoEepromSlaveDone    (uint16_t lastDetected);
+static  uint8_t           sendEeepromInfoForCloning (uint8_t idLogic);
+
+// --------------------------------------------------------------------------------------------------------------------------- //
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Global Variables                              **
+**                                                                          **
+****************************************************************************** 
+*/ 
+/*  queue  declaration */
+xQueueHandle          sbcSemQueue = NULL;
+frameSbcSem_st        frameSbcSem;
+scuRoMapRegister_st*  pScuRoMapReg;
+sbcSemInfoMng_st      sbcSemInfoMng;
+tmMapRegister_st*     pScuTmMapReg;
+
+xQueueHandle          rs485SemQueue = NULL;
+frameSbcSem_st        framers485Sem;
+rs485SemInfoMng_st    rs485SemInfoMng;
+socketPresence_t      socketPresence;
+frameSbcSem_st        currFrameSbcSem;
+
+nodeMsg               headMsg;
+
+osThreadId_t          pollingSlaveTaskHandle;
+xQueueHandle          pollingSlaveQueue = NULL;
+pollingSlaveMng_st    pollingSlaveMng;
+
+osThreadId_t          remoteMngTaskHandle;
+xQueueHandle          remoteMngQueue = NULL;
+remoteMng_st          remoteMng;
+
+// --------------------------------------------------------------------------------------------------------------------------- //
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            External Variables                            **
+**                                                                          **
+******************************************************************************
+*/
+extern osThreadId_t sbcMngTaskHandle;
+
+// --------------------------------------------------------------------------------------------------------------------------- //
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Function Definition                           **
+**                                                                          **
+******************************************************************************
+*/
+
+/**
+*
+* @brief        Check if socket presence informations are programmed in the right location
+*
+* @param [in]   none
+*
+* @retval       uint8_t: TRUE, if an answer must be sent
+*
+***********************************************************************************************************************/
+
+uint8_t is_socketPresence_Programmed (void)
+{
+    
+  /* Check if structure is not initialized: all values to 0xFF */
+  if (socketPresence.keyPresence == 0xFFFFFFFF) 
+    /* structure NOT initialized */
+    return FALSE;
+  
+  /* structure initialized */
+  return TRUE;
+}
+
+void sbcSemGestTask (void * pvParameters)
+{
+  frameSbcSem_st tmpFrameSbcSem;  
+  uint32_t       timeTickSem;
+  uint8_t        ix;
+
+  /*-------- Creates an empty mailbox for uart  messages --------------------------*/
+  sbcSemQueue = xQueueCreate(NUM_BUFF_SEM_SCU, sizeof(frameSbcSem_st));
+  configASSERT(sbcSemQueue != NULL);
+  vQueueAddToRegistry(sbcSemQueue, "sbcSemQueue" );
+  
+  /*-------- Creates all timer for the led task  --------------------------*/
+  for (ix = (uint8_t)0; ix < (uint8_t)NUM_SBCSEM_TIMER; ix++)
+  {
+    if (ix == (uint8_t)TIMER_FOR_ACK)
+    {
+      xSbcSemTimers[ix] = xTimerCreate("TimSbcSem", TIMEOUT_ACK_RESP, pdFALSE, (void*)(ix), sbcSemTimCallBack);
+    }
+    else
+    {
+      /* in this case we dont use the auto-reload features */
+      xSbcSemTimers[ix] = xTimerCreate("TimSbcSem", DEFAULT_SBCSEM_TIME, pdFALSE, (void*)(ix), sbcSemTimCallBack);
+    }
+    configASSERT(xSbcSemTimers[ix] != NULL);
+  }
+
+  /* init structure for management */
+  sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_TO_START;
+
+  packetStatsCounter = (uint32_t)0;
+
+  headMsg = NULL;
+  ptrAreaConfPar = NULL;
+    
+  timeTickSem = portMAX_DELAY;
+
+  for (;;)
+  {
+    /* Wait for some event from Rx/Tx uart SBC (typically UART5)  */
+    if (xQueueReceive(sbcSemQueue, (void *)&frameSbcSem, timeTickSem) == pdPASS)
+    {
+      timeTickSem = sbcSemMsgProcess(&frameSbcSem, timeTickSem);
+    }
+    else
+    {
+      tmpFrameSbcSem.sbcSemEvent = SBC_SEM_TIMEOUT;
+      timeTickSem = sbcSemMsgProcess(&tmpFrameSbcSem, timeTickSem);
+    }
+  }
+}
+
+/**
+*
+* @brief        Decoder message coming from SBC on UART5, or for internal task as debug 
+*
+* @param [in]   none
+*
+* @retval       uint8_t: TRUE, if an answer must be sent
+*
+***********************************************************************************************************************/
+static uint32_t sbcSemMsgProcess(frameSbcSem_st* pMsg, uint32_t currTick)
+{
+  uint16_t              ixScu, ixLogic;
+  uint32_t              maskBit;
+  uint32_t              timeTickTmp;
+  uint16_t*             pWord;
+  uint8_t               error_array[EVS_ERROR_ARRAY_SIZE];
+  scuOpModes_e          locScuMode;
+  scuRoMapRegister_st*  pScuRoMapRegSlave;
+  uint8_t               result, cnt;
+
+  
+  if (pMsg->sbcSemEvent != SBC_SEM_TIMEOUT)
+  {
+    ixScu = pMsg->data.index; // get modbus address from incoming message 
+    
+    if (ixScu > (uint16_t)MODBUS_BROADCAST_ADDR) 
+      ixLogic = fromRs485ToSem(ixScu); 
+    else 
+      ixLogic = 0;
+    maskBit = sbcSemMaskBit[ixLogic];
+  }
+
+  timeTickTmp = currTick;
+
+  switch (sbcSemInfoMng.sbcSemStates)
+  {
+    case SBC_SEM_WAIT_TO_START:
+      switch (pMsg->sbcSemEvent)
+      {
+        case NOTIFY_START_TASK:
+ 
+          pScuRoMapReg = getRoMdbRegs(0);
+          pScuTmMapReg = getTmMdbRegs(ixLogic);
+
+          pScuRoMapReg->scuMapRegNotify.ntfPresences = (uint32_t)0;
+          /* socketPresence structure has been read already in eeprom_read_all() Nick 24/06/2024 */
+          if ((socketPresence.matrixConv[0] != 1) || (socketPresence.matrixIdConn[0] != 1) || (socketPresence.matrixIdConn[15] == 0xFF))
+          {
+            /* put in the matrix the default config */
+            if (socketPresence.matrixConv[0] != 1)
+            {
+              /*      destination                                         source                       length */
+              memcpy((uint8_t *)&socketPresence.matrixConv, (uint8_t *)&Default_Socket_Presence.matrixConv, (size_t)SCU_NUM);
+            }
+            if ((socketPresence.matrixIdConn[0] != 1) || (socketPresence.matrixIdConn[15] == 0xFF))
+            {
+              /*      destination                                         source                       length */
+              memcpy((uint8_t *)&socketPresence.matrixIdConn, (uint8_t *)&Default_Socket_Presence.matrixIdConn, (size_t)SCU_NUM);
+            }
+            if (WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t)) == osOK)    // save socket Presence 
+            {
+              tPrintf("Matrix Initializated\n\r");
+            }
+          }
+          setDevAlias();  /* set the number on LCD in according with matrix */
+          socketPresence.livePresence = socketPresence.activityStatus = sbcSemInfoMng.offLine = sbcSemInfoMng.sbcActive = 0;
+          if (isSemMasterFz() == TRUE)
+          {
+            socketPresence.assignedDeviceId |= (uint32_t)0x01; // the first device Id is reserverd for SCU  master Principale  
+            socketPresence.livePresence |= (uint32_t)0x01;  /* the master, bit 0, address 1 is always present*/
+            socketPresence.chainPresence |= (uint32_t)0x01; /* the master, bit 0, address 1 is always present*/
+            setInfoEepromSlaveDone((uint16_t)socketPresence.chainPresence);
+            switch (socketPresence.keyPresence)
+            {
+              case KEY_FULL_CONFIG:
+
+                // wait 5 sec before master starts with discovery procedure
+                restartSbcSemTimer(TIMER_FIND_CONFIG, WAIT_FOR_START_DISCOVERY);
+               /* master starts discovery phase cheking the presence of secondary master SCU using broadcast address  */
+                sbcSemInfoMng.sbcSemStates = SBC_SEM_INIT_DISCOVERY;
+                break;
+
+              case KEY_LOCAL_CONFIG:
+                sbcSemInfoMng.firstIdFree = 3;  // first address available for master and slave. Bit 0 = addr 1 is reserved primary master Bit 1 = addr 2 for linked slave
+                // wait 100m sec before master starts with discovery procedure
+                restartSbcSemTimer(TIMER_FIND_CONFIG, WAIT_FOR_START_DISCOVERY);
+               /* master starts discovery phase cheking the presence of secondary master SCU using broadcast address  */
+                sbcSemInfoMng.sbcSemStates = SBC_SEM_INIT_DISCOVERY;
+                break;
+
+              default:
+                
+                /* If socket presence structure is not programmed --> in some fw version (< 4.3.2o),
+                   these informations are in eeprom in another location (0x1F60)*/
+                if (is_socketPresence_Programmed() == FALSE)
+                    if (WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&Default_Socket_Presence, sizeof(socketPresence_t)) == osOK)
+                      tPrintf("Socket presence informations programmed to default \n\r");
+
+                break;
+            }          
+          }
+          else
+          {
+            if (getScuAddressTypeMode() == SCU_FIXED_ADDR)
+            {
+              /* Fixed address on RS485: just wait 3 sec before entering in operative mode That avoid to send info to Master during power-up phase*/
+              restartSbcSemTimer(TIMER_FIND_CONFIG, WAIT_FOR_OPERATING_STATE);
+              /* the slave has been already configured */
+              socketPresence.keyPresence = KEY_FULL_CONFIG;
+              sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_TO_BE_OPERATIVE;
+
+              /* starts the task to manager suspend / release function   */
+              remoteMngTaskHandle = osThreadNew(remoteMngTask, NULL, &remoteMngTask_attributes);  
+            }
+            else
+            {
+              sbcSemInfoMng.random = NULL_RANDOM;
+              /* the slave SCU was not registered from the master so its modbus address it is virtual */
+              sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_TO_REGISTER;
+            }
+          }
+          break;
+
+        case NOTIFY_TO_MASTER_TX:
+          /* save the message for future use  */
+          headMsg = addNode(headMsg, pMsg);
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case SBC_SEM_WAIT_TO_REGISTER:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_EVENT_RS485: // ex SCU_EVENT_RD_ANSW_WR_REQ
+          /* a master start the addressing procedure  */
+          if (ixScu == MODBUS_BROADCAST_ADDR)
+          {
+            sbcSemInfoMng.sbcSemStates = checkToSendReqAddress(pMsg);
+          }
+          else
+          {
+            if (pMsg->data.rAddr == ADDR_ADDR_S_CONN_RW)
+            {          
+              /* another slave request the address:  restart random delay */
+              restartSbcSemTimer(TIMER_FOR_REQ_ADDR, (uint32_t)(sbcSemInfoMng.random / FACTOR_FOR_RANDOM_DELAY));
+            }
+          }
+          break;
+
+        case NOTIFY_MODBUS_WR_ACK:
+          if ((pMsg->data.index == currFrameSbcSem.data.index) &&         // phisical address 1...16 
+              (sbcSemInfoMng.random == (uint32_t)sbcSemInfoMng.dataVal))  // it is the ACK referred at our transmssion 
+          {
+            /* release the transmitter */
+            currFrameSbcSem.sbcSemEvent = NOTIFY_MODBUS_ACK;
+            configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+            /* stop ACK gard  timer */
+            xTimerStop(xSbcSemTimers[TIMER_FOR_ACK], SBCSEM_TIMER_GARD_TIME);
+            /* the slave SCU wait for address */
+            sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_RS485_ADDR; 
+          }
+          break;
+
+        case NOTIFY_TO_MASTER_TX:
+          if (pMsg->data.rAddr == ADDR_TM_EVSE_READY_RO)  // 0x512 Testing machine starts test
+          {
+            sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE_COLLAUDO;
+          }
+          break;
+
+        default:
+          /* Message or ACK from other skave are discarded */
+          break;
+      }
+      break;
+
+    case SBC_SEM_WAIT_RS485_ADDR:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_TIMEOUT:
+          /* address not received wait for next tentative */
+          sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_TO_REGISTER; 
+          break;
+
+        case SBC_SEM_EVENT_RS485: 
+          /* a master ended the addressing procedure  */
+          if (ixScu == MODBUS_BROADCAST_ADDR)
+          {
+            result = checkAssignNewAddress(pMsg);
+            if (result == 0)
+            {
+              if (setScuAddressTypeMode(SCU_FIXED_ADDR) == 0) // try to set the flag to confirm adrress fixed 
+              {
+                setParamFromAssignedAddr();     // set status, ... before master read info parameters
+                /* Blank state: to avoid transmission while other SCU are on going phase assignement address  */
+                sbcSemInfoMng.sbcSemStates = SBC_SEM_BLANK_AFTER_ASS_ADDR;
+                /* timeout 100ms for receive address  */
+                timeTickTmp = pdMS_TO_TICKS(WAIT_TO_OPERATIVE_POST_ASS_ADDR);  
+              }
+              else
+              {
+                sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_TO_REGISTER;              
+              }
+            }
+            else
+            {
+              if (result == 1) sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_TO_REGISTER;
+            }
+          }
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case SBC_SEM_BLANK_AFTER_ASS_ADDR:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_TIMEOUT:
+          sendMonMngMsg(MON_SEM_TASK, MON_START);      // activation task for monitor  
+          /* starts the task to manager suspend / release function   */
+          remoteMngTaskHandle = osThreadNew(remoteMngTask, NULL, &remoteMngTask_attributes);  
+          semSlaveSendActEnrg();                       // ask to send master active energy value 
+          /* now wait a request info from master */
+          sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE;
+          timeTickTmp = portMAX_DELAY;
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+
+    case SBC_SEM_INIT_DISCOVERY:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_EVENT_RS485: // ex SCU_EVENT_RD_ANSW_WR_REQ
+        case NOTIFY_TO_MASTER_TX:
+          /* save the message for future use  */
+          headMsg = addNode(headMsg, pMsg);
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case SBC_SEM_DISCOVERY_S:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_TIMEOUT:
+
+          break;
+
+        case SBC_SEM_EVENT_RS485: // ex SCU_EVENT_RD_ANSW_WR_REQ
+          if ((pMsg->data.rAddr == ADDR_CONNECTOR_IDS_RW)  || (pMsg->data.rAddr == ADDR_EVSE_TM_RW))// 0x0004 or 0x0022
+          {
+            /* this is a slave answer where the address has been assigned already */
+            socketPresence.livePresence |= maskBit;
+            restartSbcSemTimer(TIMER_FIND_CONFIG, WAIT_FOR_DISCOVERY_SLAVE); // the master restart the timeout
+          }
+          else
+          {
+            if (pMsg->data.rAddr == ADDR_ADDR_S_CONN_RW)
+            {
+              mngReqAddress(pMsg);
+            }
+            else
+            {
+              /* save the message for future use  */
+              headMsg = addNode(headMsg, pMsg);
+            }
+          }
+          break;
+
+        case SCU_EVENT_MSG_FROM_SBC_RD:
+          break;
+
+        case NOTIFY_TO_MASTER_TX:
+          /* save the message for future use  */
+          headMsg = addNode(headMsg, pMsg);
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case SBC_SEM_RECOVERY_INFO:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_TIMEOUT:
+        case RECOVERY_INFO:
+          while (txRS485Available() == (uint8_t)FALSE) osDelay(100);
+          if (getInfoSocket(sbcSemInfoMng.activityStatus, &sbcSemInfoMng) == FALSE)
+          {
+            setCurrentDateTimeInSem();
+            /* all the socket has been discovered */
+            if (socketPresence.livePresence > socketPresence.chainPresence)
+            {
+              socketPresence.chainPresence = socketPresence.livePresence;
+            }
+            sbcSemInfoMng.activeLastDiscovery = socketPresence.livePresence;
+            /* save in EEPROM also  */
+            if (WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t)) == osOK)    // save socket Presence 
+            {
+              tPrintf("Presences detected at reset --> 0x%x\n\r", socketPresence.livePresence);
+            }
+
+            timeTickTmp = portMAX_DELAY;
+            sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE;
+
+            forceSBCreadScu(sbcSemInfoMng.activityStatus);
+
+            sbcSemInfoMng.pollingFlag = (uint16_t)ENABLED;
+            /* the alive task must be started to check slave connection periodically  */
+            pollingSlaveTaskHandle = osThreadNew(pollingSlaveTask, NULL, &pollingSlaveTask_attributes);  
+            Print_Slave_FW_Version();
+            if (getScuOpMode() != SCU_M_STAND_ALONE)
+            {
+              /* starts the task to manager suspend / release function   */
+              remoteMngTaskHandle = osThreadNew(remoteMngTask, NULL, &remoteMngTask_attributes);  
+            }
+            if (socketPresence.livePresence == sbcSemInfoMng.activityStatus)
+            {
+              /* active the UART5 for communication with SBC only the first time after startup */
+              reInitSbcUart();
+            }
+
+            /* save all the slave parameters in external flash mememory to restore it in the future */
+            saveAllSlaveParameters();
+
+            /* check if there are message to manage in the list */
+            if (headMsg != NULL)
+            {
+              /* re-send the message in the queue list  */
+              headMsg = extractSendFirstInList(headMsg);
+            }
+            else
+            {
+              resetPacketStatusNum();
+            }
+            sbcSemInfoMng.discoveryMask = 0;
+          }
+          else
+          {
+            timeTickTmp = TIMEOUT_ACK_RESP;
+            sbcSemInfoMng.sbcSemStates = SBC_SEM_ACK_RECOVERY_INFO;
+          }
+          break;
+
+        case NOTIFY_TO_MASTER_TX:
+          /* save the message for future use  */
+          headMsg = addNode(headMsg, pMsg);
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case SBC_SEM_ACK_RECOVERY_INFO:
+      switch (pMsg->sbcSemEvent)
+      {
+        case NOTIFY_MODBUS_RD_ACK:
+          if (((sbcSemInfoMng.logicIdSocket + 1) == pMsg->data.index) && (sbcSemInfoMng.dataVal == pMsg->dataToSend.len))
+          {
+            /* a previous request to read has been accepted and new data are arrived so store it in the map */
+            void* pSrc = (void*)((uint32_t)pMsg->dataToSend.pData + (uint32_t)sizeof(headerAnswRHR_t));
+            /*      destination                  source                         length */
+            memcpy((void*)sbcSemInfoMng.pDataRd, pSrc, (size_t)(pMsg->dataToSend.len));
+          }
+          if (sbcSemInfoMng.addrVal == ADDR_START_RDD)
+          {
+            /* point to next possible slave */
+            sbcSemInfoMng.discoveryMask = sbcSemInfoMng.discoveryMask << 1;
+            sbcSemInfoMng.logicIdSocket++;
+          }
+          /* release the transmitter */
+          currFrameSbcSem.sbcSemEvent = NOTIFY_MODBUS_ACK;
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          /* release the buffer  */
+          if (pMsg->dataToSend.pData != NULL) 
+          {
+            free((void*)pMsg->dataToSend.pData);
+            pMsg->dataToSend.pData = NULL;
+          }
+          /* timeout 20ms for next reading   */
+          timeTickTmp = pdMS_TO_TICKS(TIMEOUT_RD_REQ);  
+          sbcSemInfoMng.sbcSemStates = SBC_SEM_RECOVERY_INFO;
+          break;
+
+        case SBC_SEM_TIMEOUT:
+          tPrintf("Abort: No info received from Addr = %d!\n\r", sbcSemInfoMng.logicIdSocket + 1);
+          socketPresence.livePresence &= (~sbcSemInfoMng.discoveryMask);
+          /* timeout 20ms for next reading   */
+          if (sbcSemInfoMng.logicIdSocket < SCU_NUM)
+          {
+            sbcSemInfoMng.logicIdSocket++;
+            sbcSemInfoMng.discoveryMask = sbcSemInfoMng.discoveryMask << 1;
+          }
+          timeTickTmp = pdMS_TO_TICKS(TIMEOUT_RD_REQ);  
+          sbcSemInfoMng.sbcSemStates = SBC_SEM_RECOVERY_INFO;
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case SBC_SEM_WAIT_TO_BE_OPERATIVE:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_EVENT_RS485: // ex SCU_EVENT_RD_ANSW_WR_REQ
+          if (ixScu == MODBUS_BROADCAST_ADDR)
+          {
+            if (pMsg->data.rAddr == ADDR_EVSE_TM_RW)
+            {
+              pWord = (uint16_t *)pMsg->dataToSend.pData;
+              if (SCU_S_REPL_ADDR != getStationId()) /* board with address = 99 is for replacement */
+              {
+                if (((uint16_t)SCU_S_PS_LIVE == *pWord) || ((uint16_t)SCU_S_PS_STARTUP == *pWord) ||
+                    ((uint16_t)SCU_S_PS_NEW == *pWord))               // SCU_S_PS_NEW = 6 or SCU_S_PS_LIVE=5  or SCU_S_PS_STARTUP=4
+                {
+                  /* a master starts a broadcast request: this is the case when the slave starts long time after master reset  */
+                  if (socketPresence.keyPresence == KEY_FULL_CONFIG)
+                  {
+                    /* the address in ADDR_CONNECTOR_IDS_RW has been already assigned by master */
+                    currFrameSbcSem.sbcSemEvent = NOTIFY_TO_MASTER_TX;
+                    currFrameSbcSem.data.index = getPhysicalMdbAddr();  /* rs485SemMsgProcess() use physical address = modbus address   1...247 */
+                    currFrameSbcSem.data.rAddr = ADDR_CONNECTOR_IDS_RW;  // 0x0004
+                    currFrameSbcSem.dataToSend.pData = (uint8_t*)&sbcSemInfoMng.dataVal;
+                    /* to avoid possible conflit on first Tx byte a random delay is used  */
+                    osDelay((uint32_t)10 * (uint32_t)currFrameSbcSem.data.index);  /* delay in the range 2...50 msec */
+                    configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+                    sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_WR_MASTER_ACK_STARTUP; 
+                    // start ACK timer 
+                    timeTickTmp = pdMS_TO_TICKS(TIMEOUT_ACK_RESP); 
+                    sendMonMngMsg(MON_SEM_TASK, MON_START);      // activation task for monitor  
+                    semSlaveSendActEnrg();                       // ask to send master active energy value 
+                  }
+                }        /* no action in this state: wait time out */
+              }
+              else
+              {
+                if ((uint16_t)SCU_S_PS_NEW == *pWord)               // SCU_S_PS_NEW = 6 
+                {
+                  /* ask the master to send eeprom configuration data: This is made writing at address ADDR_GET_EEPROM_RW */
+                  currFrameSbcSem.sbcSemEvent = NOTIFY_TO_MASTER_TX;
+                  currFrameSbcSem.data.index = getPhysicalMdbAddr();  /* rs485SemMsgProcess() use physical address = modbus address   1...247 */
+                  currFrameSbcSem.data.rAddr = ADDR_GET_EEPROM_RW;    // 0x0523
+                  sbcSemInfoMng.dataVal = (uint16_t)1099;
+                  currFrameSbcSem.dataToSend.pData = (uint8_t*)&sbcSemInfoMng.dataVal;
+                  configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+                  sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_WR_MASTER_ACK_STARTUP; 
+                  // start ACK timer 
+                  timeTickTmp = pdMS_TO_TICKS(TIMEOUT_ACK_RESP); 
+                }
+              }
+            }
+          }
+          break;
+
+        case NOTIFY_TO_MASTER_TX:
+          if (pMsg->data.rAddr == ADDR_TM_EVSE_READY_RO)  // 0x512 Testing machine starts test
+          {
+            sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE_COLLAUDO;
+          }
+          else
+          {
+            if (SCU_S_REPL_ADDR != getStationId()) /* board with address = 99 is for replacement, so no message storing is need */
+            {
+              /* a previous message is sending, so the current is put in the list */
+              headMsg = addNode(headMsg, pMsg);
+            }
+          }
+          break;
+
+        default:
+          break;
+
+      }
+      break;
+
+    case SBC_SEM_OPERATIVE_COLLAUDO:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_EVENT_RS485: // ex SCU_EVENT_RD_ANSW_WR_REQ
+          /* upgrade the register */
+          (void)setChangeRegisterBit(ixScu, pMsg, (uint32_t)maskBit, ixLogic);
+          break;
+
+        case NOTIFY_TO_MASTER_TX:
+          (void)setChangeRegisterBit(SCU_M_P_ADDR, pMsg, (uint32_t)maskBit, ixLogic);
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+
+    case SBC_SEM_OPERATIVE:
+      switch (pMsg->sbcSemEvent)
+      {
+        case POLLING_CHANGE_INFO:
+        case SBC_SEM_EVENT_RS485: // ex SCU_EVENT_RD_ANSW_WR_REQ
+          toggleHeartLed();
+          if (isSemMasterFz() == TRUE) 
+          {
+            if (pMsg->data.rAddr == ADDR_ADDR_S_CONN_RW)  // 0x513
+            {
+              /* a new slave (socket) has been inserted in the chain and ask its address */
+              mngReqAddress(pMsg);
+            }
+            else
+            {
+              if ((pMsg->data.rAddr == ADDR_CONNECTOR_IDS_RW) || (pMsg->data.rAddr == ADDR_EVSE_TM_RW)) // 0x0004 or 0x0022  ADDR_EVSE_TM_RW
+              {
+                /* this is a slave answer where the address has been assigned already: this is the case the socket has RS485 off-line and we reconnect its later  */
+                /* update activity status */                               
+                sbcSemInfoMng.activityStatus |= maskBit;
+                if ((socketPresence.livePresence & maskBit) == 0)
+                {
+                  /* recover all info */
+#ifdef COME_ERA
+                  /* the live presence bit will be update at the end of recovery info phase Nick 30/07/2024 */
+                  socketPresence.livePresence |= maskBit; 
+#endif
+                  restartSbcSemTimer(TIMER_FIND_CONFIG, WAIT_FOR_NEXT_DISCOVERY); // the master restart the timeout 500msec
+                }
+                else
+                {
+                  if (pMsg->data.rAddr == ADDR_EVSE_TM_RW) // 0x0022 ADDR_EVSE_TM_RW
+                  {
+                    pWord = (uint16_t *)pMsg->dataToSend.pData;
+                    pScuRoMapRegSlave = getRoMdbRegs(ixLogic);
+                    if  (pScuRoMapRegSlave->scuMapRegStatusMeas.ntfChgStat != *pWord)
+                    {
+                      /* the current state stored in the slave map, isn't the same coming from polling */
+                      /* so update the map and notify to SEM                                           */
+                      pScuRoMapRegSlave->scuMapRegStatusMeas.ntfChgStat = pMsg->status = *pWord;
+                      /* upgrade the register */
+                      pMsg->data.rAddr = ADDR_EVSE_CHARGE_STATUS_RO;
+                      result = (uint8_t)setChangeRegisterBit(ixScu, pMsg, (uint32_t)maskBit, ixLogic);
+                    }
+                  }
+                }
+              }
+              else
+              {
+                if (pMsg->data.rAddr == ADDR_GET_EEPROM_RW)
+                {
+                  /* this is a slave SCU board used as replacement for first address fail. First of all we find first address fail */
+                  for (cnt = 0, maskBit = (uint32_t)1, result = SCU_NUM; cnt < SCU_NUM; cnt++, maskBit = maskBit << 1)
+                  {
+                    if (cnt == 0) continue;
+                    if (((socketPresence.chainPresence & maskBit) != 0) && ((socketPresence.livePresence & maskBit) == 0)) 
+                    {
+                      /* this is the index of a fail board. The jolly SCU is placed at the lower number diplayed on LCD, i.e. minimum connector Id  */
+                      if (socketPresence.matrixIdConn[cnt] < result) result = socketPresence.matrixIdConn[cnt];
+                    }
+                  }
+                  if (result < SCU_NUM)
+                  {
+                    /* recovery the address on RS485 for first fail board to be cloned */
+                    cnt = socketPresence.matrixConv[result]; 
+                    /* we have found the address of replaced slave SCU */
+                    if (sendEeepromInfoForCloning(cnt) == 0)
+                    {
+                      break;
+                    }
+                    /* restart the master to check if cloned SCU works properly (detected with all info) */
+                    activeImmediateReset(); 
+                  }
+                }
+                else
+                {
+                  /* upgrade the register */
+                  result = (uint8_t)setChangeRegisterBit(ixScu, pMsg, (uint32_t)maskBit, ixLogic);
+                  if (result == (uint8_t)SEND_ACK)
+                  {
+                    /* a message froma slave on  RS485 has been received: Set the activity bit */
+                    sbcSemInfoMng.activityStatus |= maskBit;
+                    if ((sbcSemInfoMng.scuInDwldIdx == ixScu) && (pMsg->data.rAddr == ADDR_EVSE_ERROR2_RO))
+                    {
+                      /* the rebooting phase in the slave is terminated: it is necessary to re-scan all info  */
+                      sbcSemInfoMng.scuInDwldIdx = (uint16_t)0;
+                      /* set initial socket info */
+                      sbcSemInfoMng.discoveryMask = (uint32_t)0x2;
+                      sbcSemInfoMng.logicIdSocket = (uint16_t)0x1;
+                      sbcSemInfoMng.sbcSemStates = SBC_SEM_RECOVERY_INFO;
+                      sbcSemInfoMng.addrVal = ADDR_START_RDD;
+                      /* timeout 20ms for starting recovery info procedure  */
+                      timeTickTmp = pdMS_TO_TICKS(TIMEOUT_RD_REQ);  
+                    }
+                  }
+                  else
+                  {
+                    if (result == (uint8_t)SEND_RETRY)
+                    {
+                      /* the current message cannot be managed now, so put in the list */
+                      headMsg = addNode(headMsg, pMsg);
+                    }
+                  }
+                }
+              }
+            }
+          }
+          else
+          {
+            /* a master start the addressing procedure after a its reboot */
+            if (ixScu == MODBUS_BROADCAST_ADDR)
+            {
+              if (pMsg->data.rAddr == ADDR_EVSE_TM_RW)  // AUTOCONFIG_FUNCTION_RW = ADDR_EVSE_TM_RW = 0x0022 is the register used for polling 
+              {
+                pWord = (uint16_t *)pMsg->dataToSend.pData;
+                if (((uint16_t)SCU_S_PS_STARTUP == *pWord) || ((uint16_t)SCU_S_PS_LIVE == *pWord))  // SCU_S_PS_STARTUP = SCU_S_S = 4 or SCU_S_PS_LIVE in polling phase 
+                {
+                  ixLogic = getLogicalMdbAddrSem();
+                  maskBit = sbcSemMaskBit[ixLogic];
+#ifdef POLLING_ONLY_INACTIVE
+                  /* the slave responde to polling only if has been inactive during polling period (about 6 sec) */
+                  if ((socketPresence.keyPresence == KEY_FULL_CONFIG) && 
+                      ((sbcSemInfoMng.offLine == TRUE) || ((sbcSemInfoMng.activityStatus & maskBit) == 0) || (((uint16_t)SCU_S_S == *pWord))))
+#else
+                  /* the slave responde to polling always (about 6 sec) */
+                  if (socketPresence.keyPresence == KEY_FULL_CONFIG)
+#endif
+                  {
+                    sbcSemInfoMng.offLine = FALSE;
+                    /* the address in ADDR_CONNECTOR_IDS_RW has been already assigned by master */
+                    currFrameSbcSem.sbcSemEvent = NOTIFY_TO_MASTER_TX;
+                    currFrameSbcSem.data.index = getPhysicalMdbAddr();  /* rs485SemMsgProcess() use phisical address 1...16 */
+                    //currFrameSbcSem.data.rAddr = ADDR_CONNECTOR_IDS_RW;
+                    currFrameSbcSem.data.rAddr = ADDR_EVSE_TM_RW;  // ADDR_EVSE_CHARGE_STATUS_RO or ADDR_EVSE_TM_RW
+                    
+                    currFrameSbcSem.dataToSend.pData = (uint8_t*)&sbcSemInfoMng.dataVal;
+                    /* to avoid possible conflit on first Tx byte a random delay is used  */
+                    osDelay((uint32_t)10 * (uint32_t)currFrameSbcSem.data.index);  /* delay in the range 2...50 msec */
+                    configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+                    sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_WR_MASTER_POLL_ACK;
+                    // start ACK timer 
+                    xTimerReset (xSbcSemTimers[TIMER_FOR_ACK], 0);
+                  }
+                  else
+                  {
+                    sbcSemInfoMng.activityStatus = 0;
+                  }
+                }
+                else
+                {
+                  if ((uint16_t)SCU_ALL_FACTORY_PARAM == *pWord) 
+                  {
+                    /* for debug only */
+                    restoreFactoryDefault();
+                  }
+                }
+              }
+            }
+            else
+            {
+              /* SCU slave: a write operation has been done from master over RS485, so an update can be possible  */
+              semUpdateConfig(pMsg);
+              osDelay(10);
+            }
+          }
+          break;
+
+        case SBC_SEM_EVENT_UART5_SEND_DWLD_CMD:
+        case SBC_SEM_EVENT_UART5:
+          locScuMode = getScuOpMode();
+          /* message coming from SBC: the writing can be referred to the master or for a slave  */
+          if ((locScuMode == SCU_M_P) && (getPhysicalMdbAddr() == pMsg->data.index))
+          {
+            /* the write operation refer the SCU MASTER */
+            semUpdateConfig(pMsg);
+          }
+          else
+          {
+            if ((locScuMode == SCU_M_STAND_ALONE) && ((pMsg->data.rAddr == ADDR_FILE_COMMAND_RW) || (pMsg->data.rAddr == ADDR_FILE_SIZE_RW)) &&  
+                (pMsg->sbcSemEvent != SBC_SEM_EVENT_UART5_SEND_DWLD_CMD))
+            {
+              /* the stand alone SCU send the FW upload message on RS485 only at received both info  */
+            }
+            else
+            {
+              pScuRoMapRegSlave = getRoMdbRegs(ixLogic);
+              if (((pScuRoMapRegSlave->scuMapRegNotify.ntfErr2 & ERROR2_OFFL) == 0) && (pollingSlaveMng.offLineCounter[ixLogic] == 0))
+              {
+                 /* we transfer the request on RS485 only if the slave is present on the RS485.  */
+                 /* If the master has lost the link sending info to the slave has no sense       */
+                /* the write operation refer the SCU SLAVE so the writing must be sent over RS485  */
+                /* no more master secondary SCU are present in the chain */
+                sbcSemInfoMng.dataVal = (uint16_t)1;  // for discovery primary/secondary slave SCU 
+                currFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_TX;
+                currFrameSbcSem.data.index = pMsg->data.index;  // phisical address 1...16 or 0 for broadcast 
+                currFrameSbcSem.data.rAddr = pMsg->data.rAddr;
+                currFrameSbcSem.dataToSend.len = pMsg->dataToSend.len;
+                currFrameSbcSem.dataToSend.pData = (uint8_t*)pMsg->dataToSend.pData;
+                configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+                if (pMsg->data.index != MODBUS_BROADCAST_ADDR)
+                {
+                  timeTickTmp = pdMS_TO_TICKS(TIMEOUT_ACK_RESP); 
+                  sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_WR_ACK;
+                }
+              }
+            }
+          }
+          break;
+
+        case NOTIFY_TO_MASTER_TX:
+          if ((getScuOpMode() == SCU_M_P) && (getPhysicalMdbAddr() == pMsg->data.index))
+          {
+            result = (uint8_t)setChangeRegisterBit(ixScu, pMsg, (uint32_t)maskBit, ixLogic); 
+            if (result == (uint8_t)SEND_RETRY)
+            {
+              /* the current message cannot be managed now, so put in the list */
+              headMsg = addNode(headMsg, pMsg);
+            }
+            osDelay(100);
+          }
+          else
+          {
+            /* if FW update is ongoing on a slave device, don't notify changes to master */
+            if (getStatusDwnl() == FALSE)
+            {
+              result = (uint8_t)setChangeRegisterBit(SCU_M_P_ADDR, pMsg, (uint32_t)maskBit, ixLogic);
+              if (result == (uint8_t)SEND_ACK)
+              {
+                /* a change inside a slave occured. Data must be sent to master over RS485  */
+                currFrameSbcSem.sbcSemEvent = NOTIFY_TO_MASTER_TX;
+                currFrameSbcSem.data.index = pMsg->data.index;  //  physical address 1...16 
+                currFrameSbcSem.data.rAddr = pMsg->data.rAddr;
+                currFrameSbcSem.dataToSend.len = pMsg->dataToSend.len;
+                currFrameSbcSem.dataToSend.pData = (uint8_t*)&pMsg->dataToSend.pData;
+                configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+                /* reset the activity bit: will be set when ACK will be received */
+                sbcSemInfoMng.activityStatus &= (~maskBit);
+
+                // start ACK timer 
+                xTimerReset (xSbcSemTimers[TIMER_FOR_ACK], 0);
+                sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_WR_MASTER_ACK;
+              }
+              else
+              {
+                if (result == (uint8_t)SEND_RETRY)
+                {
+                  /* the current message cannot be managed now, so restore it in first position The sequence timing cannot be modified!  */
+                  headMsg = addNode(headMsg, pMsg);
+                  osDelay(100);
+                }
+              }
+            }
+          }
+          break;
+
+        case SCU_EVENT_MSG_FROM_SBC_RD:
+          if (resetChangeRegisterBit(ixLogic, pMsg->data.rAddr, pMsg->dataToSend.len) == TRUE)
+          {
+            sbcSemInfoMng.sbcActive = TRUE;
+            //tPrintf("Socket %d Event 0x%X closed!\n\r", ixScu, pMsg->data.rAddr);
+            if (headMsg != NULL)
+            {
+              /* re-send a message in the queue list if present */
+              headMsg = extractSendFirstInList(headMsg);
+            }
+            else
+            {
+              resetPacketStatusNum();
+            }
+          }
+          break;
+
+        case SCU_EVENT_MSG_FROM_MASTER_RD:
+          if (getPhysicalMdbAddr() == pMsg->data.index)  // phisical address 1...16 
+          {
+            ;
+          }
+          break;
+          
+        case SBC_SEM_TIMEOUT:
+        case RECOVERY_INFO:
+          while (txRS485Available() == (uint8_t)FALSE) osDelay(100);
+          if (getInfoSocket((sbcSemInfoMng.activityStatus & (~sbcSemInfoMng.activeLastDiscovery)), &sbcSemInfoMng) == FALSE)
+          {
+
+            /* force the SBC to read new data from added SCU */
+            forceSBCreadScu(sbcSemInfoMng.activityStatus & (~sbcSemInfoMng.activeLastDiscovery));
+
+            /* all new add socket has been discovered */
+            sbcSemInfoMng.activeLastDiscovery = socketPresence.chainPresence = socketPresence.livePresence;
+
+            /* save in EEPROM also  */
+            if (WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t)) == osOK)    // save socket Presence 
+            {
+              tPrintf("Presences detected --> 0x%x\n\r", socketPresence.chainPresence);
+            }
+
+            /* save all the slave parameters in external flash mememory to restore it in the future */
+            saveAllSlaveParameters();
+
+            sbcSemInfoMng.discoveryMask = 0;
+            timeTickTmp = portMAX_DELAY;
+            Print_Slave_FW_Version();
+          }
+          else
+          {
+            timeTickTmp = TIMEOUT_ACK_RESP;
+          }
+          break;
+
+        case NOTIFY_MODBUS_RD_ACK:
+          if (((sbcSemInfoMng.logicIdSocket + 1) == pMsg->data.index) && (sbcSemInfoMng.dataVal == pMsg->dataToSend.len))
+          {
+            /* a previous request to read has been accepted and new data are arrived so store it in the map */
+            void* pSrc = (void*)((uint32_t)pMsg->dataToSend.pData + (uint32_t)sizeof(headerAnswRHR_t));
+            /*      destination                  source                         length */
+            memcpy((void*)sbcSemInfoMng.pDataRd, pSrc, (size_t)(pMsg->dataToSend.len));
+            if (sbcSemInfoMng.addrVal == ADDR_START_RDD)
+            {
+              /* point to next possible slave */
+              sbcSemInfoMng.addrVal = ADDR_START_RDD;
+              sbcSemInfoMng.discoveryMask = sbcSemInfoMng.discoveryMask << 1;
+              sbcSemInfoMng.logicIdSocket++;
+            }
+            /* timeout 20ms for next reading   */
+            timeTickTmp = pdMS_TO_TICKS(TIMEOUT_RD_REQ);  
+            /* release the transmitter */
+            currFrameSbcSem.sbcSemEvent = NOTIFY_MODBUS_ACK;             
+            configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+            /* release the buffer  */
+            if (pMsg->dataToSend.pData != NULL) 
+            {
+              free((void*)pMsg->dataToSend.pData);
+              pMsg->dataToSend.pData = NULL;
+            }
+          }
+          break;
+
+        default:
+          break;
+
+      }
+      break;
+
+    case SBC_SEM_WAIT_WR_ACK:
+      switch (pMsg->sbcSemEvent)
+      {
+        case NOTIFY_MODBUS_WR_ACK:
+          if (pMsg->data.index == currFrameSbcSem.data.index)  // phisical address 1...16 
+          {
+            /* the ack coming from expected socket */
+            sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE;
+            /* release the transmitter */
+            currFrameSbcSem.sbcSemEvent = NOTIFY_MODBUS_ACK;
+            configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+            /* the bridge to RS485 successfully: inform the SBC with ACK to WMR message */
+            sendAnswToSem(NO_ERROR, 
+                          (uint8_t)currFrameSbcSem.data.index, 
+                          currFrameSbcSem.data.rAddr, 
+                          currFrameSbcSem.dataToSend.len, 
+                          SCU_EVENT_MSG_FROM_SBC, 
+                          FUNCTION_WRITE_MULTIPLE_REG);
+            
+            if (headMsg != NULL)
+            {
+              /* re-send the message in the queue list  */
+              headMsg = extractSendFirstInList(headMsg);
+            }
+            else
+            {
+              resetPacketStatusNum();
+            }
+            timeTickTmp = portMAX_DELAY;
+          }
+          break;
+
+        case SBC_SEM_TIMEOUT:
+          sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE;
+          /* release the transmitter */
+          currFrameSbcSem.sbcSemEvent = NOTIFY_MODBUS_ACK;
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          /* no ack coming from expected socket --> socket unavailable */
+          ixScu = currFrameSbcSem.data.index - 1;
+          /* non info pendig, so upgrade the register */
+          pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] |= (uint32_t)0x04;  // Unavailable status
+          maskBit = sbcSemMaskBit[ixScu];
+          pScuRoMapReg->scuMapRegNotify.ntfChangeRo |= (uint32_t)maskBit;
+          pScuRoMapReg->scuMapRegStatusMeas.ntfChgStat = (uint16_t)9;
+          timeTickTmp = portMAX_DELAY;
+          break;
+
+        case SBC_SEM_EVENT_UART5:
+        case NOTIFY_TO_MASTER_TX:
+          /* a previous message is sending, so the current is put in the list */
+          headMsg = addNode(headMsg, pMsg);
+          break;
+
+        default:
+          break;
+
+      }
+      break;
+      
+    case SBC_SEM_WAIT_WR_MASTER_ACK:
+    case SBC_SEM_WAIT_WR_MASTER_ACK_STARTUP:
+    case SBC_SEM_WAIT_WR_MASTER_POLL_ACK:
+      switch (pMsg->sbcSemEvent)
+      {
+        case NOTIFY_MODBUS_WR_ACK:
+#ifdef ADDR_NO_TRANSLATION
+          if ((pMsg->data.index == SCU_M_P_ADDR) && (pMsg->data.rAddr == currFrameSbcSem.data.rAddr))
+#else
+          if ((pMsg->data.index == getPhysicalMdbAddr()) && (pMsg->data.rAddr == currFrameSbcSem.data.rAddr))
+#endif
+          {
+            /* stop ACK gard  timer */
+            xTimerStop(xSbcSemTimers[TIMER_FOR_ACK], SBCSEM_TIMER_GARD_TIME);
+            /* the ack coming from the master i.e physical address SCU_M_P_ADDR = 1 */
+            /* release the transmitter */
+            currFrameSbcSem.sbcSemEvent = NOTIFY_MODBUS_ACK;
+            configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+            if (resetChangeRegisterBit(ixLogic, pMsg->data.rAddr, pMsg->dataToSend.len) == TRUE)
+            {
+              tPrintf("Socket %d Event 0x%X sent!\n\r", ixScu, pMsg->data.rAddr);
+            }
+            if (SCU_S_REPL_ADDR == getStationId()) /* board with address = 99 is for replacement, so no message storing is need */
+            {
+              sbcSemInfoMng.sbcSemStates = SBC_SEM_WAIT_TO_BE_OPERATIVE;
+              timeTickTmp = portMAX_DELAY;
+              break;
+            }
+
+            if (headMsg != NULL)
+            {
+              /* re-send a message in the queue list if present */
+              headMsg = extractSendFirstInList(headMsg);
+            }
+            else
+            {
+              resetPacketStatusNum();
+            }
+
+            if (sbcSemInfoMng.sbcSemStates != SBC_SEM_WAIT_WR_MASTER_POLL_ACK)
+            {
+              /* a message froma slave on  RS485 to master has been aknoledged: Set the activity bit */
+              sbcSemInfoMng.activityStatus |= maskBit;
+            }
+
+            if (sbcSemInfoMng.sbcSemStates == SBC_SEM_WAIT_WR_MASTER_ACK_STARTUP)
+            {
+              evs_error_get(error_array, 0, 0, 0);
+              updateModbusErrorRegisters(error_array, TRUE);
+            }
+            sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE;
+            sendMonMngMsg(MON_SEM_TASK, MON_START);      // activation task for monitor  
+            timeTickTmp = portMAX_DELAY;
+          }
+          break;
+
+        case NOTIFY_TO_MASTER_TX:
+          if (SCU_S_REPL_ADDR != getStationId()) /* board with address = 99 is for replacement, so no message storing is need */
+          {
+            /* a previous message is sending, so the current is put in the list */
+            headMsg = addNode(headMsg, pMsg);
+          }
+          break;
+
+        default:
+          break;
+
+      }
+      break;
+      
+
+    default:
+      switch (pMsg->sbcSemEvent)
+      {       
+        case NOTIFY_TO_MASTER_TX:
+          /* A notification to master was sent, but automa status is not managed, so put in the queue */
+          headMsg = addNode(headMsg, pMsg);
+          break;
+          
+        default:
+          break;
+      }
+      break;
+  }
+
+  if (pMsg->sbcSemEvent == NOTIFY_MODBUS_WR_ACK)
+  {
+    if (pMsg->dataToSend.pData != NULL)
+    {
+      /* free temporary payload buffer */
+      free(pMsg->dataToSend.pData);
+    }
+  }
+
+  return (timeTickTmp);
+}
+// --------------------------------------------------------------------------------------------------------------------------- //
+
+/**
+*
+* @brief        Get the pointer to task queue
+*
+* @param [in]   none
+*
+* @retval       xQueueHandle: pointer to defined  queue
+*
+***********************************************************************************************************************/
+xQueueHandle getSbcSemQueueHandle(void)
+{
+   return(sbcSemQueue);
+}
+
+
+
+void rs485SemGestTask (void * pvParameters)
+{
+  uint32_t       timeTick;
+  frameSbcSem_st tmpframers485Sem;  
+
+  /*-------- Creates an empty mailbox for uart  messages --------------------------*/
+  rs485SemQueue = xQueueCreate(NUM_BUFF_RS485_SEM, sizeof(frameSbcSem_st));
+  configASSERT(rs485SemQueue != NULL);
+  
+  /* init structure for management */
+  rs485SemInfoMng.rs485SemStates = RS485_SEM_OPERATIVE;
+    
+  //timeTick = pdMS_TO_TICKS(TIMEOUT_RESP_500);
+  timeTick = portMAX_DELAY;
+
+  for (;;)
+  {
+    /* Wait for some event from Rx/Tx uart SBC (typically UART5)  */
+    if (xQueueReceive(rs485SemQueue, (void *)&framers485Sem, timeTick) == pdPASS)
+    {
+      timeTick = rs485SemMsgProcess(&framers485Sem);
+    }
+    else
+    {
+      tmpframers485Sem.sbcSemEvent = SBC_SEM_TIMEOUT;
+      timeTick = rs485SemMsgProcess(&tmpframers485Sem);
+    }
+  }
+}
+
+
+
+/**
+*
+* @brief        Decoder message from / to RS485 (slave <---> master) 
+*
+* @param [in]   none
+*
+* @retval       uint32_t: timeout value 
+*
+***********************************************************************************************************************/
+static uint32_t rs485SemMsgProcess(frameSbcSem_st* pMsg)
+{
+  uint16_t              ixScuPhysical, ixScuLogical;
+  uint32_t              timeTickTmp;
+  scuRoMapRegister_st*  pRoRegs;
+  scuRwMapRegister_st*  pRwRegs;
+  tmMapRegister_st*     pTmRegs;
+#ifndef ADDR_NO_TRANSLATION
+  uint8_t               addrRs485;   
+#endif
+
+  timeTickTmp = portMAX_DELAY;
+
+  if (pMsg->sbcSemEvent != SBC_SEM_TIMEOUT)
+  {
+    if (pMsg->data.index == MODBUS_BROADCAST_ADDR)
+    {
+      ixScuLogical = ixScuPhysical = pMsg->data.index;
+      addrRs485 = MODBUS_BROADCAST_ADDR;
+    }
+    else
+    {
+      ixScuPhysical = pMsg->data.index;                     // physical address 1...16    
+      ixScuLogical = pMsg->data.index - 1;                  // logical address  0...15
+#ifndef ADDR_NO_TRANSLATION
+      addrRs485 = socketPresence.matrixConv[ixScuLogical];  // modbus address   1...247
+      rs485SemInfoMng.rs485RWmR.regAdd = pMsg->data.rAddr;
+#endif
+    }
+
+    pRoRegs = getRoMdbRegs(ixScuLogical);
+    pRwRegs = getRwMdbRegs(ixScuLogical);
+    pTmRegs = getTmMdbRegs(ixScuLogical);
+  }
+
+  switch (rs485SemInfoMng.rs485SemStates)
+  {
+    case RS485_SEM_IDLE:
+      break;
+
+    case RS485_SEM_OPERATIVE:
+      switch (pMsg->sbcSemEvent)
+      {
+        case NOTIFY_TO_MASTER_TX:
+          switch (pMsg->data.rAddr)
+          {
+            case ADDR_EVSE_CHARGE_STATUS_RO:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pRoRegs->scuMapRegStatusMeas.ntfChgStat);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRoRegs->scuMapRegStatusMeas.ntfChgStat; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_EVSE_CHARGE_STATUS_RO;
+#endif
+              break;
+
+            case ADDR_EVSE_EVENT_FLAGS_RO:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pRoRegs->scuMapRegStatusMeas.ntfSktEvent);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRoRegs->scuMapRegStatusMeas.ntfSktEvent; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_EVSE_EVENT_FLAGS_RO;
+#endif
+              break;
+
+            case ADDR_VOLTAGE_AC_RO:
+              rs485SemInfoMng.rs485RWmR.numBytes = (ADDR_SCU_RESERVED6B - ADDR_VOLTAGE_AC_RO) * 2; // transmit until last info TIME_INCHARGE_RO
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRoRegs->scuMapRegStatusMeas.mtVsys; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_VOLTAGE_AC_RO;
+#endif
+              break;
+
+            case ADDR_TIME_IN_CHARGE_RO:
+              rs485SemInfoMng.rs485RWmR.numBytes = (LEN_TIME_IN_CHARGE_RO) * 2; // transmit only info TIME_INCHARGE_RO
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRoRegs->scuMapRegStatusMeas.timeInCharge; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_TIME_IN_CHARGE_RO;
+#endif
+              break;
+
+            case ADDR_CONNECTOR_IDS_RW:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pRwRegs->scuSetRegister.devAlias);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRwRegs->scuSetRegister.devAlias; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_CONNECTOR_IDS_RW;
+#endif
+              break;
+
+          case ADDR_CONNECTOR_TYPE_RW:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(scuSetRegister_st);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRwRegs->scuSetRegister.connType; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_CONNECTOR_TYPE_RW;
+#endif
+              break;
+
+            case ADDR_ENERGY_METERS_RW:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pRwRegs->scuSetRegister.mtType);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRwRegs->scuSetRegister.mtType; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_ENERGY_METERS_RW;
+#endif
+              break;
+
+            case ADDR_UID_AUTHORIZATION_RO:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pRoRegs->scuMapRegStatusMeas.uidAuth);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRoRegs->scuMapRegStatusMeas.uidAuth; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_UID_AUTHORIZATION_RO;
+#endif
+              break;
+
+            case ADDR_SESSION_ID_RO:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pRoRegs->scuMapRegStatusMeas.evSessionId);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRoRegs->scuMapRegStatusMeas.evSessionId; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_SESSION_ID_RO;
+#endif
+              break;
+
+            case ADDR_EVSE_ERROR1_RO:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pRoRegs->scuMapRegNotify.ntfErr1);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRoRegs->scuMapRegNotify.ntfErr1; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_EVSE_ERROR1_RO;
+#endif
+              break;
+              
+            case ADDR_EVSE_ERROR2_RO:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pRoRegs->scuMapRegNotify.ntfErr2);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRoRegs->scuMapRegNotify.ntfErr2; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_EVSE_ERROR2_RO;
+#endif
+              break;
+
+            case ADDR_ADDR_S_CONN_RW:
+              rs485SemInfoMng.rs485RWmR.numBytes = pMsg->dataToSend.len;
+              rs485SemInfoMng.pOriginData = (uint8_t*)pMsg->dataToSend.pData; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_ADDR_S_CONN_RW;
+#endif
+              break;
+
+            case ADDR_TM_ADDR_REQ_RW:
+              rs485SemInfoMng.rs485RWmR.numBytes = pMsg->dataToSend.len;
+              rs485SemInfoMng.pOriginData = (uint8_t*)pMsg->dataToSend.pData; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_TM_ADDR_REQ_RW;
+#endif
+              break;
+
+            case ADDR_TM_ADDR_ASS_RW:
+              /* in the ADDR_TM_ADDR_REQ_RW there is the randomId received*/
+              /* in the ADDR_TM_ADDR_ASS_RW there is the physical address assigned */
+              rs485SemInfoMng.rs485RWmR.numBytes = pMsg->dataToSend.len;
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pTmRegs->tmAddrReq; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_TM_ADDR_REQ_RW;
+#endif
+              break;
+
+            case ADDR_EVSE_TM_RW:
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pRoRegs->scuMapRegStatusMeas.ntfChgStat);
+              rs485SemInfoMng.pOriginData = (uint8_t*)&pRoRegs->scuMapRegStatusMeas.ntfChgStat; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_EVSE_CHARGE_STATUS_RO;
+#endif
+              break;
+              
+            case ADDR_GET_EEPROM_RW:
+              /* this address is used by SCU jolly to request info at the master to clone the previous broken board */
+              rs485SemInfoMng.rs485RWmR.numBytes = sizeof(pTmRegs->tmGetEeprom);
+              rs485SemInfoMng.pOriginData = (uint8_t*)pMsg->dataToSend.pData; 
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.regAdd = SIZE_MODBUS_MAP * ixScuLogical + ADDR_GET_EEPROM_RW;
+#endif
+              break;
+
+            default:
+              rs485SemInfoMng.pOriginData = NULL; 
+              break;
+          }
+          if (rs485SemInfoMng.pOriginData != NULL)
+          {
+#ifdef ADDR_NO_TRANSLATION
+            /* data must be sent to SCU master over RS485 */
+            currFrameSbcSem.data.index = rs485RWmR.unitId = SCU_M_P_ADDR;  /* the message must be sent to SCU master */
+#else
+            currFrameSbcSem.data.index = ixScuPhysical;  /* the message must be sent to SCU master */
+            rs485SemInfoMng.rs485RWmR.unitId = addrRs485;
+#endif
+            writeMasterModbusRegister(rs485SemInfoMng.pOriginData, &rs485SemInfoMng.rs485RWmR);
+            rs485SemInfoMng.rs485SemStates = RS485_SEM_ACK_WAITING_WR;
+            /* set parameter for retransmission */
+            rs485SemInfoMng.numRetry = (uint16_t)0;
+            timeTickTmp = pdMS_TO_TICKS(TIMEOUT_ACK_TRANSMITTER_RESP); 
+          }
+          break;
+
+        case NOTIFY_TO_SLAVE_TX:
+          if  ((pMsg->data.rAddr < ADDR_RESERVED_A) ||                                                          // area RW configurazioni 
+               ((pMsg->data.rAddr >= ADDR_FILE_COMMAND_RW)  && (pMsg->data.rAddr < ADDR_END_RW_REGS_WO)) ||     // area RW FW upgrade
+               ((pMsg->data.rAddr >= ADDR_TM_MEASURED_CURRENT_RW)  && (pMsg->data.rAddr < ADDR_RESERVED_B)))    // area RW collaudo
+          {
+            /* filter on register to send to a slave */
+#ifdef ADDR_NO_TRANSLATION
+              rs485SemInfoMng.rs485RWmR.unitId = ixScuPhysical;  /* the message must be sent to SCU slave */
+#else
+            rs485SemInfoMng.rs485RWmR.unitId = addrRs485;     /* the message must be sent to SCU slave */
+#endif
+            rs485SemInfoMng.rs485RWmR.numWords = pMsg->dataToSend.len;
+            rs485SemInfoMng.rs485RWmR.numBytes = 2 * rs485SemInfoMng.rs485RWmR.numWords;
+            rs485SemInfoMng.pOriginData = (uint8_t*)pMsg->dataToSend.pData; 
+            rs485SemInfoMng.rs485RWmR.regAdd = pMsg->data.rAddr;
+            writeMasterModbusRegister(rs485SemInfoMng.pOriginData, &rs485SemInfoMng.rs485RWmR);
+            if (rs485SemInfoMng.rs485RWmR.unitId != MODBUS_BROADCAST_ADDR)
+            {
+              currFrameSbcSem.data.index = rs485SemInfoMng.rs485RWmR.unitId;  // phisical address 1...16
+              timeTickTmp = pdMS_TO_TICKS(TIMEOUT_ACK_RESP); 
+              rs485SemInfoMng.rs485SemStates = RS485_SEM_ACK_WAITING_WR;
+            }
+          }
+          break;
+
+        case NOTIFY_TO_SLAVE_RX:
+          rs485SemInfoMng.rs485Rd.numBytes = pMsg->dataToSend.len;
+#ifdef ADDR_NO_TRANSLATION
+          rs485SemInfoMng.rs485Rd.unitId = ixScuPhysical;  /* the message must be sent to SCU slave */
+#else
+          rs485SemInfoMng.rs485Rd.unitId = addrRs485;     /* the message must be sent to SCU slave */
+#endif
+          rs485SemInfoMng.rs485Rd.regAdd = pMsg->data.rAddr;
+          readMasterModbusRegister(&rs485SemInfoMng.rs485Rd);
+          currFrameSbcSem.data.index = rs485SemInfoMng.rs485Rd.unitId;  // phisical address 1...16
+          if (pMsg->data.rAddr == ADDR_GET_EEPROM_RW)
+          {
+            /* in this case the time out must be longer: the slave will transmit about 1KB and this means about 44ms */
+            timeTickTmp = pdMS_TO_TICKS(TIMEOUT_ACK_RESP); // use 500ms
+          }
+          else
+          {
+            /* in this case the time out must be longer: the slave will transmit about 1KB and this means about 44ms */
+            timeTickTmp = pdMS_TO_TICKS(TIMEOUT_ACK_TRANSMITTER_RESP); 
+          }
+          rs485SemInfoMng.rs485SemStates = RS485_SEM_ACK_WAITING_RD;
+          break;
+
+        default:
+          break;
+
+      }
+      break;
+
+    case RS485_SEM_ACK_WAITING_WR:
+    case RS485_SEM_ACK_WAITING_RD:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_TIMEOUT:
+          /* no answer. Take here some action to recover the error */
+          if (rs485SemInfoMng.numRetry >= NUM_TRANS_RETRY)
+          {
+            rs485SemInfoMng.numRetry = (uint16_t)0;
+            rs485SemInfoMng.rs485SemStates = RS485_SEM_OPERATIVE;
+          }
+          else
+          {
+            /* no ACK received, so retry the transmission */
+            rs485SemInfoMng.numRetry++;
+            if (rs485SemInfoMng.rs485SemStates == RS485_SEM_ACK_WAITING_WR)
+            {
+              writeMasterModbusRegister(rs485SemInfoMng.pOriginData, &rs485SemInfoMng.rs485RWmR);
+            }
+            else
+            {
+              readMasterModbusRegister(&rs485SemInfoMng.rs485Rd);
+            }
+            tPrintf("Socket %d retrasmission!\n\r", getNumSocketLcd(ixScuLogical));
+            timeTickTmp = pdMS_TO_TICKS(TIMEOUT_ACK_TRANSMITTER_RESP); 
+          }
+          break;
+
+        case NOTIFY_MODBUS_ACK:
+          rs485SemInfoMng.rs485SemStates = RS485_SEM_OPERATIVE;
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    default:
+      break;
+  }
+
+  return (timeTickTmp);
+}
+// --------------------------------------------------------------------------------------------------------------------------- //
+
+/**
+*
+* @brief        Get the pointer to task queue
+*
+* @param [in]   none
+*
+* @retval       xQueueHandle: pointer to defined  queue
+*
+***********************************************************************************************************************/
+xQueueHandle getRs485SemQueueHandle(void)
+{
+   return(rs485SemQueue);
+}
+
+/**
+*
+* @brief        build an async WRMR message to SCU on RS485  
+*
+* @param [in]   scuRWmultipleReg_st* : pointer to struct where is store the message 
+*
+* @retval       none:  
+*
+***********************************************************************************************************************/
+static void  writeMasterModbusRegister (uint8_t* pOriginData, headerReqRWMR_st* pScuRWmR)
+{
+  uint8_t*                pEnd;
+  rs485RWmultipleReg_st*  pMsg;
+  uint8_t*                pMallocTx;
+  uint16_t                length;
+  crcMode_u               crc;
+
+  pMallocTx = (uint8_t*)malloc(sizeof(headerReqRWMR_st) + pScuRWmR->numBytes + (uint16_t)sizeof(crc)); // remember + 2 for checksum 
+  pMsg = (rs485RWmultipleReg_st*)pMallocTx;
+  /* the command must be executed    */
+  length = (uint16_t)sizeof(headerReqRWMR_st) + pScuRWmR->numBytes;
+  pMsg->unitId = pScuRWmR->unitId; 
+  pMsg->function = FUNCTION_WRITE_MULTIPLE_REG;
+  pMsg->regAdd = swapW(pScuRWmR->regAdd);
+  pScuRWmR->numWords = pScuRWmR->numBytes / 2;
+  pMsg->numWords = swapW(pScuRWmR->numWords);
+  pMsg->numBytes = pScuRWmR->numBytes;
+
+  /*      destination               source          length */
+  memcpy((void*)pMsg->data, (void*)pOriginData, (size_t)pScuRWmR->numBytes);
+  
+  /* now found the CRC message */
+  crc.crcW = crcEvaluation ((uint8_t*)pMsg, length);
+  /* position pEnd pointer on crc field */
+  pEnd =  (uint8_t*)((uint32_t)pMsg + (uint32_t)length);
+  *pEnd = crc.crcLH_st.crcL;
+  pEnd++;
+  *pEnd = crc.crcLH_st.crcH;
+  length += sizeof(crc.crcW);
+
+  if (xSemaphoreTake(getScuSinapsiTxUartSemaphoreHandle(), portMAX_DELAY) == pdTRUE)
+  {
+    setMallocTx485(pMallocTx);
+    /* start transmission on UART RS485 to SCU RS485 Bus using DMA */
+    txOnRs485Bus((uint8_t*)pMsg, (uint16_t)length); 
+  }
+}
+
+/**
+*
+* @brief        build an async RIR message to slave on RS485  
+*
+* @param [in]   headerRHR_t* : pointer to struct where is stored the read info 
+*
+* @retval       none:  
+*
+***********************************************************************************************************************/
+static void  readMasterModbusRegister (headerRHR_t* pScuRIR)
+{
+  uint8_t*                pEnd;
+  headerRHR_t*            pMsg;
+  uint8_t*                pMallocTx;
+  uint16_t                length;
+  crcMode_u               crc;
+
+  pMallocTx = (uint8_t*)malloc(sizeof(headerRHR_t) + (uint16_t)sizeof(crc)); // remember + 2 for checksum 
+  pMsg = (headerRHR_t*)pMallocTx;
+  /* the command must be executed    */
+  length = (uint16_t)sizeof(headerRHR_t);
+  pMsg->unitId = pScuRIR->unitId; 
+  pMsg->function = FUNCTION_READ_INPUT_REG;
+  pMsg->regAdd = swapW(pScuRIR->regAdd);
+  pMsg->numBytes = swapW(pScuRIR->numBytes);
+
+  /* now found the CRC message */
+  crc.crcW = crcEvaluation ((uint8_t*)pMsg, length);
+  /* position pEnd pointer on crc field */
+  pEnd =  (uint8_t*)((uint32_t)pMsg + (uint32_t)length);
+  *pEnd = crc.crcLH_st.crcL;
+  pEnd++;
+  *pEnd = crc.crcLH_st.crcH;
+  length += sizeof(crc.crcW);
+
+  if (xSemaphoreTake(getScuSinapsiTxUartSemaphoreHandle(), portMAX_DELAY) == pdTRUE)
+  {
+    setMallocTx485(pMallocTx);
+    /* start transmission on UART RS485 to SCU RS485 Bus using DMA */
+    txOnRs485Bus((uint8_t*)pMsg, (uint16_t)length); 
+  }
+}
+
+/**
+*
+* @brief       get info from a socket 
+*
+* @param [in]  uint32_t : mask bit for the socket    
+* @param [in]  sbcSemInfoMng_st* : info for discovery    
+*  
+* @retval      uint8_t: TRUE, more slave must be checked; FALSE 
+*              end procedure 
+*  
+****************************************************************/
+static uint8_t getInfoSocket(uint32_t presenceMask, sbcSemInfoMng_st* pInfo) 
+{
+  uint32_t              result;
+  frameSbcSem_st        tmpFrameSbcSem;
+  scuRwMapRegister_st*  pRwRegs;
+  scuRoMapRegister_st*  pRoRegs; 
+  tmMapRegister_st*     pTmRegs;
+
+  if (pInfo->logicIdSocket >= SCU_NUM) return(FALSE);
+
+  pRwRegs = getRwMdbRegs(pInfo->logicIdSocket);
+  pRoRegs = getRoMdbRegs(pInfo->logicIdSocket);
+
+  do
+  {
+    result = presenceMask & pInfo->discoveryMask;
+    if ((result) != (uint32_t)0)
+    {
+      /* the socket with this mask is present */
+      switch (pInfo->addrVal)
+      {
+        case ADDR_START_RDD:
+          tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_RX;
+          tmpFrameSbcSem.data.index = pInfo->logicIdSocket + 1; // physical address 1...16 
+          tmpFrameSbcSem.data.rAddr = ADDR_START_RDD;
+          pInfo->pDataRd = (uint8_t*)&pRoRegs->scuMapRegInfoVer;
+          tmpFrameSbcSem.dataToSend.len = (uint16_t)(ADDR_SCU_RESERVED1 - ADDR_START_RDD);  /* richiedo la lettura di tutta la remote inventory: versione FW, SN, ... */
+          pInfo->dataVal = tmpFrameSbcSem.dataToSend.len * 2;  // lenght in bytes 
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          /* point to next info to request  */
+          pInfo->addrVal = ADDR_EVSE_EVENT_FLAGS_RO;
+          break;
+
+        case ADDR_EVSE_EVENT_FLAGS_RO:
+          tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_RX;
+          tmpFrameSbcSem.data.index = pInfo->logicIdSocket + 1;  // physical address 1...16 
+          tmpFrameSbcSem.data.rAddr = ADDR_EVSE_EVENT_FLAGS_RO;
+          pInfo->pDataRd = (uint8_t*)&pRoRegs->scuMapRegStatusMeas;
+          tmpFrameSbcSem.dataToSend.len = (uint16_t)(ADDR_SCU_RESERVED6B - ADDR_EVSE_EVENT_FLAGS_RO);  /* richiedo la lettura dello stato di tutti gli eventi */
+          pInfo->dataVal = tmpFrameSbcSem.dataToSend.len * 2;  // lenght in bytes  
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          /* point to next info to request  */
+          pInfo->addrVal = ADDR_CONNECTOR_TYPE_RW;
+          break;
+
+        case ADDR_CONNECTOR_TYPE_RW:
+          tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_RX;
+          tmpFrameSbcSem.data.index = pInfo->logicIdSocket + 1;   // physical address 1...16 
+          tmpFrameSbcSem.data.rAddr = ADDR_CONNECTOR_TYPE_RW;
+          pInfo->pDataRd = (uint8_t*)&pRwRegs->scuSetRegister;
+          tmpFrameSbcSem.dataToSend.len = (uint16_t)(ADDR_RESERVED_A - ADDR_CONNECTOR_TYPE_RW);  /* richiedo la lettura delle configurazioni  */
+          pInfo->dataVal = tmpFrameSbcSem.dataToSend.len * 2;  // lenght in bytes 
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          /* point to next info to request  */
+          pInfo->addrVal = ADDR_EVSE_ERROR1_RO;
+          break;
+
+        case ADDR_EVSE_ERROR1_RO:
+          tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_RX;
+          tmpFrameSbcSem.data.index = pInfo->logicIdSocket + 1;   // physical address 1...16 
+          tmpFrameSbcSem.data.rAddr = ADDR_EVSE_ERROR1_RO;
+          pInfo->pDataRd = (uint8_t*)&pRoRegs->scuMapRegNotify.ntfErr1;
+          tmpFrameSbcSem.dataToSend.len = (uint16_t)(ADDR_EVSE_CHANGE_REGISTERS_RO  - ADDR_EVSE_ERROR1_RO);  /* richiedo la lettura degli errori  */
+          pInfo->dataVal = tmpFrameSbcSem.dataToSend.len * 2;  // lenght in bytes 
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+#if BOARD_REPAIR
+          if ((pInfo->discoveryMask & pInfo->infoEepromSlaveToDo) == 0)
+          {
+            /* point to next possible slave */
+            pInfo->addrVal = ADDR_START_RDD;
+          }
+          else
+          {
+            /* eeprom info parameter must be reuired to the slave */
+            pInfo->addrVal = ADDR_GET_EEPROM_RW;
+            /* reset the flag: only one time the request must be performed */
+            pInfo->infoEepromSlaveToDo &= (~pInfo->discoveryMask);
+          }
+#else
+          /* point to next possible slave */
+          pInfo->addrVal = ADDR_START_RDD;
+#endif
+          break;
+
+        case ADDR_GET_EEPROM_RW:
+          pTmRegs = getTmMdbRegs(pInfo->logicIdSocket);
+          tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_RX;
+          tmpFrameSbcSem.data.index = pInfo->logicIdSocket + 1;   // physical address 1...16 
+          tmpFrameSbcSem.data.rAddr = ADDR_GET_EEPROM_RW;
+          pInfo->pDataRd = (uint8_t*)&pTmRegs->tmGetEeprom;  
+          tmpFrameSbcSem.dataToSend.len = (uint16_t)(LEN_TM_GET_EEPROM_RW);  /* richiedo la lettura della EEPROM  */
+          pInfo->dataVal = tmpFrameSbcSem.dataToSend.len * 2;  // lenght in bytes 
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          /* point to next possible slave */
+          pInfo->addrVal = ADDR_START_RDD;
+          break;
+      }
+    }
+    else
+    {
+      pInfo->discoveryMask = pInfo->discoveryMask << 1;
+      pInfo->logicIdSocket++;
+      pRwRegs = getRwMdbRegs(pInfo->logicIdSocket);
+      pRoRegs = getRoMdbRegs(pInfo->logicIdSocket);
+    }
+  }while ((result == (uint32_t)0) && (pInfo->logicIdSocket < SCU_NUM));
+
+  if (pInfo->logicIdSocket >= SCU_NUM) return(FALSE); else return(TRUE);
+
+}
+
+/**
+*
+* @brief       get info on RS485 transmission status  
+*
+* @param [in]  uint32_t : mask bit for the socket    
+* @param [in]  sbcSemInfoMng_st* : info for discovery    
+*  
+* @retval      uint8_t: TRUE transmission complete (Tx + ACK) 
+*  
+****************************************************************/
+uint8_t txRS485Available(void) 
+{
+  if (rs485SemInfoMng.rs485SemStates == RS485_SEM_OPERATIVE) return(TRUE); else return(FALSE);
+}
+
+/**
+*
+* @brief       Actuators_Mdb_to_Eeprom_Translate translate modbus to
+*              Eeprom codification
+*           
+* @param [in]  pointer to the variable to change
+*  
+* @retval      None
+*  
+****************************************************************/
+
+void Actuators_Mdb_to_Eeprom_Translate (uint8_t *ptr)
+{
+  uint8_t tmp = 0, tmp1 = FALSE;
+    
+  if((*ptr & ACT_BLCK) == ACT_BLCK)
+  {
+    tmp |= BLOCK_ATT0;
+  }
+  
+  if((*ptr & ACT_MIRR) == ACT_MIRR)
+  {
+    tmp |= CONTACT_ATT0;
+  }
+  
+  if((*ptr & ACT_RCBO) == ACT_RCBO)
+  {
+    tmp |= RCBO_ATT0;
+  }
+
+  /* Check if BBCK must be enabled */
+  if ((*ptr & ACT_BACK) == ACT_BACK)
+  {
+    /* Set flag for SEM */
+    tmp |= BBCK_ATT0; 
+    /* Set backup flag for webUI http */
+    tmp1 = TRUE;
+  }
+
+  /* Save Backup flag in eeprom (for webUI http )*/
+  // xx eeprom_array_set(BATTERY_CONFIG_EADD, (uint8_t*)&tmp1, 1);    
+  EEPROM_Save_Config (BATTERY_CONFIG_EADD, (uint8_t*)&tmp1, 1);
+    
+  /* Get LCD_TYPE address from eeprom, where WIFI_ON is saved */
+  eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&tmp1, 1);
+  /* Check if WIFI must be enabled or not */
+  if((*ptr & ACT_WIFI) == ACT_WIFI)
+    tmp1 |= WIFI_ON;        /* Enable WIFI */
+  else
+    tmp1 &= ~WIFI_ON;       /* Disable WIFI */
+  
+  /* Save new configuration */
+  
+  /*** SAVE ON EEPROM ***/   
+  EEPROM_Save_Config (LCD_TYPE_EADD, (uint8_t *)&tmp1, 1);
+  
+  /* Get configuration of hw check2 from modbus */ 
+  /* P.S --> PAUT in modbus map is inside hw checks settings */
+  tmp1 = getHwChecks2();
+
+  /* PAUT enabled? check in modbus map */
+  if (tmp1 & PAUT_CRL2)
+    tmp |= PAUT_ATT0;   /* Set Post authorization mode */
+  else
+    tmp &= ~PAUT_ATT0;  /* Reset Post authorization mode */ 
+  
+  *ptr = tmp;
+}
+
+/**
+*
+* @brief       Save HW Checks and Actuators into Eeeprom 
+*              
+*           
+* @param [in]  Modbus address of the register to save
+*  
+* @retval      None
+*  
+****************************************************************/
+
+void HW_CHECKS_ACTUATORS_EEprom_Save (uint16_t rAddr)
+{
+  uint8_t   HwCheckTmp, temp8;
+  uint16_t  hwCheck;
+  static uint8_t   temp[5];
+  uint8_t collaudoFlag;
+  
+  /* Save in EEPROM check flags and actuator presence */
+  switch (rAddr)  
+  {
+    case ADDR_HW_CHECKS1_RW:                    /* Prepare HW_CHECK1_RW */
+        /* Get configuration from eeprom */
+        eeprom_param_get(CONTROL_BYTE0_EADD, &HwCheckTmp, 1);
+        /* bit 4 and 5 have a different codification between Modbus map and Eeprom: BLE and WiFi in modbus, 
+           REMOTE and PULS in GSY and WebUI ???) */
+        /* Configuration from EEprom --> Consider bit 4 and 5, used for REMOTE and PULS */
+        HwCheckTmp &= (uint8_t)(REMOTE_CRL0 | PULS_CRL0);  
+        /* Get configuration from modbus */
+        hwCheck = getHwChecks1();
+        /* Clear bit4 and 5, reserved for REMOTE and PULS */
+        hwCheck &= ~(uint8_t)(REMOTE_CRL0 | PULS_CRL0);
+        temp[0] = (uint8_t)hwCheck | HwCheckTmp;  
+        temp[1] = (uint8_t)(hwCheck >> 8);
+      break;
+      
+    case ADDR_HW_CHECKS2_RW:                   /* Prepare HW_CHECK2_RW */
+        /* Get configuration from modbus */      
+        hwCheck = getHwChecks2();
+        temp[2] = (uint8_t)hwCheck;  
+        temp[3] = (uint8_t)(hwCheck >> 8);
+        /* Set HGTP configuration in eeprom for webserver GUI */
+        temp8 = (hwCheck & HGTP_CRL2) >> HGTP_CRL2_bit_pos;        
+        
+        /*** SAVE ON EEPROM ***/                   
+        EEPROM_Save_Config (TEMP_CTRL_ENB_EADD, &temp8, 1);
+      break;
+      
+    case ADDR_HW_ACTUATORS_RW:                /* Prepare HW_ACTUATORS_RW */
+        /* Get actuators from modbus */
+        temp[4] = (uint8_t)getHwActuators();                   
+        /* Translate actuators informations from modbus format to eeprom format */
+        Actuators_Mdb_to_Eeprom_Translate (&temp[4]);  
+        /* Write settings into eeprom */
+        /*** SAVE ON EEPROM ***/           
+        EEPROM_Save_Config (CONTROL_BYTE0_EADD, (uint8_t *)temp, 5);                                    
+
+        collaudoFlag = getCollaudoRunning();
+        /* reset immediato  */
+        if(!collaudoFlag)
+        {
+          activeImmediateReset(); 
+        }
+      break;  
+      
+    default:
+      break;
+  }
+  
+}
+
+/**
+*
+* @brief       Save HW Flags into Eeeprom 
+*              
+*           
+* @param [in]  None
+*  
+* @retval      None
+*  
+****************************************************************/
+
+void HW_PRESENCE_FLAG_EEprom_Save (void)
+{
+   uint8_t   HwFlagsEeprom;
+   uint16_t  temp16;
+
+   /* Prepare information to save in Eeprom  according to this codification:
+   
+    LCD_TYPE_EADDR in Eeprom
+
+    Bit 0 --> LCD_ON
+    Bit 2 --> WIFI_ON 
+    Bit 3 --> DIFF_RIARMABILE
+
+   */
+   
+   temp16 = getHwFlags();
+   eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&HwFlagsEeprom, 1);
+   /* Check Display LCD presence */
+   if ((temp16 & DISPLAY_LCD_FLAG) == DISPLAY_LCD_FLAG)
+     HwFlagsEeprom |= LCD_2X20;
+   else 
+     HwFlagsEeprom &= ~LCD_2X20;     
+   /* Check WIFI module presence */
+   if ((temp16 & WIFI_CONNECTION_FLAG) == WIFI_CONNECTION_FLAG)
+     HwFlagsEeprom |= WIFI_ON;
+   else
+     HwFlagsEeprom &= ~WIFI_ON;     
+   /* Check DIFF RIARMABILE module presence */
+   if ((temp16 & DIFF_RIARM_FLAG) == DIFF_RIARM_FLAG)
+     HwFlagsEeprom |= DIRI_ON;           
+   else
+     HwFlagsEeprom &= ~DIRI_ON;                
+   /* Write settings into eeprom */   
+   /*** SAVE ON EEPROM ***/   
+   EEPROM_Save_Config (LCD_TYPE_EADD, (uint8_t *)&HwFlagsEeprom, 1);
+}
+
+/**
+*
+* @brief       Set new connector ID in conversion matrix
+*              
+*           
+* @param [in]  Connector ID
+*  
+* @retval      None
+*  
+****************************************************************/
+
+void CONN_ID_Set_New (uint16_t New_Connector_ID)
+{
+  uint8_t  mdbAddr;
+  
+  /* get address on modbus and relative modbus pointer area   */
+  mdbAddr = getLogicalMdbAddrSem();  
+  /* Set New connector ID in matrix */
+  socketPresence.matrixIdConn[mdbAddr] = New_Connector_ID;
+  /* Save in eeprom */
+  WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t));
+}
+
+/**
+*
+* @brief       parser config area to apply the new 
+*              configuration
+*
+* @param [in]  frameSbcSem_st* : pointer to info    
+*  
+* @retval      none 
+*  
+****************************************************************/
+static void semUpdateConfig(frameSbcSem_st* pMsg) 
+{
+  frameRemote_st  frameRemote;  
+  static uint8_t  temp[5];
+  uint16_t        temp16;
+  uint32_t        temp32;
+
+  if (pMsg->data.rAddr <= ADDR_RESERVED_A)
+  {
+        
+    /* we are in configuration parameter area */
+    switch (pMsg->data.rAddr)
+    {
+      case ADDR_HW_CHECKS1_RW:
+      case ADDR_HW_CHECKS2_RW:
+      case ADDR_HW_ACTUATORS_RW:
+        /* Save HW CHECKS and ACTUATORS into EEPROM */
+        HW_CHECKS_ACTUATORS_EEprom_Save(pMsg->data.rAddr);        
+        if (isSemMasterFz() == FALSE) 
+        {
+          /* the slave must send the change in EEPROM to the master when all 3 regs are written  */
+          restartSbcSemTimer(TIMER_FOR_REQ_ADDR, WAIT_FOR_EEPROM_WRITE);
+        }
+        break;
+        
+      case ADDR_AUTHORIZATION_FEEDBACK_RW:
+        
+        if (*((uint16_t*)pMsg->dataToSend.pData) == (uint16_t)0x0001)
+        {
+          frameRemote.currentEvent = REMOTE_EVS_AUTH_START;
+          frameRemote.currentData = (uint16_t)0x0001;
+          configASSERT(xQueueSendToBack(remoteMngQueue, (void *)&frameRemote, portMAX_DELAY) == pdPASS); // remoteSuspRelProcess()
+        }
+        else if (*((uint16_t*)pMsg->dataToSend.pData) == (uint16_t)0x0002)
+        {
+          send_to_evs(EVS_AUTH_NEG);
+        }
+        else if (*((uint16_t*)pMsg->dataToSend.pData) == (uint16_t)0x0003)
+        {
+          send_to_evs(EVS_AUTH_STOP);
+        }
+        
+        break;
+        
+      case ADDR_REMOTE_COMMANDS_RW:
+        temp16 = *((uint16_t*)pMsg->dataToSend.pData);
+        if (temp16 == (uint16_t)0x0001)
+        {
+          frameRemote.currentEvent = REMOTE_EVS_AUTH_STOP;
+          frameRemote.currentData = (uint16_t)0x0001;
+          configASSERT(xQueueSendToBack(remoteMngQueue, (void *)&frameRemote, portMAX_DELAY) == pdPASS); // remoteSuspRelProcess()
+        }
+        else if (temp16 == (uint16_t)0x0002)
+        {
+          /* inizio carica */
+          lastCommandSent = EVS_AUTH_START;
+          send_to_evs(EVS_AUTH_START);
+        }
+        else if (temp16 == (uint16_t)MODE_AVAILABLE)
+        {
+          temp[0] = (uint8_t)EVS_MODE_AVAILABLE;
+          
+          /*** SAVE ON EEPROM ***/
+          EEPROM_Save_Config (SOCKET_ENABLE_EADD, (uint8_t*)temp, 1);
+          
+          evs_reserved_set(0);
+          
+          send_to_evs(EVS_AUTORIZATION_MODE);
+        }
+        else if (temp16 == (uint16_t)MODE_UNAVAILABLE)
+        {
+          temp[0] = (uint8_t)EVS_MODE_UNAVAILABLE;
+          
+          /*** SAVE ON EEPROM ***/
+          EEPROM_Save_Config (SOCKET_ENABLE_EADD, (uint8_t*)temp, 1);
+                        
+          send_to_evs(EVS_AUTORIZATION_MODE);
+        }
+        else if (temp16 == (uint16_t)MODE_RESERVED)
+        {
+//          temp[0] = (uint8_t)EVS_MODE_AVAILABLE | (uint8_t)EVS_MODE_RESERVED;
+//          eeprom_param_set(SOCKET_ENABLE_EADD, (uint8_t*)temp, 1);
+          evs_reserved_set(1);
+          send_to_evs(EVS_AUTORIZATION_MODE);
+        }
+        else if (temp16 == (uint16_t)HARD_REBOOT)
+        {
+          /* reset immediato  */
+          activeImmediateReset();
+        }        
+        else if ((temp16 >= REMOVE_CONNECTOR_ID_START) && (temp16 <= REMOVE_CONNECTOR_ID_END))
+        {
+          temp[0] = (uint8_t)(temp16 - REMOVE_CONNECTOR_ID_START) + (uint8_t)1; // logic id 1..15 (logic 0 is master and cannot be removed)
+          removeSocketFromList(temp[0]);
+        }
+        
+        break;
+        
+      case ADDR_EVSE_OPERATION_MODE_RW:
+        
+        temp16 = getOperationMode();
+        temp[0] = (uint8_t)(temp16);   /* evse_mode in modbus map --> FREE, PERSONAl, NET */
+        temp[1] = (uint8_t)(temp16 / 0x100) ;  /* master_mode --> LOCAL - OCPP */ 
+        /* Check if LOCAL mode */
+        if (temp[1] <= (char)0x01)
+        {
+          if (temp[0] <= EVS_NET_MODE)  /* EVS_FREE_MODE = 0, EVS_PERS_MODE = 1, EVS_NET_MODE = 2 NON gestiti: EVS_OCPP_MODE = 3*/
+          {
+            /* set the current operative mode                       */            
+            /*** SAVE ON EEPROM ***/
+            EEPROM_Save_Config (EVS_MODE_EADD, (uint8_t*)&temp[0], 1);
+                          
+            send_to_evs(EVS_AUTORIZATION_MODE);
+          }
+        }
+        else
+        {
+          temp[0] = (char)EVS_OCPP_MODE;
+          /* set OCPP = 3 as current operative mode                       */          
+          /*** SAVE ON EEPROM ***/
+          EEPROM_Save_Config (EVS_MODE_EADD, (uint8_t*)&temp[0], 1);
+          send_to_evs(EVS_AUTORIZATION_MODE);
+        }        
+        
+        break;
+        
+      case ADDR_MAX_TEMPORARY_POWER_AC:        
+        frameRemote.currentEvent = REMOTE_MAX_POWER_CHANGE;
+        frameRemote.currentData = (uint16_t)0x0002;
+        configASSERT(xQueueSendToBack(remoteMngQueue, (void *)&frameRemote, portMAX_DELAY) == pdPASS); // remoteSuspRelProcess()      
+        break;
+        
+      case ADDR_HWC_FLAGS_RW:        
+        /* Save Hw flags into Eeprom */
+        HW_PRESENCE_FLAG_EEprom_Save ();                  
+        break;
+
+      case ADDR_DISPLAY_DEFAULT_LANGUAGE_RW:
+        /* get language received */
+        temp16 = getDefaultLanguage();              
+        /* Uniformato a pagina Web Nik e Modbus v21.3. Esempio se bit n.5 settato a 1 --> in eeprom finisce il valore 0x05 - 1 (non bit mask ma enum) */      
+        LANG_Modbus_to_EEprom_Translate ((uint32_t)temp16);
+        break;
+        
+      case ADDR_DISPLAY_LANGUAGES_RW:
+        /* Get available languages */
+        temp32 = getAvailableLanguages();
+        /* Translate from Modbus to eeprom format */
+        LANG_Available_Mdb_to_EEprom_Translate (temp32);        
+        break;
+
+      case ADDR_MAX_TYPICAL_CURRENT_RW:
+        /* Get Max typical current */
+        temp16 = getMaxTypicalCurrent();
+        /* Store into eeprom location */        
+        /*** SAVE ON EEPROM ***/
+        EEPROM_Save_Config (M3T_CURRENT_EADD, (uint8_t*)&temp16, 1);
+        break;
+        
+      case ADDR_MAX_SIMPLIFIED_CURRENT_RW:
+        /* Get Max typical current */
+        temp16 = getMaxSimplifiedCurrent();
+        /* Store into eeprom location */        
+        /*** SAVE ON EEPROM ***/
+        EEPROM_Save_Config (M3S_CURRENT_EADD, (uint8_t*)&temp16, 1);
+        break;
+        
+      case ADDR_PM_MODE_RW:
+      case ADDR_PM_IMIN_RW:
+      case ADDR_PM_PMAX_RW:
+      case ADDR_PM_FLAGS_RW:
+      case ADDR_PM_HPOWER_RW:
+      case ADDR_PM_DSET_RW:
+      case ADDR_PM_DMAX_RW:
+        /* Translate from MOdbus to EEprom format */
+        PM_Mdb_to_EEprom_Translate(pMsg->data.rAddr);
+        break;
+        
+      case ADDR_MENU_VISIBILITY_RW:
+        /* Get PM menu visibility flag */
+        temp16 = getPmMenuVisibility();
+        /* Store into eeprom location */        
+        /*** SAVE ON EEPROM ***/
+        EEPROM_Save_Config (HIDDEN_MENU_VIS_EADD, (uint8_t*)&temp16, 1);
+        break;
+       
+    case ADDR_CHARGE_TIME_RW:
+        /* Get Charge by Time value */      
+        temp16 = getChargeByTime();
+        /* Store into eeprom location */        
+        /*** SAVE ON EEPROM ***/
+        EEPROM_Save_Config (TCHARGE_TIME_EADD, (uint8_t*)&temp16, 1);
+        break;
+        
+    case ADDR_CHARGE_MAX_ENERGY_RW:
+        /* Get Charge by Energy value */      
+        temp16 = getChargeByEnergy();
+        /* Store into eeprom location */        
+        /*** SAVE ON EEPROM ***/
+        EEPROM_Save_Config (ENRG_LIMIT_EADD, (uint8_t*)&temp16, 1);
+        break;        
+                
+    case ADDR_CONNECTOR_IDS_RW:
+        /* Get Connector ID from modbus map */
+        temp16 = getConnectorId();
+        /* Set new connector ID on conversion matrix */
+        CONN_ID_Set_New (temp16);  
+        /* Set also the new number to show on LCD with the new value of connector ID*/
+        numberOnLcd = temp16;        
+        if (isSemMasterFz() == FALSE) 
+        {
+          /* the slave must send the change in EEPROM to the master when all 3 regs are written  */
+          restartSbcSemTimer(TIMER_FOR_REQ_ADDR, WAIT_FOR_EEPROM_WRITE);
+        }
+        break;
+        
+
+      case ADDR_TIMEOUT_RANGE1_RW:
+        /* get the timeout value from SEM message */
+        temp16 = *((uint16_t*)pMsg->dataToSend.pData);
+        /* save this value and set for Evs Manager */
+        saveTimeoutRange1(temp16);
+        setWaitTimeValue(temp16);
+        break;
+
+      default:
+        /* not a configuration register */
+        break;
+        
+    }
+  }
+  
+}
+
+/**
+*
+* @brief       start the task management 
+*
+* @param [in]  none    
+*  
+* @retval      none 
+*  
+****************************************************************/
+void startSbcSemProcess(void) 
+{
+  frameSbcSem_st        tmpFrameSbcSem;  
+
+  tmpFrameSbcSem.sbcSemEvent = NOTIFY_START_TASK;
+  tmpFrameSbcSem.data.index = getPhysicalMdbAddr();
+  tmpFrameSbcSem.timeEntry = getPacketStatusNum();
+  configASSERT(xQueueSendToBack(getSbcSemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+}
+
+/**
+*
+* @brief       set in the modbus map hardware configuration 
+*
+* @param [in]  
+*  
+* @retval      none 
+*  
+****************************************************************/
+void  upgradeModbusHwConfig(void) 
+{
+  uint8_t               mdbAddr;
+  frameSbcSem_st        tmpFrameSbcSem;  
+  uint16_t              idConn;
+
+  idConn = fromRs485ToSem((uint16_t)getPhysicalMdbAddr());
+  mdbAddr = (uint8_t)idConn;
+
+  /* Init modbus registers according to the setting in eeprom */
+  initModbusRegisters();
+  
+  /* If SEM, send this setting to the Master */
+  if (isSemMode())
+  {
+    /* send the info to notify manager */
+    tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_MASTER_TX;
+    tmpFrameSbcSem.data.index = mdbAddr + 1;  // phisical address 1...16 
+    tmpFrameSbcSem.data.rAddr = ADDR_CONNECTOR_TYPE_RW;
+    tmpFrameSbcSem.timeEntry = getPacketStatusNum();
+    configASSERT(xQueueSendToBack(getSbcSemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+  }
+}
+
+/**
+*
+* @brief       upgrade bit for error or status notification  
+*
+* @param [in]  
+*  
+* @retval      none 
+*  
+****************************************************************/
+void  upgradeModbusReg(uint16_t errAddr) 
+{
+  frameSbcSem_st          tmpFrameSbcSem;  
+  uint8_t                 mdbAddr;
+
+  if (isSemMode() == FALSE)
+    return;
+  
+  if (getSbcSemQueueHandle() == NULL)
+    return;
+
+  mdbAddr = getLogicalMdbAddrSem();
+  /* send the info to notify manager ADDR_EVSE_ERROR1_RO */
+  tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_MASTER_TX;
+  tmpFrameSbcSem.data.index = mdbAddr + 1; // phisical address 1...16
+  tmpFrameSbcSem.data.rAddr = errAddr;
+  tmpFrameSbcSem.dataToSend.len = (uint16_t)1;
+  tmpFrameSbcSem.timeEntry = getPacketStatusNum();
+  configASSERT(xQueueSendToBack(getSbcSemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+}
+
+/**
+*
+* @brief       set the property bit in the register change 
+*              notification
+*
+* @param [in]  uint16_t: SCU physical index 01...32 
+* @param [in]  uint16_t: base changed register 
+* @param [in]  uint16_t: mask bit 
+* @param [in]  uint16_t: device Id i.e. logical index in array 
+*        structures 
+*  
+* @retval      bitNotifyResult_e: success if TRUE 
+*  
+****************************************************************/
+static bitNotifyResult_e  setChangeRegisterBit(uint16_t ixScu, frameSbcSem_st* pMsg, uint32_t mskBit, uint16_t deviceId) 
+{
+  scuRoMapRegister_st*    pRoRegs;
+  scuRwMapRegister_st*    pRwRegs;
+  uint16_t                val, regChanged;
+  uint8_t                 logicAddr, ix, strReg[36], toPrint, toUpdate;
+  bitNotifyResult_e       result; 
+
+  result = SEND_ACK;
+  val = 0;
+   toPrint = toUpdate = TRUE;
+
+  logicAddr = (uint8_t)deviceId;
+
+  pRoRegs = getRoMdbRegs(logicAddr);
+  pRwRegs = getRwMdbRegs(logicAddr);
+
+  regChanged = pMsg->data.rAddr;
+  switch (regChanged) 
+  {
+    case ADDR_UID_AUTHORIZATION_RO:
+      /* set in the map the right value for the origin of the change  */
+      pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] |= (uint16_t)UID_AUTHORIZATION_BIT;
+      /*         destination           source */
+      strcpy((char *)strReg, AddrUidStr);
+      break;
+
+    case ADDR_EVSE_EVENT_FLAGS_RO:
+      pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] |= (uint16_t)SOCKET_EVENT_FLAG_BIT;
+      /*         destination           source */
+      strcpy((char *)strReg, AddrEventFlag);
+      val = pRoRegs->scuMapRegStatusMeas.ntfSktEvent;
+      break;
+
+    case ADDR_EVSE_CHARGE_STATUS_RO:
+#ifdef COME_ERA
+      pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] |= (uint16_t)EVSE_CONNECTOR_STATUS_BIT_RO;
+      /*         destination           source */
+      strcpy((char *)strReg, AddrChargStatus);
+      ix = (uint8_t)pRoRegs->scuMapRegStatusMeas.ntfChgStat;
+      val = pRoRegs->scuMapRegStatusMeas.ntfChgStat;
+      if (ix <= END_CHARGE_STATE)
+      {
+        /*         destination       source */
+        strcat((char *)strReg, nameState[ix]);
+      }
+      if (val == (uint16_t)MDBSTATE_REBOOTING)
+      {
+        /* reset max_temporary_power when a reboot on slave occurred */
+        pRwRegs->scuSetRegister.maxTempPowerAc = (uint32_t)0;
+      }
+      if (val == (uint16_t)MDBSTATE_REBOOTING)
+      {
+        /* reset max_temporary_power when a reboot on slave occurred */
+        pRwRegs->scuSetRegister.maxTempPowerAc = (uint32_t)0;
+      }
+#else
+
+      val = pMsg->status;
+      if (prevState[logicAddr] != val)
+      {
+        if ((getScuOpMode() != SCU_M_P) || (pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] & (uint16_t)EVSE_CONNECTOR_STATUS_BIT_RO) == (uint16_t)0)
+        {
+          pRoRegs->scuMapRegStatusMeas.ntfChgStat = prevState[logicAddr] = val;
+          pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] |= (uint16_t)EVSE_CONNECTOR_STATUS_BIT_RO;
+          /*         destination           source */
+          strcpy((char *)strReg, AddrChargStatus);
+          ix = (uint8_t)pRoRegs->scuMapRegStatusMeas.ntfChgStat;
+          if (ix <= SUSPENDED_NOPOWER_STATE)
+          {
+            /*         destination       source */
+            strcat((char *)strReg, nameState[ix]);
+          }
+          if (val == (uint16_t)MDBSTATE_REBOOTING)
+          {
+            /* reset max_temporary_power when a reboot on slave occurred */
+            pRwRegs->scuSetRegister.maxTempPowerAc = (uint32_t)0;
+          }
+        }
+        else
+        {
+          /* previus info has not been read from SBC */
+          return(SEND_RETRY);
+        }
+      }
+      else
+      {
+        result = SEND_NULL;
+      }
+#endif
+      break;
+
+    case ADDR_EVSE_ERROR1_RO:
+        pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] |= (uint16_t)EVSE_ERROR1_BIT_RO;
+        /*         destination   source */
+        strcpy((char *)strReg, AddrErr1);
+        val = pRoRegs->scuMapRegNotify.ntfErr1;
+        break;
+
+    case ADDR_EVSE_ERROR2_RO:
+        pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] |= (uint16_t)EVSE_ERROR2_BIT_RO;
+        /*         destination   source */
+        strcpy((char *)strReg, AddrErr2);
+        val = pRoRegs->scuMapRegNotify.ntfErr2;
+        break;
+
+    case ADDR_CONNECTOR_TYPE_RW:
+        pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] |= (uint16_t)CONFIGURATIONS_BIT_RW;
+        /*         destination     source */
+        strcpy((char *)strReg, AddrConnType);
+        val = 0;
+        break;
+
+    case ADDR_SESSION_ID_RO:
+      pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] |= (uint16_t)SESSION_ID_BIT_RO;
+      /*         destination     source */
+      strcpy((char *)strReg, AddrSessId);
+      val = pRoRegs->scuMapRegStatusMeas.evSessionId;
+      break;
+      
+    case ADDR_ENERGY_METERS_RW:
+#ifdef COME_ERA
+      /* workaround: on detect EM type set EM error, so the SEM is ready to read it when receive the clearing alarm */
+      /* clearing is made by socket at the and of the detected procedure                                            */
+      pRoRegs->scuMapRegNotify.ntfErr1 |= ((uint16_t)ERROR1_EMTR);
+#else
+      /* an energy meter has been detected, so an EM error must be removed */
+      pRoRegs->scuMapRegNotify.ntfErr1 &= (~(uint16_t)ERROR1_EMTR);
+#endif
+      pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[logicAddr] |= (uint16_t)EVSE_ERROR1_BIT_RO;
+      /*         destination           source */
+      strcpy((char *)strReg, AddrEm);
+      break;
+ 
+    case ADDR_CURRENT_AC_L1_RO:
+    case ADDR_VOLTAGE_AC_RO:
+      /*   destination           source */
+      strcpy((char *)strReg, AddrMeasure);
+      /* for measure upgrade no setting is necessary SEM read it automatically with polling */
+      result = SEND_ACK;
+      toPrint = toUpdate = FALSE;
+      break;
+
+    case ADDR_TIME_IN_CHARGE_RO:
+      /* for measure upgrade no setting is necessary SEM read it automatically with polling */
+      result = SEND_ACK;
+      toPrint = toUpdate = FALSE;
+      break;
+      
+    default:
+      result = SEND_NULL;
+      break;
+  }
+  if (result == SEND_ACK)
+  {
+    // if a slave has been removed from discovered list only at the end of discovery phase must inform SEM 
+    if ((isSemMasterFz() == TRUE) && (toUpdate == TRUE) && ((sbcSemInfoMng.activeLastDiscovery & mskBit) != 0))
+    {
+      /* set the bit position for this SCU where the change occurred */
+      pScuRoMapReg->scuMapRegNotify.ntfChangeRo |= mskBit; 
+    }
+    if (toPrint == TRUE)
+    {
+      tPrintf("Socket %d Reg=0x%X %s Value= 0x%X at %s N=0x%X\n\r", getNumSocketLcd(deviceId), regChanged, strReg, val, getHmsStr(), pMsg->timeEntry);
+    }
+  }
+  return(result);
+}
+
+/**
+*
+* @brief       reset the property bit in the register change 
+*              notification
+*
+* @param [in]  uint16_t: SCU logical index 00...31 
+* @param [in]  uint16_t: base changed register 
+* @param [in]  uint16_t: num word to be read  
+*  
+* @retval      uint8_t: success if TRUE 
+*  
+****************************************************************/
+static uint8_t  resetChangeRegisterBit(uint16_t ixScu, uint16_t regChanged, uint16_t lenRd) 
+{
+  scuRoMapRegister_st*  pScuIxRoMapReg;
+  uint8_t               result;
+
+  result = FALSE;
+
+  if ((regChanged == ADDR_EVSE_EVENT_FLAGS_RO) && (lenRd >= (ADDR_SCU_RESERVED6B - ADDR_EVSE_EVENT_FLAGS_RO)))
+  {
+    pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] = (uint16_t)0;
+    /* no more events to manage for this SCU, so the status bit can be resetted */
+    pScuRoMapReg->scuMapRegNotify.ntfChangeRo &= (~(uint32_t)sbcSemMaskBit[ixScu]);
+    pScuIxRoMapReg = getRoMdbRegs(ixScu);
+    if (pScuIxRoMapReg->scuMapRegStatusMeas.uidAuth[0] != 0)
+    {
+      pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] &= (~(uint16_t)UID_AUTHORIZATION_BIT); result = TRUE;
+      pScuIxRoMapReg->scuMapRegStatusMeas.uidAuth[0] = pScuRoMapReg->scuMapRegStatusMeas.uidAuth[1] = (uint8_t)0;
+      gsy_quick_polling_update(RFID_PENDING, 0);
+    }
+    return (TRUE);
+  }
+    
+  /* reset the bit of the read register by SBC-SEM */
+  if (regChanged == ADDR_UID_AUTHORIZATION_RO)
+  {
+    pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] &= (~(uint16_t)UID_AUTHORIZATION_BIT); result = TRUE;
+    pScuRoMapReg->scuMapRegStatusMeas.uidAuth[0] = pScuRoMapReg->scuMapRegStatusMeas.uidAuth[1] = (uint8_t)0;
+    gsy_quick_polling_update(RFID_PENDING, 0);
+  }
+  if (regChanged == ADDR_EVSE_EVENT_FLAGS_RO)
+  {
+    pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] &= (~(uint16_t)SOCKET_EVENT_FLAG_BIT); result = TRUE;
+  }
+  if (regChanged == ADDR_EVSE_CHARGE_STATUS_RO)
+  {
+    pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] &= (~(uint16_t)EVSE_CONNECTOR_STATUS_BIT_RO); result = TRUE;
+  }
+  if ((regChanged <= ADDR_EVSE_ERROR1_RO) && (regChanged + lenRd > ADDR_EVSE_ERROR1_RO))
+  {
+    pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] &= (~(uint16_t)EVSE_ERROR1_BIT_RO); result = TRUE;
+  }
+  if ((regChanged <= ADDR_EVSE_ERROR2_RO) && (regChanged + lenRd > ADDR_EVSE_ERROR2_RO))
+  {
+    pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] &= (~(uint16_t)EVSE_ERROR2_BIT_RO); result = TRUE;
+  }
+  if (regChanged == ADDR_CONNECTOR_TYPE_RW)
+  {
+    pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] &= (~(uint16_t)CONFIGURATIONS_BIT_RW); result = TRUE;
+  }
+  if (regChanged == ADDR_SESSION_ID_RO)
+  {
+    pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] &= (~(uint16_t)SESSION_ID_BIT_RO); result = TRUE;
+  }
+
+  if (result == TRUE)
+  {
+    if (pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[ixScu] == (uint16_t)0)
+    {
+      /* no more events to manage for this SCU, so the status bit can be resetted */
+      pScuRoMapReg->scuMapRegNotify.ntfChangeRo &= (~(uint32_t)sbcSemMaskBit[ixScu]);
+    }
+  }
+  return(result);
+}
+
+/**
+*
+* @brief       set the property UID bytes in the registers 
+*
+* @param [in]  none 
+*  
+* @retval      none 
+*  
+****************************************************************/
+void setUIDinfoROmap (void) 
+{
+  scuRoMapRegister_st*    pRoRegs;
+  uint8_t                 mdbAddr;
+
+  mdbAddr = getLogicalMdbAddrSem();
+  pRoRegs = getRoMdbRegs(mdbAddr);
+
+  /* set in the map the right value for len, card type and UID */
+  rfid_uid_get((uint8_t *)&pRoRegs->scuMapRegStatusMeas.uidAuth[2], (sl030_type_en*)(&pRoRegs->scuMapRegStatusMeas.uidAuth[1]));
+  if ((pRoRegs->scuMapRegStatusMeas.uidAuth[6] == 0) && (pRoRegs->scuMapRegStatusMeas.uidAuth[7] == 0) &&
+      (pRoRegs->scuMapRegStatusMeas.uidAuth[8] == 0) && (pRoRegs->scuMapRegStatusMeas.uidAuth[9] == 0))
+  {
+    pRoRegs->scuMapRegStatusMeas.uidAuth[0] = (uint8_t)4;
+  }
+  else
+  {
+    pRoRegs->scuMapRegStatusMeas.uidAuth[0] = (uint8_t)7;
+  }
+}
+
+/**
+*
+* @brief        callback to manager timers   
+*
+* @param [in]   TimerHandle_t: the elapsed timer 
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static void sbcSemTimCallBack (TimerHandle_t pxTimer)
+{
+  frameSbcSem_st        tmpFrameSbcSem;  
+  uint32_t              timer_id, val;
+  scuOpModes_e          locScuMode;
+  uint8_t               result;
+
+  /* find the led  which the timer is referred */
+  timer_id = (uint32_t)pvTimerGetTimerID(pxTimer);
+
+  switch (timer_id)
+  {
+    case (uint32_t)TIMER_FIND_CONFIG:
+      switch (sbcSemInfoMng.sbcSemStates)
+      {
+        case SBC_SEM_INIT_DISCOVERY:
+          if (isSemMasterFz() == TRUE)
+          {
+            sbcSemInfoMng.dataVal = (uint16_t)SCU_S_PS_STARTUP;  // for discovery slave SCU (slave primary, i.e with TFT or slave secondary) 
+            tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_TX;
+            tmpFrameSbcSem.data.index = MODBUS_BROADCAST_ADDR;
+            tmpFrameSbcSem.data.rAddr = ADDR_EVSE_TM_RW;
+            tmpFrameSbcSem.dataToSend.pData = (uint8_t*)&sbcSemInfoMng.dataVal;
+            tmpFrameSbcSem.dataToSend.len = LEN_EVSE_TM_MODE_RW;
+            configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+            restartSbcSemTimer(TIMER_FIND_CONFIG, WAIT_FOR_DISCOVERY_SLAVE); // the master restart the timeout 1000msec
+            sbcSemInfoMng.activityStatus = 0; 
+            sbcSemInfoMng.sbcSemStates = SBC_SEM_DISCOVERY_S;
+          }
+          else
+          {
+            /* the ack coming from expected socket */
+            sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE;
+            locScuMode = getScuOpMode();
+            if ((locScuMode == SCU_S_P) || (locScuMode == SCU_S_S))
+            {
+              /* after update it is necessary a slave must inform the master about new FW   */
+              val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*) getHandleRtc(), BACKUP_HW_INFO);
+              if ((val & NOTIFY_FW_UPD_MASK) == NOTIFY_FW_UPD_FLAG)
+              {
+                /* reset the flag */
+                val &= (~NOTIFY_FW_UPD_MASK);
+                HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO, val);       
+                /* send the info on communication error   */
+                sendEventToSemMng(NOTIFY_TO_MASTER_TX, ADDR_EVSE_ERROR2_RO);
+              }
+            }
+          }
+          break;
+
+        case SBC_SEM_DISCOVERY_S:
+          /* no more master secondary SCU are present in the chain */
+          if ((socketPresence.livePresence & (~SCU_MASTER_MASK_BIT)) == 0)
+          {
+            pScuRoMapReg->scuMapRegNotify.ntfPresences = (uint32_t)0x01; // only SCU master is present --> stand alone socket
+            socketPresence.chainPresence |= (uint32_t)0x01;
+            /* the alive task must be started to check if a slave will be connected   */
+            sbcSemInfoMng.discoveryMask = 0;
+            if (getScuOpMode() == SCU_M_STAND_ALONE)
+            {
+              /* set initial socket info */
+              sbcSemInfoMng.discoveryMask = (uint32_t)0x1;
+              /* only the SCU Isolated is present For SEM this SCU must be put in OFF-LINE */
+              pScuRoMapReg->scuMapRegStatusMeas.ntfChgStat = (uint16_t)MDBSTATE_UNAVAILABLE;
+            }
+          }
+          else
+          {
+            if (getRemotePmFlag() == FALSE) setPmRemoteSemFlag(TRUE); // we are working in SEM with one slave present atleast 
+            if (getScuOpMode() == SCU_M_STAND_ALONE)
+            {
+              /* set initial socket info */
+              sbcSemInfoMng.discoveryMask = (uint32_t)0x1;
+            }
+            else
+            {
+              /* set initial socket info */
+              sbcSemInfoMng.discoveryMask = (uint32_t)0x2;
+            }
+          }
+          sbcSemInfoMng.activityStatus = socketPresence.livePresence; // set mask for discovery procedure
+
+          sbcSemInfoMng.addrVal = ADDR_START_RDD;  // to get info on  discovered primary/secondary slave an master SCU 
+          tmpFrameSbcSem.sbcSemEvent = RECOVERY_INFO;
+          tmpFrameSbcSem.data.rAddr = sbcSemInfoMng.addrVal = ADDR_START_RDD;
+          sbcSemInfoMng.sbcSemStates = SBC_SEM_RECOVERY_INFO;
+          if (getScuOpMode() == SCU_M_P)
+          {
+            /* set initial socket info */
+            sbcSemInfoMng.logicIdSocket = (uint16_t)0x1;
+            tmpFrameSbcSem.data.index = (uint16_t)0x1;
+          }
+          else
+          {
+            /* SCU_M_STAND_ALONE case */
+            sbcSemInfoMng.logicIdSocket = (uint16_t)0x0;
+            tmpFrameSbcSem.data.index = (uint16_t)0x0;
+          }
+          tmpFrameSbcSem.timeEntry = getPacketStatusNum();
+          configASSERT(xQueueSendToBack(getSbcSemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+          break;
+
+        case SBC_SEM_WAIT_TO_BE_OPERATIVE:
+          /* the ack coming from expected socket */
+          locScuMode = getScuOpMode();
+          if ((locScuMode == SCU_S_P) || (locScuMode == SCU_S_S))
+          {
+            /* after update it is necessary a slave must inform the master about new FW   */
+            val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*) getHandleRtc(), BACKUP_HW_INFO);
+            if ((val & NOTIFY_FW_UPD_MASK) == NOTIFY_FW_UPD_FLAG)
+            {
+              /* reset the flag */
+              val &= (~NOTIFY_FW_UPD_MASK);
+              HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO, val);       
+              /* send the info on communication error   */
+              sendEventToSemMng(NOTIFY_TO_MASTER_TX, ADDR_EVSE_ERROR2_RO);
+            }
+          }
+          break;
+
+        case SBC_SEM_OPERATIVE:
+          sbcSemInfoMng.addrVal = ADDR_START_RDD;  // to get info on  discovered primary/secondary slave an master SCU 
+          tmpFrameSbcSem.sbcSemEvent = RECOVERY_INFO;
+          tmpFrameSbcSem.data.rAddr = sbcSemInfoMng.addrVal = ADDR_START_RDD;
+          /* set initial socket info */
+          if (getScuOpMode() == SCU_M_P)
+          {
+            /* set initial socket info */
+            sbcSemInfoMng.discoveryMask = (uint32_t)0x2;
+            sbcSemInfoMng.logicIdSocket = (uint16_t)0x1;
+            tmpFrameSbcSem.data.index = (uint16_t)0x1;
+          }
+          else
+          {
+            /* SCU_M_STAND_ALONE case */
+            sbcSemInfoMng.discoveryMask = (uint32_t)0x1;
+            sbcSemInfoMng.logicIdSocket = (uint16_t)0x0;
+            tmpFrameSbcSem.data.index = (uint16_t)0x0;
+          }
+          tmpFrameSbcSem.timeEntry = getPacketStatusNum();
+          configASSERT(xQueueSendToBack(getSbcSemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case TIMER_FOR_ACK:
+      switch (sbcSemInfoMng.sbcSemStates)  
+      {
+        case SBC_SEM_INIT_DISCOVERY:
+          /* release the transmitter */
+          tmpFrameSbcSem.sbcSemEvent = NOTIFY_MODBUS_ACK;
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          /* the previous message hasn't received ACK: possible conflit on firstr Tx byte? Retry */
+          osDelay(getRandomDelay());  /* delay in the range 2...50 msec */
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&currFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          break;
+
+        case SBC_SEM_WAIT_TO_REGISTER:
+          if (sbcSemInfoMng.firstIdFree > (uint16_t)SCU_M_P_ADDR)
+          {
+            locScuMode = getScuOpMode();
+            if (getScuOpMode() == SCU_S_S)
+            {
+              if (socketPresence.keyPresence == KEY_FULL_MASTER_P)
+              {
+                /* the edge address coming from Broadcast procedure SCU MASTER */
+                socketPresence.keyPresence = KEY_FULL_MASTER_P_S;
+              }
+              else
+              {
+                /* the edge address coming from linked secondary master  */
+                socketPresence.keyPresence = KEY_FULL_MASTER_S;
+              }
+            }
+            else
+            {
+              socketPresence.keyPresence = KEY_FULL_CONFIG;
+            }
+            result = (uint8_t)sbcSemInfoMng.firstIdFree; sbcSemInfoMng.firstIdFree = 0; 
+            if (WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t)) == osOK)    // save socket Presence 
+            {
+              tPrintf("Assigned address %d\n\r", result);
+              /* a new address must be set */
+              // xx eeprom_array_set(RS485_ADD_EADD, (uint8_t*)&result, 1);
+              EEPROM_Save_Config (RS485_ADD_EADD, (uint8_t*)&result, 1);
+              /* Send event to update eeprom */
+              // send_to_eeprom(EEPROM_UPDATE); 
+              /* Restart with new RS485 address */
+              activeImmediateReset();
+            }
+          }
+          break;
+
+        case SBC_SEM_OPERATIVE:
+          break;
+
+        case SBC_SEM_WAIT_WR_MASTER_ACK:
+        case SBC_SEM_WAIT_WR_MASTER_POLL_ACK: 
+          sbcSemInfoMng.offLine = TRUE;
+          tPrintf("Master unavailable!\n\r");
+          /* communication problem with master */
+          tmpFrameSbcSem.sbcSemEvent = NOTIFY_MODBUS_ACK;
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE;
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case TIMER_FOR_TICK_RTC:
+      setCurrentDateTimeInSem();
+      break;
+
+    case TIMER_FOR_ACK_POLLING:
+      switch (sbcSemInfoMng.sbcSemStates)
+      {
+        case SBC_SEM_OPERATIVE:
+          /* release the transmitter */
+          tmpFrameSbcSem.sbcSemEvent = NOTIFY_MODBUS_ACK;
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case TIMER_FOR_REQ_ADDR:
+      switch (sbcSemInfoMng.sbcSemStates)
+      {
+        case SBC_SEM_WAIT_TO_REGISTER:
+          /* a  slve SCU is present in the chain and requires an address */
+          sbcSemInfoMng.dataVal = (uint16_t)sbcSemInfoMng.random;                 // copy in the tag Id the product SN crc 100....
+          pScuTmMapReg->tmAddrReq = sbcSemInfoMng.dataVal;                         
+          pScuTmMapReg->tmAddrAss = (uint16_t)getPhysicalMdbAddr();               // just for debug put the current address
+          tmpFrameSbcSem.dataToSend.len = (uint16_t)6;                            /* we send 3 word = 6 bytes starting from ADDR_ADDR_S_CONN_RW */
+          tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_MASTER_TX;
+          tmpFrameSbcSem.data.index = getPhysicalMdbAddr();                         /* just for debug  rs485SemMsgProcess() */
+          tmpFrameSbcSem.data.rAddr = ADDR_ADDR_S_CONN_RW;
+          tmpFrameSbcSem.dataToSend.pData = (uint8_t*)&pScuTmMapReg->tmAddrSconnM;
+          configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+          // start ACK timer 
+          xTimerReset (xSbcSemTimers[TIMER_FOR_ACK], 0);
+          break;
+
+        case SBC_SEM_OPERATIVE:
+          /* the slave must send eeprom_array info to the master for updating configuration */
+          val = (uint32_t)getLogicalMdbAddrSem();
+          if (getAndsendAllSlaveParameters((uint8_t)val) == 0)  // 0 means NO_ERROR
+          {
+            tPrintf("Sent upgrade eeprom info slave %02d!!\n\r", val + 1);
+          }
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    default:
+      break;
+  }
+}
+
+/**
+*
+* @brief        send a message in broadcast mode for firmware update   
+*
+* @param [in]   none
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void upgradeFwSlaveBroadcast(uint8_t ixScu)
+{
+  scuRwMapRegister_st*    pRwRegs;
+  frameSbcSem_st          tmpFrameSbcSem;  
+
+  pRwRegs = getRwMdbRegs(SCU_M_P_ADDR_LOG);
+  tmpFrameSbcSem.sbcSemEvent = SBC_SEM_EVENT_UART5_SEND_DWLD_CMD;
+  tmpFrameSbcSem.data.index = (uint16_t)ixScu;                                // physical address 1...31 or broadcast 0
+  tmpFrameSbcSem.data.rAddr = ADDR_FILE_COMMAND_RW; // 
+  tmpFrameSbcSem.dataToSend.len = LEN_FILE_COMMAND_RW + LEN_FILE_SIZE_RW;           // lenght in word of data to be transmitted over RS485
+  tmpFrameSbcSem.dataToSend.pData = (uint8_t*)&pRwRegs->scuSetRegFwUpd.fileCommand; // data origin
+  tmpFrameSbcSem.timeEntry = getPacketStatusNum();
+   
+  configASSERT(xQueueSendToBack(getSbcSemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+}
+
+/**
+*
+* @brief        Creating a node for sem message     
+*
+* @param [in]   node
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+nodeMsg createNode()
+{
+    nodeMsg temp; // declare a node
+
+    temp = (nodeMsg)malloc(sizeof(struct semMsgList));  // allocate memory using malloc()
+    temp->next = NULL;                                  // make next point to NULL
+    return temp;                                        //return the new node
+}
+
+/**
+*
+* @brief        Adding a message on node 
+*
+* @param [in]   node
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static nodeMsg addNode(nodeMsg head, frameSbcSem_st *pMessage)
+{
+    nodeMsg temp,p;           // declare three nodes temp, p
+
+    temp = createNode();      //createNode will return a new node with data = value and next pointing to NULL.
+    /* add element's value to data part of node */
+    /*      destination               source           length */
+    memcpy((void*)&temp->inMsg, (void*)pMessage, (size_t)sizeof(frameSbcSem_st));
+
+    if(head == NULL)
+    {
+      head = temp;            //when linked list is empty
+    }
+    else
+    {
+      p = head;              //assign head to p and pFirst 
+      while(p->next != NULL)
+      {
+        p = p->next;          //traverse the list until p is the last node.The last node always points to NULL.
+      }
+      p->next = temp;
+    }
+    return head;
+}
+
+/**
+*
+* @brief        Sent the first message waiting in the list 
+*
+* @param [in]   nodeMsg: head of the list 
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+static nodeMsg extractSendFirstInList(nodeMsg head)
+{
+    frameSbcSem_st        locFrameSbcSem;
+    nodeMsg               p, pPrev, pMin, pMinPrev;
+    uint32_t              minId;
+
+    p = pMinPrev = pMin = head;              //assign head to p and pFirst 
+    minId = p->inMsg.timeEntry;
+    while(p != NULL)
+    {
+      if (p->inMsg.timeEntry < minId)
+      {
+        minId = p->inMsg.timeEntry;
+        pMin = p;
+        pMinPrev = pPrev;
+      }                     // find the oldest packet --> first to be processed 
+      pPrev = p;
+      p = p->next;          //traverse the list until p is the last node.The last node always points to NULL.
+    }
+    pMinPrev->next = pMin->next;  // extract the item and link the previous to the next 
+
+    /*      destination               source           length */
+    memcpy((void*)&locFrameSbcSem, (void*)pMin, (size_t)sizeof(frameSbcSem_st));
+    free(pMin);               // free previous allocated area 
+    configASSERT(xQueueSendToBack(getSbcSemQueueHandle(), (void *)&locFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+    if (pMin != head)
+    {
+      return(head);
+    }
+    else
+    {
+      return(pMin->next);
+    }
+}
+
+
+/**
+*
+* @brief        Set the load balancing by SEM  
+*
+* @param [in]   none 
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void setNewMaxTempPowerSem(void)
+{
+  uint32_t temp32;
+
+  temp32 = getMaxTempPowerAc();
+  pmng_sem_power_set((uint16_t)temp32, 1);
+}
+
+/**
+*
+* @brief        Set the current date and time in  SEM  
+*
+* @param [in]   none 
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void setCurrentDateTimeInSem(void)
+{
+  time_t                currUT;
+  scuRwMapRegister_st*  pRwRegs;
+  uint8_t               mdbAddr;
+  uint8_t               timezone;
+  uint8_t               dst;
+  struct tm             *pTimeinfo;
+
+  //setUtcDateTimeRegister();
+
+  currUT = getCurrentUnixTime();
+
+  /* update globat date and time structure  **/
+  pTimeinfo = localtime (&currUT);
+
+
+
+  mdbAddr = getLogicalMdbAddrSem();
+  pRwRegs = getRwMdbRegs(mdbAddr);
+  
+  /* Get timezone saved in eeprom */
+  eeprom_param_get(TIME_ZONE_EADD, (uint8_t*)&timezone, 1);
+    
+  /* Get dst flag saved in eeprom */
+  eeprom_param_get(DST_EADD, (uint8_t*)&dst, 1);
+  
+  pRwRegs->scuSetRegister.rtcInf[0] = pTimeinfo->tm_sec;
+  pRwRegs->scuSetRegister.rtcInf[2] = pTimeinfo->tm_min;
+  pRwRegs->scuSetRegister.rtcInf[4] = pTimeinfo->tm_hour;
+  pRwRegs->scuSetRegister.rtcInf[6] = pTimeinfo->tm_mday;
+  pRwRegs->scuSetRegister.rtcInf[8] = pTimeinfo->tm_mon;
+  pRwRegs->scuSetRegister.rtcInf[10] = ((pTimeinfo->tm_year) & 0xFF);        /* Fixed ticket SCU-113 */ 
+  pRwRegs->scuSetRegister.rtcInf[11] = ((pTimeinfo->tm_year) & 0xFF00) >> 8; /* Fixed ticket SCU-113 */
+  pRwRegs->scuSetRegister.rtcInf[12] = pTimeinfo->tm_wday;
+  pRwRegs->scuSetRegister.rtcInf[13] = (pTimeinfo->tm_yday & 0xFF);          /* Fixed ticket SCU-113 */
+  pRwRegs->scuSetRegister.rtcInf[14] = (pTimeinfo->tm_yday & 0xFF00) >> 8;   /* Fixed ticket SCU-113 */
+  pRwRegs->scuSetRegister.rtcInf[16] = dst;
+  
+  pRwRegs->scuSetRegister.rtcTimeZone = timezone * 60;
+
+  // every 10 sec recall RTC for syncronization 
+  while ((xTimerChangePeriod (xSbcSemTimers[TIMER_FOR_TICK_RTC], TICK_FOR_RTC_SYNCRO, SBCSEM_TIMER_GARD_TIME) != pdPASS)); 
+
+}
+
+/**
+*
+* @brief        Save the right key in the structure    
+*
+* @param [in]   uint8: fixed / adjustable address type  
+*
+* @retval       none 
+*
+***********************************************************************************************************************/
+void setAddressType(uint8_t type, uint8_t clearPresence)
+{
+  uint8_t result; 
+
+  result = ReadFromEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t));
+  if (clearPresence == TRUE)
+  {
+    socketPresence.chainPresence = socketPresence.livePresence = socketPresence.assignedDeviceId = 0;
+  }
+
+  if (result == osOK)
+  {
+    if (type == (uint8_t)SCU_FIXED_ADDR)
+    {
+      socketPresence.keyPresence = KEY_FULL_CONFIG;
+      setScuAddressTypeMode(SCU_FIXED_ADDR);
+    }
+    else
+    {
+      socketPresence.keyPresence = (uint16_t)0;
+      setScuAddressTypeMode(SCU_TEMPORARY_ADDR);
+    }
+    if (WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t)) == osOK)    // save socket Presence 
+    {
+      tPrintf("Presences Defined\n\r");
+    }
+  }
+}
+
+/**
+*
+* @brief        Task to manage the alive polling on present slave     
+*
+* @param [in]   void*: parameters task  
+*
+* @retval       none 
+*
+***********************************************************************************************************************/
+static void pollingSlaveTask (void * pvParameters)
+{
+  frameSbcSem_st tmpFrameSbcSem;  
+  uint32_t       timeTickPoll;
+
+  /*-------- Creates an empty mailbox for uart  messages --------------------------*/
+  pollingSlaveQueue = xQueueCreate(NUM_BUFF_POLLING, sizeof(frameSbcSem_st));
+  configASSERT(pollingSlaveQueue != NULL);
+  
+  /* init structure for management */
+  pollingSlaveMng.pollStates = SLAVE_INIT;
+  pollingSlaveMng.unreachableSlave = (uint16_t)0;
+
+    
+  timeTickPoll = ACTIVITY_PERIOD_CHECK_TIME;
+
+  for (;;)
+  {
+    /* Wait for some event from timer or message   */
+    if (xQueueReceive(pollingSlaveQueue, (void *)&tmpFrameSbcSem, timeTickPoll) == pdPASS)
+    {
+      timeTickPoll = pollingSlaveProcess(&frameSbcSem);
+    }
+    else
+    {
+      tmpFrameSbcSem.sbcSemEvent = SBC_SEM_TIMEOUT;
+      timeTickPoll = pollingSlaveProcess(&tmpFrameSbcSem);
+    }
+  }
+}
+
+/**
+*
+* @brief        Manage the polling on present slave  
+*
+* @param [in]   frameSbcSem_st*: pointer to incoming message 
+*
+* @retval       uint32_t: new timeout 
+*
+***********************************************************************************************************************/
+static uint32_t pollingSlaveProcess(frameSbcSem_st* pMsg)
+{
+  uint32_t              timeTickTmp;
+  frameSbcSem_st        tmpFrameSbcSem;  
+  scuRoMapRegister_st*  pRoRegs; 
+  uint16_t              scuId, maskId, logicId;
+
+
+  timeTickTmp = ACTIVITY_PERIOD_CHECK_TIME;
+
+  if ((getStatusDwnl() == TRUE)  || (getBroadcastDownload() == TRUE))  
+    pollingSlaveMng.pollStates = FW_DOWNLOAD;
+
+  switch (pollingSlaveMng.pollStates)
+  {
+    case SLAVE_INIT:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_TIMEOUT:
+          if (sbcSemInfoMng.pollingFlag ==(uint16_t)ENABLED)
+          {
+            pollingSlaveMng.pollStates = SLAVE_IDLE;
+            pollingSlaveMng.checkMask = (uint16_t)SCU_MASTER_MASK_BIT;     // init with master data 
+            pollingSlaveMng.phyId = (uint16_t)SCU_M_P_ADDR;                // the master is out of polling periodic check 
+            /* starts to check slaves  */
+            pollingSlaveMng.pollStates = SLAVE_IDLE;
+            timeTickTmp = ACTIVITY_PERIOD_CHECK_TIME;
+          }
+          sbcSemInfoMng.activityStatus = 0;                             // reset all activity bit        
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case SLAVE_IDLE:
+      sbcSemInfoMng.dataVal = (uint16_t)SCU_S_PS_LIVE;    // for discovery slave SCU (slave primary, i.e with TFT or slave secondary) 
+      tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_TX;
+      tmpFrameSbcSem.data.index = MODBUS_BROADCAST_ADDR;
+      tmpFrameSbcSem.data.rAddr = ADDR_EVSE_TM_RW;        // AUTOCONFIG_FUNCTION_RW = ADDR_EVSE_TM_RW = 0x0022 is the register used for polling 
+      tmpFrameSbcSem.dataToSend.pData = (uint8_t*)&sbcSemInfoMng.dataVal;
+      tmpFrameSbcSem.dataToSend.len = LEN_EVSE_TM_MODE_RW;
+      configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+      /* command is sent: wait next slot */
+      pollingSlaveMng.pollStates = CTRL_SLAVE;
+      timeTickTmp = START_PERIOD_CHECK_LIVE; // timeout for receive responce from all active slaves 1000ms 
+      break;
+
+    case CTRL_SLAVE:
+      switch (pMsg->sbcSemEvent)
+      {
+        case SBC_SEM_TIMEOUT:
+          pollingSlaveMng.unactiveSlave = (socketPresence.chainPresence & pScuRoMapReg->scuMapRegNotify.ntfPresences) ^ sbcSemInfoMng.activityStatus;
+          if (pollingSlaveMng.unactiveSlave != 0)
+          {
+            if (getScuOpMode() == SCU_M_STAND_ALONE)
+            {
+              scuId = 1; maskId = 1; logicId = 0;            
+            }
+            else
+            {
+              scuId = 2; maskId = 2; logicId = 1;
+            }
+
+            for ( ; scuId < SCU_NUM; scuId++, maskId = maskId << 1, logicId++)
+            {
+              /* the check doen't involved the master */
+              pRoRegs = getRoMdbRegs(logicId);
+              if ((pollingSlaveMng.unactiveSlave & maskId) != 0)
+              {
+                if ((pRoRegs->scuMapRegNotify.ntfErr2 & ERROR2_OFFL) == 0)
+                {
+                  if (pollingSlaveMng.offLineCounter[logicId] >= NUM_OFF_LINE_RETRY)
+                  {
+                    /* the current scuId doesn't respond: put it in OFF_L error status Only one time !!! */
+                    pRoRegs->scuMapRegNotify.ntfErr2 |= ERROR2_OFFL;
+                    /* set error for SEM communication */
+                    tmpFrameSbcSem.data.rAddr = ADDR_EVSE_ERROR2_RO;
+                    (void)setChangeRegisterBit(scuId, (frameSbcSem_st*)&tmpFrameSbcSem, (uint32_t)maskId, logicId); 
+                    tPrintf ("SCU %02d off-line! %s\n\r" , scuId, getHmsStr());
+                    /* remove from discovered list so, when RS485 will be reconnected, a new discovery starts */
+                    socketPresence.livePresence &= ~(maskId);
+                    sbcSemInfoMng.activeLastDiscovery &= ~(maskId);  
+                  }
+                  else
+                  {
+                    pollingSlaveMng.offLineCounter[logicId]++;
+                    tPrintf ("SCU %02d off-line! Retry=%d %s\n\r" , getNumSocketLcd(logicId), pollingSlaveMng.offLineCounter[logicId], getHmsStr());
+                    /* restore RS485   */
+                    uartReintialization(); 
+                  }
+                }
+                else
+                {
+                  ;
+                }
+              }
+              else
+              {
+                if (pollingSlaveMng.offLineCounter[logicId] >= NUM_OFF_LINE_RETRY)
+                {
+                  /* the current scuId  respond now: put it in ON_LINE  Only one time !!! */
+                  pRoRegs->scuMapRegNotify.ntfErr2 &= (~ERROR2_OFFL);
+                  tPrintf ("SCU %02d on-line!! %s\n\r" , getNumSocketLcd(logicId), getHmsStr()); //  HAL_GetTick()
+                }
+                pollingSlaveMng.offLineCounter[logicId] = 0;
+              }
+            }
+          }
+          timeTickTmp = START_PERIOD_CHECK_LIVE;  // timeout for receive responce from all active slave 1000ms 
+          pollingSlaveMng.pollStates = FIND_NEW_SLAVE;  // 2000ms 
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case FIND_NEW_SLAVE:
+      sbcSemInfoMng.dataVal = (uint16_t)SCU_S_PS_NEW;  // for discovery new slave SCU (slave primary, i.e with TFT or slave secondary) 
+      tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_TX;
+      tmpFrameSbcSem.data.index = MODBUS_BROADCAST_ADDR;
+      tmpFrameSbcSem.data.rAddr = ADDR_EVSE_TM_RW;
+      tmpFrameSbcSem.dataToSend.pData = (uint8_t*)&sbcSemInfoMng.dataVal;
+      tmpFrameSbcSem.dataToSend.len = LEN_EVSE_TM_MODE_RW;
+      configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+      /* command is sent: wait next slot */
+      pollingSlaveMng.pollStates = SLAVE_INIT;
+      timeTickTmp = ACTIVITY_PERIOD_CHECK_TIME; // next time is 8sec
+      break;
+
+    case FW_DOWNLOAD:           /* FW download ongoing */
+       if ((getBroadcastDownload() == TRUE))
+       {
+         /* the task will be stopped with portMAX_DELAY value. Wait for reset at the end download  */
+         timeTickTmp = portMAX_DELAY;
+       }
+       else
+       {
+         /* the polling will restart at the end of slave upload */
+         timeTickTmp = SUSPEND_FOR_UPLOAD_TIME;
+         pollingSlaveMng.pollStates = SLAVE_INIT;
+       }
+      break;
+
+      default:
+        break;
+
+  }
+  return(timeTickTmp);
+}
+
+/**
+*
+* @brief       get FW version from the slaves
+*
+* @param [in]  None
+*  
+* @retval      none  
+*  
+****************************************************************/
+
+void Print_Slave_FW_Version (void)
+{
+  uint8_t cnt;
+  uint32_t mask;
+  scuRoMapRegister_st*  pRoRegs;
+  
+  for (cnt = 0, mask = 1; cnt < SCU_NUM; cnt++, mask <<= 1)
+  {
+     pRoRegs = getRoMdbRegs(cnt);
+    
+     if (socketPresence.livePresence & mask)     
+       tPrintf ("SCU id%02d --> FW version %s\n\r" , cnt +1, pRoRegs->scuMapRegInfoVer.mfwVer);
+     osDelay(10);
+  }
+  
+}
+
+/**
+*
+* @brief       get  slaves with assogned address
+*
+* @param [in]  None
+*  
+* @retval      none  
+*  
+****************************************************************/
+
+void Print_Slave_Assigned (void)
+{
+  uint8_t cnt;
+  uint32_t mask;
+  
+  for (cnt = 0, mask = 1; cnt < SCU_NUM; cnt++, mask <<= 1)
+  {
+     if (socketPresence.chainPresence & mask) 
+     {
+       tPrintf ("Address %02d Assigned\n\r" , cnt +1);
+     }
+     osDelay(10);
+  }
+  
+}
+
+
+
+/**
+*
+* @brief       reset current command sent to EVS for suspend / 
+*              resume function 
+*
+* @param [in]  None
+*  
+* @retval      none  
+*  
+****************************************************************/
+
+void resetCommandRemote (void)
+{
+  //lastCommandSent = EVS_EVENT_NULL;
+}
+
+/**
+*
+* @brief       get socket index inside fake code  
+*
+* @param [in]  uint32_t : mask bit for the socket    
+* @param [in]  sbcSemInfoMng_st* : info for discovery    
+*  
+* @retval      none  
+*  
+****************************************************************/
+static uint8_t  getSktNumInFakeCode(void) 
+{
+  uint8_t connNum;
+
+	eeprom_param_get(CONNECTOR_NUMBER_EADD, (uint8_t *)&connNum, 1);
+  return (connNum);
+}
+
+/**
+*
+* @brief       get tag id from product serial number   
+*
+* @param [in]  none    
+*  
+* @retval      uint16_t: crc on product SN  
+*  
+****************************************************************/
+static uint16_t  getTagIdFromPrdSn(void) 
+{
+  scuRoMapRegister_st*  pRoRegs;
+  crcMode_u             crc;
+  uint16_t              length;
+  uint8_t               mdbAddr;
+
+  mdbAddr = getLogicalMdbAddrSem();
+  pRoRegs = getRoMdbRegs(mdbAddr);
+
+  length = (uint16_t)strlen((char*)pRoRegs->scuMapRegInfoVer.prodSn);
+  /* now found the CRC message */
+  crc.crcW = crcEvaluation ((uint8_t*)pRoRegs->scuMapRegInfoVer.prodSn, length);
+  return(crc.crcW);
+}
+
+/**
+*
+* @brief       get the id for LCD    
+*
+* @param [in]  none    
+*  
+* @retval      uint8_t: id to put on LCD   
+*  
+****************************************************************/
+uint8_t  getIdNumberForLcd(void) 
+{
+  uint8_t                 idLcd;
+
+  if (isSemMode() == TRUE)
+  {
+    idLcd = numberOnLcd;
+  }
+  else
+  {
+    /* get SCU address        */
+    eeprom_param_get(RS485_ADD_EADD, (uint8_t *)&idLcd, 1);
+    idLcd++;
+  }
+  return(idLcd);
+}
+
+/**
+*
+* @brief       get the id LCD from device Id    
+*
+* @param [in]  uint8_t: device Id (0...15)    
+*  
+* @retval      uint8_t: id on LCD  
+*  
+****************************************************************/
+uint8_t  getNumSocketLcd(uint8_t deviceId) 
+{
+  scuRwMapRegister_st*  pRwRegs;
+  uint8_t               lcdNum;
+
+  pRwRegs = getRwMdbRegs(deviceId);
+  lcdNum = (uint8_t)pRwRegs->scuSetRegister.devAlias;
+  return(lcdNum);
+}
+  
+
+
+/**
+*
+* @brief       set in the modbus map the alias id number
+*
+* @param [in]  uint16_t: station status  
+*  
+* @retval      none 
+*  
+****************************************************************/
+void  setDevAlias (void) 
+{
+  scuRwMapRegister_st*  pRwRegs;
+  uint8_t               mdbAddr;
+  uint16_t              idDev;
+
+  /* get address on modbus and relative modbus pointer area   */
+  if (isSemMode() == TRUE)
+  {
+    mdbAddr = getPhysicalMdbAddr();
+    idDev = fromRs485ToSem(mdbAddr);
+    
+    // NULL id ? exit
+    if (idDev == NULL_ID)
+      return;
+    
+    pRwRegs = getRwMdbRegs(idDev);
+    pRwRegs->scuSetRegister.devAlias = socketPresence.matrixIdConn[idDev]; 
+    numberOnLcd = (uint8_t)pRwRegs->scuSetRegister.devAlias;
+
+    eeprom_param_get(RS485_ADD_EADD, &mdbAddr, 1);
+    if (mdbAddr == (SCU_S_REPL_ADDR - 1))
+    {
+      /* this is a board for replacement: its address is 99 but 16 for Firmware  */
+      numberOnLcd = SCU_S_REPL_ADDR;
+    }
+  }
+  else
+  {
+    mdbAddr = getLogicalMdbAddr();
+    pRwRegs = getRwMdbRegs(mdbAddr);
+    pRwRegs->scuSetRegister.devAlias = mdbAddr + 1; 
+  }
+}
+
+
+/**
+*
+* @brief       Check if to send to  master a request to receive 
+*              a new modbus address
+*
+* @param [in]  frameSbcSem_st*: pointer to received message    
+*  
+* @retval      sbcSemStates_e: the new state for the process  
+*  
+****************************************************************/
+static sbcSemStates_e  checkToSendReqAddress(frameSbcSem_st* pMsg) 
+{
+  uint16_t*             pWord;
+  sbcSemStates_e        retState;
+  uint32_t              reqDelay;
+
+  pWord = (uint16_t *)pMsg->dataToSend.pData;
+  retState = SBC_SEM_WAIT_TO_REGISTER;
+  gsy_connected_set((uint8_t)1); // the slave suppose that SEM is present 
+
+  if (((uint16_t)SCU_S_PS_STARTUP == *pWord)  || ((uint16_t)SCU_S_PS_NEW == *pWord))  // SCU_S_PS_STARTUP == 4 all slave SCU, secondary or primary 
+  {                                                                                   // SCU_S_PS_NEW == 6 all slave SCU, secondary or primary
+    /* the current slave is the same type required from master */
+    if (pMsg->data.rAddr == ADDR_EVSE_TM_RW)
+    {
+      if ((socketPresence.keyPresence != KEY_FULL_CONFIG)  || 
+          ((socketPresence.keyPresence == KEY_FULL_CONFIG) && socketPresence.chainPresence ==0)) // coming from a factory reset 
+      {
+        if (getSktNumInFakeCode() == 1)
+        {
+          /* only the first socket slave answer to require the address: the other wait for the assigning  message  */
+          switch (getNumSktInProduct())
+          {
+            case 1:
+              pScuTmMapReg->tmAddrSconnM = (uint16_t)0;
+              break;
+            case 2:
+              pScuTmMapReg->tmAddrSconnM = KEY_SCU_SLAVE_LINKED_2;
+              break;
+            case 4:
+              pScuTmMapReg->tmAddrSconnM = KEY_SCU_SLAVE_LINKED_4;
+              break;
+            default:
+              pScuTmMapReg->tmAddrSconnM = KEY_SCU_SLAVE_LINKED_2;
+              break;
+          }
+          sbcSemInfoMng.dataVal = (uint16_t)0xFFFF;  /* set the flag for transmission executed to dummy state */
+          sbcSemInfoMng.random = (uint32_t)getTagIdFromPrdSn();
+          reqDelay =  (uint32_t)(sbcSemInfoMng.random / FACTOR_FOR_RANDOM_DELAY);  //  --> random delay from 0...2048 msec
+
+          /* to avoid possible conflit on first Tx byte a random delay is used  */
+          //osDelay((uint32_t)(random / 100));  /* random delay in the range 0...655 msec depending on LSB CRC Product SN */
+          
+          while ((xTimerChangePeriod (xSbcSemTimers[TIMER_FOR_REQ_ADDR], reqDelay, SBCSEM_TIMER_GARD_TIME) != pdPASS)); 
+        }
+        else
+        {
+          sbcSemInfoMng.dataVal = getTagIdFromPrdSn();  // copy in the tag Id the product SN crc  
+          /* the slave SCU wait for address */
+          retState = SBC_SEM_WAIT_RS485_ADDR;
+        }
+      }
+    }
+  }
+  return(retState);
+}
+
+/**
+*
+* @brief       Check the assigned address received from master 
+*
+* @param [in]  frameSbcSem_st*: pointer to received message    
+*  
+* @retval      uint8_t: error code (0 = no error)  
+*  
+****************************************************************/
+static uint8_t  checkAssignNewAddress(frameSbcSem_st* pMsg) 
+{
+  uint16_t*             pWord;
+  uint16_t              ixScu, maskBit, idLogic;
+  uint8_t               modbusAddr, error, deviceId1, deviceId2;
+
+  pWord = (uint16_t *)pMsg->dataToSend.pData;
+  error = osOK;
+
+  /* the received message from master (word sequence): tag id - modbusAddress - device Id 1 - device Id 2 */
+  if (sbcSemInfoMng.dataVal == *pWord) // check if it is my tag id (crc SN)
+  {
+    /* recovery the modbusAddress  */
+    pWord++;
+    ixScu = modbusAddr = (uint8_t)(*pWord);
+    modbusAddr--;                                    // for hystoryc reason we stored modbusAddr - 1
+    if (pMsg->data.rAddr == ADDR_TM_ADDR_REQ_RW)
+    {
+      socketPresence.keyPresence = KEY_FULL_CONFIG;
+      pWord++;
+      deviceId1 = (uint8_t)(*pWord);                 // the master assign the address at the first socket i.e. the socket with SocketNumber = 1
+      pWord++;
+      deviceId2 = (uint8_t)(*pWord);                 // the second device Id assigned from master  
+      if (getSktNumInFakeCode() == 1)
+      {
+        idLogic = deviceId1;
+      }
+      else
+      {
+        idLogic = deviceId2;
+        modbusAddr++;                               // the linked SCU has address + 1 from the original SCU
+        ixScu++;
+      }
+      maskBit = sbcSemMaskBit[idLogic];
+      socketPresence.livePresence |= maskBit;
+      socketPresence.matrixConv[idLogic] = ixScu;           // update matrix deviceId with physical Modbus Address
+      socketPresence.matrixIdConn[idLogic] = idLogic + 1;   // update matrix idConn: default is device id + 1 (number on LCD)
+
+      /* a new address must be set */
+      // xx eeprom_array_set(RS485_ADD_EADD, (uint8_t*)&modbusAddr, 1);      
+      if (EEPROM_Save_Config (RS485_ADD_EADD, (uint8_t*)&modbusAddr, 1) == (uint8_t)osOK)
+      {
+        /* it necessary to change current SCU modbus address */
+        updateScuModbusAddrr();
+      }
+      if (WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t)) == osOK)    // save socket Presence 
+      {
+        tPrintf("Assigned Physical address %d\n\r", ixScu);
+      }
+      else
+      {
+        error = (uint8_t)1;
+      }
+    }
+  }
+  else
+  {
+    error = (uint8_t)2;
+  }
+  return(error);
+}
+
+/**
+*
+* @brief       Manager the new modbus address request from a 
+*              slave
+*
+* @param [in]  frameSbcSem_st*: pointer to received message    
+*  
+* @retval      none  
+*  
+****************************************************************/
+static void  mngReqAddress(frameSbcSem_st* pMsg) 
+{
+  uint16_t*             pWord;
+  frameSbcSem_st        tmpFrameSbcSem;  
+  uint32_t              maskBit;
+
+  sbcSemInfoMng.firstIdFree = getFirstFreeLogicId();
+#ifdef TRANSLATE_ID_LOGIC
+  sbcSemInfoMng.addrModFree = setModbusAddress();
+#else
+  /* default relation is: address on modbus is logic Id (sbcSemInfoMng.firstIdFree) + 1 */
+  sbcSemInfoMng.addrModFree = sbcSemInfoMng.firstIdFree + 1;
+#endif
+
+  /* a  secondary slave SCU is present in the chain and requires an address */
+  pWord = (uint16_t *)pMsg->dataToSend.pData;
+  /* a  secondary master SCU is present in the chain and requires an address */
+  pScuTmMapReg->tmAddrSconnM = *pWord;                      // copy the flag for slave linked
+  pWord++;
+  pScuTmMapReg->tmAddrReq = *pWord;                         // copy the tag Id 
+   
+  pScuTmMapReg->tmAddrAss = (uint16_t)sbcSemInfoMng.addrModFree;          // assign the first free modbus address (LSB) 
+  pScuTmMapReg->tmError1InTest = (uint16_t)sbcSemInfoMng.firstIdFree;     // assign the logic Id to be used for the slave in MSB
+  pWord = (uint16_t*)&pScuTmMapReg->tmError1InTest;
+  tmpFrameSbcSem.dataToSend.len = (uint16_t)3;                            /* we send 3 word starting from ADDR_TM_ADDR_REQ_RW */
+  tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_TX;
+  tmpFrameSbcSem.data.index = MODBUS_BROADCAST_ADDR;
+  tmpFrameSbcSem.data.rAddr = ADDR_TM_ADDR_REQ_RW;
+  tmpFrameSbcSem.dataToSend.pData = (uint8_t*)&pScuTmMapReg->tmAddrReq;
+
+  maskBit = sbcSemMaskBit[sbcSemInfoMng.firstIdFree];
+  socketPresence.livePresence |= maskBit;
+  socketPresence.chainPresence |= maskBit;
+  sbcSemInfoMng.activityStatus |= maskBit;
+  socketPresence.matrixConv[sbcSemInfoMng.firstIdFree] = (uint8_t)sbcSemInfoMng.addrModFree;
+  socketPresence.matrixIdConn[sbcSemInfoMng.firstIdFree] = (uint8_t)sbcSemInfoMng.firstIdFree + 1;
+  if (sbcSemInfoMng.discoveryMask == 0)
+  {
+    sbcSemInfoMng.discoveryMask = maskBit;                        // set the mask to start the next info request phase 
+    sbcSemInfoMng.logicIdSocket = sbcSemInfoMng.firstIdFree;      // set the logic address for the first new assigned socket 
+  }
+  if ((pScuTmMapReg->tmAddrSconnM == KEY_SCU_SLAVE_LINKED_2) || (pScuTmMapReg->tmAddrSconnM == KEY_SCU_SLAVE_LINKED_4))
+  {
+    sbcSemInfoMng.firstIdFree = getFirstFreeLogicId();
+#ifdef TRANSLATE_ID_LOGIC
+    sbcSemInfoMng.addrModFree = setModbusAddress();
+#else
+    /* default relation is: address on modbus is logic Id (sbcSemInfoMng.firstIdFree) + 1 */
+    sbcSemInfoMng.addrModFree = sbcSemInfoMng.firstIdFree + 1;
+#endif
+    /* this secondary slave  has a SCU slave linked the next id is assigned using same tagId*/
+    maskBit = sbcSemMaskBit[sbcSemInfoMng.firstIdFree];
+    socketPresence.livePresence |= maskBit;
+    socketPresence.chainPresence |= maskBit;
+    sbcSemInfoMng.activityStatus |= maskBit;
+    socketPresence.matrixConv[sbcSemInfoMng.firstIdFree] = (uint8_t)sbcSemInfoMng.addrModFree;
+    socketPresence.matrixIdConn[sbcSemInfoMng.firstIdFree] = (uint8_t)sbcSemInfoMng.firstIdFree + 1;
+    /* update info for the slave */
+    tmpFrameSbcSem.dataToSend.len++;                                        /* we send 4 word starting from ADDR_TM_ADDR_REQ_RW */
+    pWord++;
+    *pWord = (uint16_t)sbcSemInfoMng.firstIdFree;
+
+    if (pScuTmMapReg->tmAddrSconnM == KEY_SCU_SLAVE_LINKED_4)
+    {
+      sbcSemInfoMng.firstIdFree = getFirstFreeLogicId();
+#ifdef TRANSLATE_ID_LOGIC
+      sbcSemInfoMng.addrModFree = setModbusAddress();
+#else
+      /* default relation is: address on modbus is logic Id (sbcSemInfoMng.firstIdFree) + 1 */
+      sbcSemInfoMng.addrModFree = sbcSemInfoMng.firstIdFree + 1;
+#endif
+      /* this secondary master has a 3 SCU slave linked the next id is assigned using same tagId*/
+      maskBit = sbcSemMaskBit[sbcSemInfoMng.firstIdFree];
+      socketPresence.livePresence |= maskBit;
+      socketPresence.chainPresence |= maskBit;
+      sbcSemInfoMng.activityStatus |= maskBit;
+      socketPresence.matrixConv[sbcSemInfoMng.firstIdFree] = (uint8_t)sbcSemInfoMng.addrModFree;
+      socketPresence.matrixIdConn[sbcSemInfoMng.firstIdFree] = (uint8_t)sbcSemInfoMng.firstIdFree + 1;
+      /* update info for the slave */
+      tmpFrameSbcSem.dataToSend.len++;                                        /* we send 5 word starting from ADDR_TM_ADDR_REQ_RW */
+      pWord++;
+      *pWord = (uint16_t)sbcSemInfoMng.firstIdFree;
+
+      /* set the 4th socket */
+      sbcSemInfoMng.firstIdFree = getFirstFreeLogicId();
+#ifdef TRANSLATE_ID_LOGIC
+      sbcSemInfoMng.addrModFree = setModbusAddress();
+#else
+      /* default relation is: address on modbus is logic Id (sbcSemInfoMng.firstIdFree) + 1 */
+      sbcSemInfoMng.addrModFree = sbcSemInfoMng.firstIdFree + 1;
+#endif
+      maskBit = sbcSemMaskBit[sbcSemInfoMng.firstIdFree];
+      socketPresence.livePresence |= maskBit;
+      socketPresence.chainPresence |= maskBit;
+      sbcSemInfoMng.activityStatus |= maskBit;
+      socketPresence.matrixConv[sbcSemInfoMng.firstIdFree] = (uint8_t)sbcSemInfoMng.addrModFree;
+      socketPresence.matrixIdConn[sbcSemInfoMng.firstIdFree] = (uint8_t)sbcSemInfoMng.firstIdFree + 1;
+      /* update info for the slave */
+      tmpFrameSbcSem.dataToSend.len++;                                        /* we send 6 word starting from ADDR_TM_ADDR_REQ_RW */
+      pWord++;
+      *pWord = (uint16_t)sbcSemInfoMng.firstIdFree;
+    }
+  }
+  configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+  restartSbcSemTimer(TIMER_FIND_CONFIG, WAIT_FOR_NEXT_DISCOVERY); // the master restart the timeout 2500msec
+}
+
+/**
+*
+* @brief       get pointer to socket info  
+*
+* @param [in]  none    
+*  
+* @retval      none  
+*  
+****************************************************************/
+socketPresence_t* getDefSocketInfoPtr(void) 
+{
+
+  return((socketPresence_t*)&Default_Socket_Presence);
+}
+
+/**
+*
+* @brief       get the number of discovered socket (could be > 
+*              then socketPresence.livePresence
+*
+* @param [in]  none    
+*  
+* @retval      uint16_t: bit position discovered sockets  
+*  
+****************************************************************/
+uint32_t getSocketDiscovered(void) 
+{
+
+  return(socketPresence.chainPresence);
+}
+
+/**
+*
+* @brief       save the number of effective socket 
+*
+* @param [in]  uint16_t: bit mask for present sockets    
+*  
+* @retval      none  
+*  
+****************************************************************/
+void setSocketDiscovered(uint16_t maskPresence) 
+{
+
+  socketPresence.chainPresence = maskPresence;
+  /* save in EEPROM also  */
+  if (WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t)) == osOK)    // save socket Presence 
+  {
+    tPrintf("Presences confirmed --> 0x%x\n\r", socketPresence.chainPresence);
+  }
+}
+
+/**
+*
+* @brief       Restore all SCU to factory parameters  
+*
+* @param [in]  none    
+*  
+* @retval      none  
+*  
+****************************************************************/
+void restoreFactoryDefaultForAll(void) 
+{
+  frameSbcSem_st        tmpFrameSbcSem;  
+
+  if (isSemMasterFz() == TRUE)
+  {
+    sbcSemInfoMng.dataVal = (uint16_t)SCU_ALL_FACTORY_PARAM;   
+    tmpFrameSbcSem.sbcSemEvent = NOTIFY_TO_SLAVE_TX;
+    tmpFrameSbcSem.data.index = MODBUS_BROADCAST_ADDR;
+    tmpFrameSbcSem.data.rAddr = ADDR_EVSE_TM_RW;
+    tmpFrameSbcSem.dataToSend.pData = (uint8_t*)&sbcSemInfoMng.dataVal;
+    tmpFrameSbcSem.dataToSend.len = LEN_EVSE_TM_MODE_RW;
+    configASSERT(xQueueSendToBack(getRs485SemQueueHandle(), (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // rs485SemMsgProcess()
+    osDelay(500);
+    eraseAllBoardInfoEeprom();
+    restoreFactoryDefault();
+  }
+}
+
+/**
+*
+* @brief       Get the modbus control manager status   
+*
+* @param [in]  none    
+*  
+* @retval      uint8_t: TRUE if operative   
+*  
+****************************************************************/
+uint8_t isModbusManagerActive (void) 
+{
+  if (sbcSemInfoMng.sbcSemStates == SBC_SEM_OPERATIVE) return(TRUE); else return(FALSE);
+}
+
+/**
+*
+* @brief       Get the slave status operative   
+*
+* @param [in]  none    
+*  
+* @retval      uint8_t: TRUE if the slave in a no transmission 
+*              window (wait to be operative, typically a little
+*              time after the address has been assigned)
+*  
+****************************************************************/
+uint8_t isSlaveWaitToBeOperative (void) 
+{
+  if (sbcSemInfoMng.sbcSemStates == SBC_SEM_BLANK_AFTER_ASS_ADDR) return(TRUE); else return(FALSE);
+}
+
+
+/**
+*
+* @brief        Task to manage the the remote suspend / release  command    
+*
+* @param [in]   void*: parameters task  
+*
+* @retval       none 
+*
+***********************************************************************************************************************/
+static void remoteMngTask (void * pvParameters)
+{
+  frameRemote_st frameRemote;  
+  uint32_t       timeTickRemote;
+
+  /*-------- Creates an empty mailbox for uart  messages --------------------------*/
+  remoteMngQueue = xQueueCreate(NUM_BUFF_REMOTE, sizeof(frameRemote_st));
+  configASSERT(remoteMngQueue != NULL);
+  
+  /* init structure for management */
+  remoteMng.remoteStates = REMOTE_INIT;
+
+  timeTickRemote = TIMER_ACTION_AT_START;
+
+  for (;;)
+  {
+    /* Wait for some event from timer or message   */
+    if (xQueueReceive(remoteMngQueue, (void *)&frameRemote, timeTickRemote) == pdPASS)
+    {
+      timeTickRemote = remoteSuspRelProcess(&frameRemote);
+    }
+    else
+    {
+      frameRemote.currentEvent = REMOTE_TIMEOUT;
+      timeTickRemote = remoteSuspRelProcess(&frameRemote);
+    }
+  }
+}
+
+/**
+*
+* @brief        Manage the polling on present slave  
+*
+* @param [in]   frameSbcSem_st*: pointer to incoming message 
+*
+* @retval       uint32_t: new timeout 
+*
+***********************************************************************************************************************/
+static uint32_t remoteSuspRelProcess(frameRemote_st* pMsg)
+{
+  uint32_t              timeTickTmp, temp32;
+
+
+  timeTickTmp = portMAX_DELAY;
+
+  if (pMsg->currentEvent == RETURN_TO_OPERATIVE) 
+  {
+    remoteMng.remoteStates = REMOTE_OPERATIVE;
+    return(timeTickTmp);
+ }
+
+  switch (remoteMng.remoteStates)
+  {
+    case REMOTE_INIT:
+      switch (pMsg->currentEvent)
+      {
+        case REMOTE_TIMEOUT:
+          if (getRemotePmFlag() == TRUE)
+          {
+            /* to inform Vania's world to use current max power defined by SEM or default */
+            temp32 = getMaxTempPowerAc();
+            pmng_sem_power_set((uint16_t)temp32, 0xFF);
+          }
+          /* no action on timeout after task is started */
+          remoteMng.remoteStates = REMOTE_OPERATIVE;
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case REMOTE_OPERATIVE:
+      switch (pMsg->currentEvent)
+      {
+        case REMOTE_EVS_AUTH_START:
+          temp32 = getMaxTempPowerAc();
+          if (temp32 != 0)
+          {
+            /* SBC has written a non null power --> remove remote suspend if present  */
+            send_to_evs(EVS_REMOTE_RELEASE);
+            osDelay(100);
+          }
+          send_to_evs(EVS_AUTH_START);
+          remoteMng.remoteStates = REMOTE_EVS_AUTH;
+          break;
+
+        case REMOTE_MAX_POWER_CHANGE:
+          temp32 = getMaxTempPowerAc();
+          pmng_sem_power_set((uint16_t)temp32, 1);
+/*          if (evs_mode_get() == EVS_FREE_MODE)
+          {
+            if ((evs_state_get() == EVSTATE_CHARGING) && (temp32 == (uint32_t)0))
+            {
+              remoteMng.remoteStates = REMOTE_EVS_SUSPENDING;
+              send_to_evs(EVS_REMOTE_SUSPENDING);
+            }
+            else
+            {
+              if ((evs_state_get() == EVSTATE_SUSPENDING) && (temp32 != (uint32_t)0))
+              {
+                remoteMng.remoteStates = REMOTE_EVS_RELEASE;
+                send_to_evs(EVS_REMOTE_RELEASE);
+              }
+            }
+          }
+          else*/
+          {
+            if (temp32 == 0)
+            {
+              remoteMng.remoteStates = REMOTE_EVS_SUSPENDING;
+              send_to_evs(EVS_REMOTE_SUSPENDING);
+            }
+            else
+            {
+              /* SBC has written a non null power --> remove remote suspend if present  */
+              send_to_evs(EVS_REMOTE_RELEASE);
+            }
+          }
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case REMOTE_EVS_AUTH:
+    case REMOTE_EVS_RELEASE:
+      switch (pMsg->currentEvent)
+      {
+        case REMOTE_MAX_POWER_CHANGE:
+          temp32 = getMaxTempPowerAc();
+          pmng_sem_power_set((uint16_t)temp32, 1);
+          /* SEM sent a new value for MAX_TEMPORARY_POWER_AC_RW */
+          if (temp32 == (uint32_t)0)
+          {
+            remoteMng.remoteStates = REMOTE_EVS_SUSPENDING;
+            send_to_evs(EVS_REMOTE_SUSPENDING);
+          }
+          else // if (temp32 != (uint32_t)0)
+          {
+            send_to_evs(EVS_REMOTE_RELEASE);
+          }
+          break;
+
+        case REMOTE_EVS_AUTH_START:
+          /* da remoto su chiusura carica (inizia con questo messaggio  */
+          remoteMng.remoteStates = REMOTE_EVS_WAIT_TO_STOP;
+          break;
+
+        case REMOTE_EVS_AUTH_STOP:
+          send_to_evs(EVS_AUTH_STOP);
+          remoteMng.remoteStates = REMOTE_OPERATIVE;
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case REMOTE_EVS_SUSPENDING:
+      switch (pMsg->currentEvent)
+      {
+        case REMOTE_MAX_POWER_CHANGE:
+          temp32 = getMaxTempPowerAc();
+          pmng_sem_power_set((uint16_t)temp32, 1);
+          /* SEM sent a new value for MAX_TEMPORARY_POWER_AC_RW */
+          if (temp32 != (uint32_t)0)
+          {
+            send_to_evs(EVS_REMOTE_RELEASE);
+            remoteMng.remoteStates = REMOTE_EVS_AUTH;
+          }
+          break;
+
+        case REMOTE_EVS_AUTH_START:
+          /* da remoto su chiusura carica (inizia con questo messaggio  */
+          remoteMng.remoteStates = REMOTE_EVS_WAIT_TO_STOP;
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    case REMOTE_EVS_WAIT_TO_STOP:
+      switch (pMsg->currentEvent)
+      {
+        case REMOTE_EVS_AUTH_STOP:
+          send_to_evs(EVS_AUTH_STOP);
+          remoteMng.remoteStates = REMOTE_OPERATIVE;
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    default:
+      break;
+
+  }
+  return(timeTickTmp);
+}
+
+/**
+*
+* @brief       Get the remote PM flag status   
+*
+* @param [in]  none    
+*  
+* @retval      uint8_t: TRUE / FALSE   
+*  
+****************************************************************/
+uint8_t getRemotePmFlag (void) 
+{
+  uint8_t               pmng_enable;
+
+  eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);     // legge power management enable
+  if ((pmng_enable & HIDDEN_MENU_SEM_ENB) == 0) return(FALSE); else return(TRUE);
+}
+
+/**
+*
+* @brief       Send a restore mesage    
+*
+* @param [in]  none    
+*  
+* @retval      none   
+*  
+****************************************************************/
+void restoreOperativeState (void) 
+{
+  frameRemote_st  frameRemote;
+  
+  if (remoteMngQueue != NULL)
+  {
+    frameRemote.currentEvent = RETURN_TO_OPERATIVE;
+    configASSERT(xQueueSendToBack(remoteMngQueue, (void *)&frameRemote, portMAX_DELAY) == pdPASS); // remoteSuspRelProcess()
+  }
+  /* end of charge: reset all current and power value */
+  resetPowerCurrentValues();
+}
+
+/**
+*
+* @brief       restart a timer with new period     
+*
+* @param [in]  uint16_t: timerid    
+* @param [in]  uint32_t: new period    
+*  
+* @retval      none   
+*  
+****************************************************************/
+static void restartSbcSemTimer (uint16_t timerId, uint32_t period) 
+{
+
+  while ((xTimerChangePeriod (xSbcSemTimers[timerId], period, SBCSEM_TIMER_GARD_TIME) != pdPASS)); 
+  xTimerReset (xSbcSemTimers[timerId], 0);     // the master restart the timeout  
+}
+
+/**
+*
+* @brief       set all bit in Scu map for active SCU to force a 
+*              read from SBC
+*
+* @param [in]  uint32_t: bit position active SCU     
+*  
+* @retval      none   
+*  
+****************************************************************/
+static void forceSBCreadScu (uint32_t activityMask) 
+{
+  uint16_t              idScu;
+  uint32_t              maskId, changeRo;
+  scuRoMapRegister_st*  pRoRegs; 
+
+  /* first of all update the live presence register */
+  socketPresence.livePresence |= activityMask;
+
+  for (idScu = 0, maskId = (uint32_t)0x1, changeRo = 0; idScu <= SCU_NUM; idScu++, maskId = maskId << 1) // SCU_M_P_ADDR -> logic address = 0
+  {
+    if ((activityMask & maskId) != 0)
+    {
+      /* this SCU is present: set the flags change for this SCU */
+      changeRo |= maskId;   
+      /* force update to SBC for connector status and errors  */       
+      pScuRoMapReg->scuMapRegNotify.ntfChangeRegRo[idScu] = ((uint16_t)EVSE_CONNECTOR_STATUS_BIT_RO | (uint16_t)EVSE_ERROR2_BIT_RO) | (uint16_t)EVSE_ERROR1_BIT_RO;
+    }
+    /* remove current OFF_L alarm  */
+    pRoRegs = getRoMdbRegs(idScu);
+    if (((pRoRegs->scuMapRegNotify.ntfErr2 & ERROR2_OFFL) != 0) || (pollingSlaveMng.offLineCounter[idScu] != 0) ||
+        ((getScuOpMode() == SCU_M_STAND_ALONE) && (pollingSlaveMng.offLineCounter[idScu] >= NUM_OFF_LINE_RETRY)))
+
+    {
+      pollingSlaveMng.offLineCounter[idScu] = 0;
+      /* the current scuId  respond now: put it in ON_LINE  Only one time !!! */
+      pRoRegs->scuMapRegNotify.ntfErr2 &= (~ERROR2_OFFL);
+      tPrintf ("SCU %02d on-line! %s\n\r" , idScu + 1, getHmsStr()); //  HAL_GetTick()
+    }
+  }
+  /* flags to invite a reading by SBC */
+  pScuRoMapReg->scuMapRegNotify.ntfPresences = (uint32_t)socketPresence.livePresence; // now the map of the precence on RS485 bus is complete
+  pScuRoMapReg->scuMapRegNotify.ntfChangeRo |= changeRo;
+  sbcSemInfoMng.discoveryMask = 0;
+}
+
+/**
+*
+* @brief       set all bit in Scu map for active SCU to force a 
+*              read from SBC
+*
+* @param [in]  uint16_t: address on RS485    
+* @param [in]  uint16_t: pointer where store the device Id
+*        linked to incoming address on RS485
+*  
+* @retval      none   
+*  
+****************************************************************/
+ uint16_t fromRs485ToSem (uint16_t addrRS485) 
+{
+  uint16_t    idx;
+
+  if (addrRS485 == 0)   /* in case of broadcast */
+    return addrRS485;
+    
+  for (idx = 0; idx < SCU_NUM; idx++)
+  {
+    if (socketPresence.matrixConv[idx] == (uint8_t)addrRS485)
+    {
+      return idx;
+    }
+  }
+  
+  return NULL_ID;
+  
+}
+
+/**
+*
+* @brief       set all bit in Scu map for active SCU to force a 
+*              read from SBC
+*
+* @param [in]  uint8_t: logic socket id 0...15    
+*  
+* @retval      none   
+*  
+****************************************************************/
+static void removeSocketFromList (uint8_t skId) 
+{
+  uint32_t              maskBit;
+   
+  maskBit = (uint32_t)sbcSemMaskBit[skId];
+
+  pScuRoMapReg->scuMapRegNotify.ntfPresences &= (uint32_t)(~maskBit);
+  socketPresence.livePresence &= (uint16_t)(~maskBit);
+  socketPresence.chainPresence &= (uint16_t)(~maskBit);
+  sbcSemInfoMng.activeLastDiscovery &= (uint16_t)(~maskBit);
+  /* la matrice di conversione per il momento non la tocchiamo. Resta fissa la corrispondenza uno a uno: [0]->1, [1]->2, [2]-> 3, .... [31] -*/
+  //socketPresence.matrixConv[skId] = (uint8_t)0; 
+  if (WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t)) == osOK)    // save socket Presence 
+  {
+    tPrintf("Socket Id %2d removed!\n\r", (skId + 1));
+    /* a change on configuration has been made */
+    activeImmediateResetFromRemove();
+  }
+}
+
+#ifdef TRANSLATE_ID_LOGIC
+/**
+*
+* @brief       set the first addres modbus free
+*
+* @param [in]  none    
+*  
+* @retval      none   
+*  
+****************************************************************/
+static uint8_t setModbusAddress (void) 
+{
+  uint32_t    maskId;
+  uint8_t     maxAddrVal, ix;
+
+  maxAddrVal = 0; maskId = 1;
+  if (!((getScuOpMode() == SCU_M_STAND_ALONE) && ((socketPresence.assignedDeviceId & SCU_MASTER_MASK_BIT) == 0)))  // in stand alone mode address 1 not assigned 
+  {
+    for (ix = 0; ix < SCU_NUM; ix++, maskId = maskId << 1)
+    {
+      if ((socketPresence.chainPresence & maskId) == maskId)
+      {
+        if (socketPresence.matrixConv[ix] > maxAddrVal)
+        {
+          maxAddrVal = socketPresence.matrixConv[ix];
+        }
+      }
+    }
+  }
+  socketPresence.assignedDeviceId |= maskId;
+  return(maxAddrVal + (uint8_t)1);
+}
+#endif
+/**
+*
+* @brief       get the first id connector free 1..15 
+*
+* @param [in]  none    
+*  
+* @retval      uint8_t: the first free position in the presence word 1..15 (position 0 is reserved for master)  
+*  
+****************************************************************/
+static uint8_t getFirstFreeLogicId (void) 
+{
+  uint32_t    maskId;
+  uint8_t     ix;
+
+  ix = 0; maskId = 1;
+  if (!((getScuOpMode() == SCU_M_STAND_ALONE) && ((socketPresence.assignedDeviceId & SCU_MASTER_MASK_BIT) == 0)))
+  {
+    for (; ix < SCU_NUM; ix++, maskId = maskId << 1)
+    {
+      if (((socketPresence.chainPresence & maskId) == (uint16_t)0) && ((socketPresence.livePresence & maskId) == (uint16_t)0))
+      {
+        break;
+      }
+    }
+  }
+  return(ix);
+}
+/**
+*
+* @brief       set  status polling flag  
+*
+* @param [in]  uint8_t: status flag     
+*  
+* @retval      none   
+*  
+****************************************************************/
+void setPollingFlag (uint8_t flagStatus) 
+{
+  sbcSemInfoMng.pollingFlag = (uint16_t)flagStatus;
+}
+
+/**
+*
+* @brief       read socket presence information from eeprom   
+*
+* @param [in]  none     
+*  
+* @retval      uint8_t:  osOK if successfull  
+*  
+****************************************************************/
+uint8_t readSocketPresence (void) 
+{
+  uint8_t   result;
+
+  result = ReadFromEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)&socketPresence, sizeof(socketPresence_t));
+  return (result);
+}
+
+/**
+*
+* @brief       get new packet status identifier    
+*
+* @param [in]  none     
+*  
+* @retval      uint32_t:  the packet status identifier   
+*  
+****************************************************************/
+uint32_t getPacketStatusNum (void) 
+{
+  uint32_t   packNum;
+
+  packNum = packetStatsCounter;
+  packetStatsCounter++;
+
+  return (packNum);
+}
+
+/**
+*
+* @brief       reset packet counter    
+*
+* @param [in]  none     
+*  
+* @retval      uint32_t:  the packet status identifier   
+*  
+****************************************************************/
+static void resetPacketStatusNum (void) 
+{
+  packetStatsCounter = (uint32_t)0;
+}
+
+/**
+*
+* @brief        check if all task involved in SBC SEM communication are in the operative state  
+*
+* @param [in]   none
+*
+* @retval       uint8_t: TRUE if all OK, i.e. operative 
+*
+***********************************************************************************************************************/
+uint8_t allTaskAreOperative (void)
+{
+  if ((sbcSemInfoMng.sbcSemStates == SBC_SEM_OPERATIVE) && (rs485SemInfoMng.rs485SemStates == RS485_SEM_OPERATIVE))
+  {
+    return(TRUE);
+  }
+  else
+  {
+    return(FALSE);
+  }
+}
+
+/**
+*
+* @brief        reset the SEM task  in the operative state  
+*
+* @param [in]   none
+*
+* @retval       none 
+*
+***********************************************************************************************************************/
+void resetInOperative (void)
+{
+  tPrintf( "Error on Sbc Task! St = %d St = %d\r\n", sbcSemInfoMng.sbcSemStates, rs485SemInfoMng.rs485SemStates);
+  sbcSemInfoMng.sbcSemStates = SBC_SEM_OPERATIVE;
+  rs485SemInfoMng.rs485SemStates = RS485_SEM_OPERATIVE;
+  /* restore RS485   */
+  uartReintialization(); 
+}
+
+/**
+*
+* @brief       get modbus address from device id 
+*
+* @param [in]  uint8_t: device id 0..31    
+*  
+* @retval      uint8_t: modbus Address on RS485 for this device 
+*              ID
+*  
+****************************************************************/
+uint8_t getModbusAddrFromDevId (uint8_t devId) 
+{
+  return((uint8_t)socketPresence.matrixConv[devId]);
+}
+
+
+/**
+*
+* @brief       save all slave parameter in the external flah 
+*              area 
+*
+* @param [in]  none:     
+*  
+* @retval      uint8_t: number of saved slave  
+*              
+*  
+****************************************************************/
+static void saveAllSlaveParameters(void)
+{
+#ifdef BOARD_REPAIR
+  uint8_t*          pData;
+  uint16_t          cnt;
+  uint32_t          cks;
+  FRESULT           ferr;
+  areaConfPar_st*   pConfPar; 
+  uint8_t           newEntryFound;    
+
+
+  if (ptrAreaConfPar == NULL)
+  {
+    return;
+  }
+  pConfPar = (areaConfPar_st*)malloc(sizeof(areaConfPar_st));
+  if (pConfPar != NULL)
+  {
+    ferr = (FRESULT)FlashRead(ALL_CONF_PARS_EXT_FLASH_ADDR, (uint8_t*)pConfPar, sizeof(areaConfPar_st));
+    /* in the heap there is the area with all slave EEPROM info: save it in the external SPI flash */
+    for (cnt = 0, cks = 0, pData = (uint8_t*)pConfPar; cnt < sizeof(areaConfPar_st) - sizeof(cks); cnt++)
+    {
+      cks += pData[cnt];
+    }
+    if ((ferr == FR_OK) && ((cks == pConfPar->globalCkecksumControl) || (pConfPar->globalCkecksumControl == 0xFFFFFFFF)))
+    {
+      if (pConfPar->globalCkecksumControl == 0xFFFFFFFF)
+      {
+        /*             destination                                  source                                   len         */
+        memcpy((uint8_t *)&pConfPar->blockConfPar[0], (uint8_t *)&ptrAreaConfPar->blockConfPar[0], sizeof(areaConfPar_st));    
+        newEntryFound = TRUE;    
+      }
+      else
+      {
+        for (cnt = 0, newEntryFound = FALSE; cnt < SCU_NUM; cnt++)
+        {
+          if ((cnt == 0) || (ptrAreaConfPar->blockConfPar[cnt].idLogicScu > (uint16_t)SCU_NUM))continue;
+          /* save only the new entry */
+          /*             destination                                  source                                   len         */
+          memcpy((uint8_t *)&pConfPar->blockConfPar[cnt], (uint8_t *)&ptrAreaConfPar->blockConfPar[cnt], sizeof(blockConfPar_st));
+          newEntryFound = TRUE;    
+        }
+      }
+      if (newEntryFound == TRUE)
+      {
+        /* now in the heap, pointer pConfPar, we have the info eeprom updated */
+        /* in the heap there is the area with all slave EEPROM info: save it in the external SPI flash */
+        for (cnt = 0, cks = 0, pData = (uint8_t*)pConfPar; cnt < sizeof(areaConfPar_st) - sizeof(cks); cnt++)
+        {
+          cks += pData[cnt];
+        }
+        pConfPar->globalCkecksumControl = cks;
+        /* write all eeprom data received from all slave in the SPI flash whit checksum at the end */
+        ferr = (FRESULT)FlashWrite(ALL_CONF_PARS_EXT_FLASH_ADDR, (uint8_t*)pConfPar, sizeof(areaConfPar_st), sizeof(areaConfPar_st));
+        /* readback the data and check if the alla data is OK */
+        if (ferr == FR_OK)
+        {
+          ferr = (FRESULT)FlashRead(ALL_CONF_PARS_EXT_FLASH_ADDR, (uint8_t*)ptrAreaConfPar, sizeof(areaConfPar_st));
+          for (cnt = 0, cks = 0, pData = (uint8_t*)pConfPar; cnt < sizeof(areaConfPar_st) - sizeof(cks); cnt++)
+          {
+            cks += pData[cnt];
+          }
+          if (ptrAreaConfPar->globalCkecksumControl != cks)
+          {
+            ferr = FR_DISK_ERR;
+          }
+          if (ferr == FR_OK)
+          {
+            tPrintf("All eeprom slave info saved in SPI flash!!\n\r");
+          }
+          else
+          {
+            tPrintf("Error on write eeprom slave info in SPI flash!!\n\r");
+          }
+        }
+      }
+    }
+  }
+  if (pConfPar != NULL)
+  {
+    free((void*)pConfPar);
+  }
+  if (ptrAreaConfPar != NULL)
+  {
+    free((void*)ptrAreaConfPar);
+    ptrAreaConfPar = NULL;
+  }
+#endif
+}
+
+/**
+*
+* @brief       save  slave parameter in the external flah 
+*              area 
+*
+* @param [in]  uint8_t: slave logic id     
+*  
+* @retval      uint8_t: 0 if no errors occured  
+*              
+*  
+****************************************************************/
+uint8_t saveSlaveParameters(void)
+{
+  uint8_t*          pData;
+  uint16_t          cnt;
+  uint32_t          cks;
+  FRESULT           ferr;
+  areaConfPar_st*   pConfPar; 
+  uint8_t           newEntryFound, idLogic;    
+
+
+  ferr = FR_NOT_READY;
+
+  if (ptrAreaConfPar == NULL)
+  {
+    return(ferr);
+  }
+  pConfPar = (areaConfPar_st*)malloc(sizeof(areaConfPar_st));
+  if (pConfPar != NULL)
+  {
+    ferr = (FRESULT)FlashRead(ALL_CONF_PARS_EXT_FLASH_ADDR, (uint8_t*)pConfPar, sizeof(areaConfPar_st));
+    /* in the heap there is the area with all slave EEPROM info: save it in the external SPI flash */
+    for (cnt = 0, cks = 0, pData = (uint8_t*)pConfPar; cnt < sizeof(areaConfPar_st) - sizeof(cks); cnt++)
+    {
+      cks += pData[cnt];
+    }
+    if ((ferr == FR_OK) && (cks == pConfPar->globalCkecksumControl))
+    {
+      for (cnt = 0, newEntryFound = FALSE; cnt < SCU_NUM; cnt++)
+      {
+        if (cnt == 0) continue;
+        /* save only the new entry */
+        if (pConfPar->blockConfPar[cnt].idLogicScu == ptrAreaConfPar->blockConfPar[cnt].idLogicScu)
+        {
+          /*             destination                                  source                                   len         */
+          memcpy((uint8_t *)&pConfPar->blockConfPar[cnt], (uint8_t *)&ptrAreaConfPar->blockConfPar[cnt], sizeof(blockConfPar_st));
+          idLogic = (uint8_t)cnt;
+          newEntryFound = TRUE;    
+          break;
+        }
+      }
+      if (newEntryFound == TRUE)
+      {
+        /* now in the heap, pointer pConfPar, we have the info eeprom updated */
+        /* in the heap there is the area with all slave EEPROM info: save it in the external SPI flash */
+        for (cnt = 0, cks = 0, pData = (uint8_t*)pConfPar; cnt < sizeof(areaConfPar_st) - sizeof(cks); cnt++)
+        {
+          cks += pData[cnt];
+        }
+        pConfPar->globalCkecksumControl = cks;
+        /* write all eeprom data received from all slave in the SPI flash whit checksum at the end */
+        ferr = (FRESULT)FlashWrite(ALL_CONF_PARS_EXT_FLASH_ADDR, (uint8_t*)pConfPar, sizeof(areaConfPar_st), sizeof(areaConfPar_st));
+        /* readback the data and check if the alla data is OK */
+        if (ferr == FR_OK)
+        {
+          ferr = (FRESULT)FlashRead(ALL_CONF_PARS_EXT_FLASH_ADDR, (uint8_t*)ptrAreaConfPar, sizeof(areaConfPar_st));
+          for (cnt = 0, cks = 0, pData = (uint8_t*)pConfPar; cnt < sizeof(areaConfPar_st) - sizeof(cks); cnt++)
+          {
+            cks += pData[cnt];
+          }
+          if (ptrAreaConfPar->globalCkecksumControl != cks)
+          {
+            ferr = FR_DISK_ERR;
+          }
+          if (ferr == FR_OK)
+          {
+            tPrintf("eeprom slave info %2d saved in SPI flash!!\n\r", idLogic + 1);
+          }
+          else
+          {
+            tPrintf("Error on write eeprom slave info in SPI flash!!\n\r");
+          }
+        }
+      }
+      else
+      {
+        ferr = FR_NOT_READY;
+      }
+    }
+  }
+  if (pConfPar != NULL)
+  {
+    free((void*)pConfPar);
+  }
+  if (ptrAreaConfPar != NULL)
+  {
+    free((void*)ptrAreaConfPar);
+    ptrAreaConfPar = NULL;
+  }
+  return ((uint8_t)ferr);
+}
+
+
+/**
+*
+* @brief       get and send to master all slave parameters in 
+*              stored in EEPROM area 
+*
+* @param [in]  uint8_t: slave logic address     
+*  
+* @retval      uint8_t: number of saved slave  
+*              
+*  
+****************************************************************/
+uint8_t getAndsendAllSlaveParameters(uint8_t idLogic)
+{
+  uint16_t          cnt;
+  blockConfPar_st*  pConfPar;
+  uint8_t*          pData;
+  uint8_t           result;
+
+  pConfPar = (blockConfPar_st*)malloc(sizeof(blockConfPar_st));
+
+  /*             Start to set logic SCU id [0..15]                                                                 */
+  pConfPar->idLogicScu = (uint16_t)idLogic;
+  /*             Start to copy eeprom array area                                                                   */
+  /*             destination                                  source                           len                 */
+  memcpy((uint8_t *)pConfPar->confEepromParamArray, (uint8_t *)getEepromArray(), EEPROM_PARAM_NUM);                             
+  /*             Copy infostation           area                                                                   */
+  /*             destination                                  source                           len                 */
+  memcpy((uint8_t *)&pConfPar->confInfoStation, (uint8_t *)getStationName(), sizeof (infoStation_t));                             
+  /*             Copy backup infostation           area                                                            */
+  /*                           data origin                         buffer destination                    len       */
+  result = ReadFromEeprom (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&pConfPar->confBackupInfoStation, sizeof (infoStation_t));     
+  /*             Copy product code    area                                                                         */
+  /*                          data origin                         buffer destination                    len        */
+  result |= ReadFromEeprom (PRD_CODE_EE_ADDRES, (uint8_t *)&pConfPar->confSerialCode, sizeof (pConfPar->confSerialCode));     
+  /*             Copy Serial Number codes  area                                                                    */
+  /*                              data origin                         buffer destination                    len    */
+  result |= ReadFromEeprom (EDATA_DEFAULT_ID_CODES, (uint8_t *)&pConfPar->confSerialFactoryCode, sizeof (pConfPar->confSerialFactoryCode));     
+
+  pConfPar->confRtcBackup[0] =  HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_EM_MODEL);
+  pConfPar->confRtcBackup[1] =  HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_EM_ENRG_ACT);
+  pConfPar->confRtcBackup[2] =  HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO);
+
+  /* set the checksum */
+  for (cnt = 0, pConfPar->ckecksumControl = 0, pData = (uint8_t*)pConfPar; cnt < sizeof(blockConfPar_st) - sizeof(pConfPar->ckecksumControl); cnt++)
+  {
+    pConfPar->ckecksumControl += (uint32_t)pData[cnt];
+  }
+  osDelay(10); // leave 10ms to give the transmitter the time to repositioning in Rx mode
+  /* start transmission on UART RS485 to SCU RS485 Bus using DMA */
+  setMallocTx485((uint8_t*)pConfPar);
+  txOnRs485Bus((uint8_t*)pConfPar, (uint16_t)sizeof(blockConfPar_st)); 
+
+  return(result);
+}
+
+/**
+*
+* @brief       get the pointer to configuration parameter area 
+*
+* @param [in]  none    
+*  
+* @retval      areaConfPar_st*: pointer to area for conf 
+*              parameters
+*  
+****************************************************************/
+areaConfPar_st* getPtrToConfParam (void) 
+{
+  return(ptrAreaConfPar);
+}
+
+/**
+*
+* @brief       set the pointer to configuration parameter area 
+*
+* @param [in]  uint8_t*: pointer to block area    
+*  
+* @retval      none 
+*  
+****************************************************************/
+void setPtrToConfParam (uint8_t* ptr) 
+{
+  ptrAreaConfPar = (areaConfPar_st*)ptr;
+}
+
+/**
+*
+* @brief       get, from external SPI flash, the status on 
+*              slave configuration parameter area
+*
+* @param [in]  uint16_t: mask for last detected slave     
+*  
+* @retval      none  
+*  
+****************************************************************/
+static void setInfoEepromSlaveDone(uint16_t lastDetected)
+{
+#ifdef BOARD_REPAIR
+  areaConfPar_st*   pConfPar;
+  uint8_t*          pData;
+  FRESULT           ferr;
+  uint16_t          cnt, mask;
+  uint32_t          cks;
+
+  pConfPar = (areaConfPar_st*)malloc(sizeof(areaConfPar_st));
+  sbcSemInfoMng.infoEepromSlaveToDo = (uint16_t)0;
+
+  /* read from external SPI flash the info slave eeprom parameters */
+  ferr = (FRESULT)FlashRead(ALL_CONF_PARS_EXT_FLASH_ADDR, (uint8_t*)pConfPar, sizeof(areaConfPar_st));
+  /* check if the alla data is OK */
+  if (ferr == FR_OK)
+  {
+    for (cnt = 0, cks = 0, pData = (uint8_t*)pConfPar; cnt < sizeof(areaConfPar_st) - sizeof(cks); cnt++)
+    {
+      cks += pData[cnt];
+    }
+    if (pConfPar->globalCkecksumControl == cks)
+    {
+      /* the data is valid and the info on slave eeprom parameters are in the malloc area  */
+      for (cnt = 0, mask = (uint16_t)1; cnt < SCU_NUM; cnt++, mask = mask << 1)
+      {
+        if (cnt == 0) continue;
+        if (pConfPar->blockConfPar[cnt].idLogicScu != cnt)
+        {
+          /* the info for this slave isn't present so must be request */
+          sbcSemInfoMng.infoEepromSlaveToDo |= mask;
+        }
+      }
+    }
+    else
+    {
+      /* the SPI flash area is empty so the info eeprom must be request for all slaves detected */
+      sbcSemInfoMng.infoEepromSlaveToDo = (uint16_t)0xFFFE;
+    }
+  }
+  free(pConfPar);
+#else
+  sbcSemInfoMng.infoEepromSlaveToDo = (uint16_t)0;
+#endif
+}
+
+/**
+*
+* @brief       get and send to slave all previuos eeprom 
+*              parameters stored in SPI flash area
+*
+* @param [in]  uint8_t: slave logic address     
+*  
+* @retval      uint8_t: 0 for no errors   
+*              
+*  
+****************************************************************/
+static uint8_t sendEeepromInfoForCloning(uint8_t idLogic)
+{
+  uint16_t          cnt;
+  blockConfPar_st*  pConfPar;
+  uint8_t*          pData;
+  uint32_t          cks;
+  FRESULT           ferr;
+
+  ptrAreaConfPar = (areaConfPar_st*)malloc(sizeof(areaConfPar_st));
+  sbcSemInfoMng.infoEepromSlaveToDo = (uint16_t)0;
+
+  /* read from external SPI flash the info slave eeprom parameters */
+  ferr = (FRESULT)FlashRead(ALL_CONF_PARS_EXT_FLASH_ADDR, (uint8_t*)ptrAreaConfPar, sizeof(areaConfPar_st));
+  /* check if the alla data is OK */
+  if (ferr == FR_OK)
+  {
+    for (cnt = 0, cks = 0, pData = (uint8_t*)ptrAreaConfPar; cnt < sizeof(areaConfPar_st) - sizeof(cks); cnt++)
+    {
+      cks += pData[cnt];
+    }
+    if (ptrAreaConfPar->globalCkecksumControl == cks)
+    {
+      if (ptrAreaConfPar->blockConfPar[idLogic].idLogicScu == idLogic)
+      {
+        pConfPar = &ptrAreaConfPar->blockConfPar[idLogic];
+        /* start transmission on UART RS485 to SCU RS485 Bus using DMA */
+        setMallocTx485((uint8_t*)ptrAreaConfPar);
+        txOnRs485Bus((uint8_t*)pConfPar, (uint16_t)sizeof(blockConfPar_st)); 
+        tPrintf("Restored eeprom slave %02d info from SPI flash!!\n\r", idLogic + 1);
+        osDelay(100);
+      }
+      else
+      {
+        ferr = FR_INT_ERR;
+      }
+    }
+    else
+    {
+      ferr = FR_DISK_ERR;
+    }
+  }
+  return((uint8_t)ferr);
+}
+
+/**
+*
+* @brief       get discovery status  
+*
+* @param [in]  none    
+*  
+* @retval      uint32_t: 0 if the discovery phase isn't active 
+*  
+****************************************************************/
+uint32_t getDiscoveryStatus (void) 
+{
+  return(sbcSemInfoMng.discoveryMask);
+}
+
+/**
+*
+* @brief       get info eeprom for slave  status  
+*
+* @param [in]  none    
+*  
+* @retval      uint16_t: bit mask for slave eeprom info 
+*  
+****************************************************************/
+uint16_t getInfoEepromSlaveStatus (void) 
+{
+  return(sbcSemInfoMng.infoEepromSlaveToDo);
+}
+
+/**
+*
+* @brief       set info eeprom for slave  status  
+*
+* @param [in]  uint16_t: bit mask for slave eeprom info    
+*  
+* @retval      none 
+*  
+****************************************************************/
+void setInfoEepromSlaveStatus (uint16_t logicSlave) 
+{
+  uint16_t              maskBit;
+
+  maskBit = (uint16_t)sbcSemMaskBit[logicSlave];
+  sbcSemInfoMng.infoEepromSlaveToDo &= (~maskBit);
+}
+
+                      
+
+
+#ifdef MODBUS_TCP_EM_LOVATO
+/**
+*
+* @brief        Ask to master for active power for all the socket   
+*
+* @param [in]   none 
+*
+* @retval       none:  
+*
+***********************************************************************************************************************/
+void  readEmValuesFromMaster (void)
+{
+  uint8_t*                pEnd;
+  headerRHR_t*            pMsg;
+  uint8_t*                pMallocTx;
+  uint16_t                length;
+  crcMode_u               crc;
+
+  pMallocTx = (uint8_t*)malloc(sizeof(headerRHR_t) + (uint16_t)sizeof(crc)); // remember + 2 for checksum 
+  pMsg = (headerRHR_t*)pMallocTx;
+  /* the command must be executed    */
+  length = (uint16_t)sizeof(headerRHR_t);
+  pMsg->unitId = SCU_M_P_ADDR; 
+  pMsg->function = FUNCTION_READ_INPUT_REG;
+  pMsg->regAdd = swapW(ADDR_EM_LOVATO_V_SYS);
+  pMsg->numBytes = swapW(sizeof(scuMapRegLovatoEmSim_st) / 2);
+
+  /* now found the CRC message */
+  crc.crcW = crcEvaluation ((uint8_t*)pMsg, length);
+  /* position pEnd pointer on crc field */
+  pEnd =  (uint8_t*)((uint32_t)pMsg + (uint32_t)length);
+  *pEnd = crc.crcLH_st.crcL;
+  pEnd++;
+  *pEnd = crc.crcLH_st.crcH;
+  length += sizeof(crc.crcW);
+
+  if (xSemaphoreTake(getScuSinapsiTxUartSemaphoreHandle(), portMAX_DELAY) == pdTRUE)
+  {
+    setMallocTx485(pMallocTx);
+    /* start transmission on UART RS485 to SCU RS485 Bus using DMA */
+    txOnRs485Bus((uint8_t*)pMsg, (uint16_t)length); 
+  }
+}
+#endif
+
+/*************** END OF FILE ******************************************************************************************/
+
+

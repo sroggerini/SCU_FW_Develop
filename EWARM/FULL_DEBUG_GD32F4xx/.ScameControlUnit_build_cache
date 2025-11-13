@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<BuildDb>
+    <Tool>
+        <Name>linker</Name>
+        <Parent>
+            <Path>C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\FULL_DEBUG_GD32F4xx\Exe\SCU.out</Path>
+            <Output>
+                <Path>C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\FULL_DEBUG_GD32F4xx\List\SCU.map</Path>
+            </Output>
+        </Parent>
+        <Parent>
+            <Path>C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\EWARM\FULL_DEBUG_GD32F4xx\Exe\SCU.out</Path>
+            <Output>
+                <Path>C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\EWARM\FULL_DEBUG_GD32F4xx\List\SCU.map</Path>
+            </Output>
+        </Parent>
+    </Tool>
+</BuildDb>

@@ -1,0 +1,6 @@
+
+- La configurazione per generare il file eseguibile deve essere denominata TARGET
+- Nella configurazione TARGET, solo nel caso si voglia disabiltare la verifica del checksum sul firmware, deve essere presente la define FULL_DEBUG
+- Nella directory SCAME_BOOT\\trunk\\EWARM\\BootSCU\\Exe deve essere presente un solo file di boot del tipo BOOT_Vxx.bin 
+- Il nome del file binario in uscita dal progetto EWARM configurazione TARGET deve essere ScameSCU.bin
+- Conviene poi rinominare ScameSCU.bin in ScameSCU_Vxyzz.bin per associare la relativa versione FW

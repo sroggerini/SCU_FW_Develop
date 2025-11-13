@@ -1,0 +1,2566 @@
+/**
+* @file        wrapper.c
+*
+* @brief       Wrapper tra station manager e low level HW - Implementation -
+*
+* @author      Nick
+*
+* @riskClass   C
+*
+* @moduleID
+*
+* @vcsInfo
+*     $Id: MFC7C102272.tmp 76 2022-06-20 09:46:05Z npiergi $
+*
+*     $Revision: 76 $
+*
+*     $Author: npiergi $
+*
+*     $Date: 2022-06-20 11:46:05 +0200 (lun, 20 giu 2022) $
+*
+*
+* @copyright
+*       Copyright (C) 2017 SCAME S.p.A. All rights reserved.
+*       This file is copyrighted and the property of Aesys S.p.A.. It contains confidential and proprietary
+*       information. Any copies of this file (in whole or in part) made by any method must also include a copy of this
+*       legend.
+*       Developed by:  SCAME S.p.A.
+***********************************************************************************************************************/
+
+/************************************************************
+ * Include
+ ************************************************************/
+#include <stddef.h>
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
+#include "main.h"
+#include "displayPin.h"
+#include "wrapper.h"
+#include "InputsMng.h"
+#include "Em_Task.h"
+#include "sbcGsy.h"
+#include "scuMdb.h"
+#include "ioExp.h"
+#include "adcTask.h"
+#include "rtcApi.h"
+#include "telnet.h"
+#include "eeprom.h"
+#include "EnergyMng.h"
+#include "flashFat.h"
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**           LOCAL MACROS, TYPEDEF, STRUCTURE, ENUM                         **
+**                                                                          **
+******************************************************************************
+*/
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Local Const                                   **
+**                                                                          **
+****************************************************************************** 
+*/ 
+
+/* ---------------  definizione I/O per gestione output  digitali            -------------- */
+static const uint16_t OUT_PIN[NUM_OUTPUT_SCU]= { OUTBL1_P_Pin,  // PD8 = Comando motore +
+                                                 OUTBL1_M_Pin,  // PD3 = Comando motore +
+                                                 CNTCT_Pin,     // PD10 = Contattore
+                                                 PWM_CP_Pin,    // PC6 = PWM su CP
+                                                 SGCBOB_Pin     // PD7 = comando bobina di sgancio
+                                               };
+
+static       GPIO_TypeDef* OUT_PORT[NUM_OUTPUT_SCU] = {OUTBL1_P_GPIO_Port,
+                                                       OUTBL1_M_GPIO_Port,
+                                                       CNTCT_GPIO_Port,
+                                                       PWM_CP_GPIO_Port,
+                                                       SGCBOB_GPIO_Port
+                                                    };
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Local Variables                               **
+**                                                                          **
+****************************************************************************** 
+*/ 
+
+static uint8_t  didx;
+
+static uint8_t  dline1[CHAR_NUM];
+static uint8_t  dline2[CHAR_NUM];
+
+/* TIM handler declaration */
+static TIM_HandleTypeDef  htimCp;
+
+/* pointer to transaction data  */
+static uint16_t       *pArea;
+static socket_t       *pSocket;
+static sck_register_t *transactionReg;
+static uint16_t       maxNumTransaction;
+
+static infoStation_t  infoStation;
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Global Variables                              **
+**                                                                          **
+****************************************************************************** 
+*/ 
+TIM_HandleTypeDef   htimV230;
+sck_measures_t      measureSck;
+
+uint8_t             filteringPEN = 0;  /* solo per debug */
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            External Variables                            **
+**                                                                          **
+******************************************************************************
+*/
+extern infoFw_u       fwInfo;
+extern infoV230_st    infoV230;
+
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            External Function                             **
+**                                                                          **
+******************************************************************************
+*/
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Internal Function prototype                   **
+**                                                                          **
+******************************************************************************
+*/
+static void     wrapper_Handler     (void);
+static void     setTimer230Restore  (void);
+static uint32_t getFlagV230Reg      (void);
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Function Definition                           **
+**                                                                          **
+******************************************************************************
+*/
+
+/**
+*
+* @brief       Put a string on LCD
+*
+* @param [in]  uint8_t*: pointer to string  
+* @param [in]  uint8_t:  tipo di allineamento  WCENTER/WLEFT/WRIGHT/WOFF 
+*  
+* @retval      none 
+*  
+****************************************************************/
+void DispUpdate(uint8_t *line1, uint8_t align1, uint8_t *line2, uint8_t align2)
+{
+  uint8_t id0;
+  uint8_t len;
+
+  for (didx = 0; didx < CHAR_NUM; didx++)		// inizializzazione
+  {
+    dline1[didx] = ' ';
+    dline2[didx] = ' ';
+  }
+
+  if (line1 != NULL)
+  {
+    for (len = 0; len < CHAR_NUM; len++)		// conta il numero di caratteri della linea 1
+    {
+      if (!line1[len])
+        break;
+    }
+
+    if (align1 == WLEFT)					// allineamento
+    {
+      id0 = 0;
+    }
+    else if (align1 == WCENTER)
+    {
+      id0 = ((CHAR_NUM - len) >> 1);
+    }
+    else	// if (align1 == WRIGHT)
+    {
+      id0 = CHAR_NUM - len;
+    }
+
+    didx = 0;
+
+    while (*((uint8_t*)((uint32_t)line1 + (uint32_t)didx)))					// copia la linea 1
+    {
+      if (didx < CHAR_NUM)
+      {
+        dline1[id0] = *((uint8_t*)((uint32_t)line1 + (uint32_t)didx));
+        id0 ++;
+        didx ++;
+      }
+      else
+      {
+        break;
+      }
+    }
+    if (len != (uint8_t)0)
+    {
+      /* now put the string on display first line */
+      putsxy_c(DISP_FIRST_COLUMN, DISP_FIRST_LINE, (char *)dline1);
+    }
+  }
+  		
+  if (line2 != NULL)
+  {
+    for (len = 0; len < CHAR_NUM; len++)		// conta il numero di caratteri della linea 2
+    {
+      if (!line2[len])
+        break;
+    }
+
+    if (align2 == WLEFT)
+    {
+      id0 = 0;
+    }
+    else if (align2 == WCENTER)
+    {
+      id0 = ((CHAR_NUM - len) >> 1);
+    }
+    else	// if (align2 == WRIGHT)
+    {
+      id0 = CHAR_NUM - len;
+    }
+
+    didx = 0;
+
+    while (*((uint8_t*)((uint32_t)line2 + (uint32_t)didx)))					// copia la linea 2
+    {
+      if (didx < CHAR_NUM)
+      {
+        dline2[id0] = *((uint8_t*)((uint32_t)line2 + (uint32_t)didx));
+        id0 ++;
+        didx ++;
+      }
+      else
+      {
+        break;
+      }
+    }
+    if (len != (uint8_t)0)
+    {
+      /* now put the string  on display second line */
+      putsxy_c(DISP_FIRST_COLUMN, DISP_SECOND_LINE, (char *)dline2);
+    }
+  }
+}
+
+/**
+*
+* @brief       get an input pin status 
+*
+* @param [in]  dIn_TypeDef:  id of required pin  
+*  
+* @retval      GPIO_PinState: pin status 0=GPIO_PIN_RESET 1=GPIO_PIN_SET 
+*  
+****************************************************************/
+GPIO_PinState getInputState(dIn_TypeDef pinId)
+{
+  GPIO_PinState result;
+
+  result = getInput(pinId);
+  return(result);
+}
+
+/**
+*
+* @brief       set an output pin status 
+*
+* @param [in]  dOut_TypeDef:  id of required pin 
+* @param [in]  GPIO_PinState:  GPIO_PIN_SET / GPIO_PIN_RESET 
+*  
+* @retval      none 
+*  
+****************************************************************/
+void setOutputState(dOut_TypeDef pinId, GPIO_PinState PinState)
+{
+
+  switch (pinId)
+  {
+    case PWM_CP:
+      break;
+
+    default:
+      if (CNTCT == pinId)
+      {
+#ifdef TA_ACT_ON_CNTT
+        if (PinState == GPIO_PIN_SET)
+        {
+          sendMsgStartTa();
+        }
+        else
+        {
+          sendMsgStopTa();
+        }
+#endif
+        cnttStatusChange();
+      }
+      HAL_GPIO_WritePin(OUT_PORT[pinId], OUT_PIN[pinId], PinState);
+      break;
+  }
+}
+
+/**
+*
+* @brief  		  set Timer PWM for CP pin   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void init_CP_PWM (void)
+{
+  GPIO_InitTypeDef    GPIO_InitStruct;
+  uint32_t            uwPrescalerValue = 0;
+  /* Timer Output Compare Configuration Structure declaration */
+  TIM_OC_InitTypeDef  sConfig;
+  
+  /* TIM3 clock enable */
+  TIM_CP_PWM_CLK_ENABLE();
+
+  /* Enable the GPIO used for CP PWM clock */
+  CP_PWM_GPIO_CLK_ENABLE();
+
+    /* GPIOx Configuration: TIM3 CH1 (PC6)  */
+  GPIO_InitStruct.Pin       = CP_PWM_PIN;
+  GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull      = GPIO_PULLUP;
+  GPIO_InitStruct.Speed     = GPIO_SPEED_FAST;
+  GPIO_InitStruct.Alternate = CP_PWM_AF;
+
+  HAL_GPIO_Init(CP_PWM__GPIO_PORT, &GPIO_InitStruct); 
+
+  /*##-1- Configure the TIM peripheral #######################################*/ 
+  /* -----------------------------------------------------------------------
+    In this example TIM3 input clock (TIM3CLK) is set to 2 * APB1 clock (PCLK1), 
+    since APB1 prescaler is different from 1.   
+      TIM3CLK = 2 * PCLK1  
+      PCLK1 = HCLK / 4 
+      => TIM3CLK = HCLK / 2 = SystemCoreClock / 2
+    To get TIM3 counter clock at 1KHz, the Prescaler is computed as following:
+    Prescaler = (TIM3CLK / TIM3 counter clock) - 1
+    Prescaler = ((SystemCoreClock / 2 ) /1 KHz) - 1
+  
+  
+       
+    Note: 
+     SystemCoreClock variable holds HCLK frequency and is defined in system_stm32f4xx.c file.
+     Each time the core clock (HCLK) changes, user had to update SystemCoreClock 
+     variable value. Otherwise, any configuration based on this variable will be incorrect.
+     This variable is updated in three ways:
+      1) by calling CMSIS function SystemCoreClockUpdate()
+      2) by calling HAL API function HAL_RCC_GetSysClockFreq()
+      3) each time HAL_RCC_ClockConfig() is called to configure the system clock frequency  
+  ----------------------------------------------------------------------- */  
+  
+  /* Compute the prescaler value to have TIM5 counter clock equal to 1MHz */
+  uwPrescalerValue = ((SystemCoreClock / 2) / 1000000) - 1;
+  
+  /* Set TIM_CP_PWM instance (TIM3) */
+  htimCp.Instance = TIM_CP_PWM;
+   
+  /* Initialize TIM3 peripheral as follows:
+       + Period = 100000 - 1
+       + Prescaler = ((SystemCoreClock/2)/100000) - 1
+       + ClockDivision = 0
+       + Counter direction = Up
+  */
+  htimCp.Init.Prescaler     = uwPrescalerValue;
+  htimCp.Init.Period        = CP_PWM_PERIOD_VALUE;      // now 1000/1000 KHz = 1msec (1KHz)
+  htimCp.Init.ClockDivision = 0;                        // quindi prendiamo un campione ogni 10msec
+  htimCp.Init.CounterMode = TIM_COUNTERMODE_UP;
+  if(HAL_TIM_PWM_Init(&htimCp) != HAL_OK)
+  {
+    /* Initialization Error */
+    wrapper_Handler();
+  }
+  /* Common configuration for all channels */
+  sConfig.OCMode     = TIM_OCMODE_PWM1;;
+  sConfig.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfig.OCFastMode = TIM_OCFAST_DISABLE;
+
+  /* Set the pulse value for channel 1 */
+  sConfig.Pulse = CP_PWM_MIN_DC;  
+  if(HAL_TIM_PWM_ConfigChannel(&htimCp, &sConfig, CP_PWM_TIM_CHx) != HAL_OK)
+  {
+    /* Configuration Error */
+    wrapper_Handler();
+  }
+
+  if(HAL_TIM_OC_Stop_IT(&htimCp, CP_PWM_TIM_CHx) != HAL_OK)
+  {
+    /* Interrupt not necessaryr */
+    wrapper_Handler();
+  }
+
+  stopPwmOnLevel(GPIO_PIN_RESET);
+}
+
+/**
+*
+* @brief  		  start Timer PWM for CP pin   
+*
+* @param [in ]  uint16_t: duty cycle ([0...1000]/1000)
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void startPwmOnCP (uint16_t dc)
+{
+  /* Timer Output Compare Configuration Structure declaration */
+  TIM_OC_InitTypeDef  sConfig;
+  GPIO_InitTypeDef    GPIO_InitStruct;
+
+  if (dc <= 1000)
+  {
+      /* GPIOx Configuration: TIM3 CH1 (PC6)  */
+    GPIO_InitStruct.Pin       = CP_PWM_PIN;
+    GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull      = GPIO_PULLUP;
+    GPIO_InitStruct.Speed     = GPIO_SPEED_FAST;
+    GPIO_InitStruct.Alternate = CP_PWM_AF;
+
+    HAL_GPIO_Init(CP_PWM__GPIO_PORT, &GPIO_InitStruct); 
+
+    /* Common configuration for all channels */
+    sConfig.OCMode     = TIM_OCMODE_PWM1;;
+    sConfig.OCPolarity = TIM_OCPOLARITY_HIGH;
+    sConfig.OCFastMode = TIM_OCFAST_DISABLE;
+
+    /* Set the pulse value for channel 1 */
+    sConfig.Pulse = (uint32_t)(dc);  
+    if(HAL_TIM_PWM_ConfigChannel(&htimCp, &sConfig, CP_PWM_TIM_CHx) != HAL_OK)
+    {
+      /* Configuration Error */
+      wrapper_Handler();
+    }
+
+    /* TIM3  enable for PWM on PC6 on channel 1 */
+    if(HAL_TIM_PWM_Start(&htimCp, CP_PWM_TIM_CHx) != HAL_OK)
+    {  
+      /* PWM error  */
+      wrapper_Handler();
+    }
+  }
+}
+
+/**
+*
+* @brief  		  stop Timer PWM for CP pin   
+*
+* @param [in ]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void stopPwmOnCP (void)
+{
+  /* TIM3  disable for PWM on PC6 on channel 1 */
+  if(HAL_TIM_PWM_Stop(&htimCp, CP_PWM_TIM_CHx) != HAL_OK)
+  {  
+    /* PWM error  */
+    wrapper_Handler();
+  }
+}
+
+
+/**
+*
+* @brief  		  PWM LOW for CP pin   
+*
+* @param [in ]  GPIO_PinState: level for PWM pin
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void stopPwmOnLevel (GPIO_PinState PinState)
+{
+  GPIO_InitTypeDef    GPIO_InitStruct;
+
+  if (PinState == GPIO_PIN_RESET)
+  {
+    HAL_GPIO_WritePin(CP_PWM__GPIO_PORT, CP_PWM_PIN, GPIO_PIN_SET);
+  }
+  else
+  {
+    HAL_GPIO_WritePin(CP_PWM__GPIO_PORT, CP_PWM_PIN, GPIO_PIN_RESET);
+  }
+  /* GPIOx Configuration: TIM3 CH1 (PC6) in output mode  */
+  GPIO_InitStruct.Pin       = CP_PWM_PIN;
+  GPIO_InitStruct.Mode      = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull      = GPIO_PULLUP;
+  GPIO_InitStruct.Speed     = GPIO_SPEED_FAST;
+
+  HAL_GPIO_Init(CP_PWM__GPIO_PORT, &GPIO_InitStruct); 
+#ifdef COME_ERA
+  stopPwmOnCP();
+
+  if (PinState == GPIO_PIN_RESET)
+  {
+    htimCp.Instance->CCER |= CP_PWM_TIM_CHx_OUT_LOW_MASK;
+  }
+  else
+  {
+    htimCp.Instance->CCER &= (~CP_PWM_TIM_CHx_OUT_LOW_MASK);
+  }
+  htimCp.Instance->CCER |= (CP_PWM_TIM_CHx_OUT_EN_MASK);
+#endif
+}
+
+
+/**
+*
+* @brief  		  set Timer used as 230Vac come back discovery   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+static void setTimer230Restore (void)
+{
+  GPIO_InitTypeDef        GPIO_InitStruct;
+  uint32_t                uwPrescalerValue;
+  /* Timer Output Compare Configuration Structure declaration */
+  TIM_OC_InitTypeDef      sConfig;
+  TIM_ClockConfigTypeDef  sClockSourceConfig;
+  
+  /* TIM8 clock enable */
+  TIM_V230_WD_CLK_ENABLE();
+
+  /* Enable the GPIO used for WD input  */
+  V230_WD_GPIO_CLK_ENABLE();
+
+    /* GPIOx Configuration: TIM3 CH1 (PC8)  */
+  GPIO_InitStruct.Pin       = V230_WD_PIN;
+  GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull      = GPIO_PULLUP;
+  GPIO_InitStruct.Speed     = GPIO_SPEED_FAST;
+  GPIO_InitStruct.Alternate = V230_WD_AF;
+
+  HAL_GPIO_Init(V230_WD_GPIO_PORT, &GPIO_InitStruct); 
+
+  /*##-1- Configure the TIM peripheral #######################################*/ 
+  /* -----------------------------------------------------------------------
+    In this example TIM8 input clock (TIM8CLK) is set to 2 * APB2 clock (PCLK2), 
+    since APB2 prescaler is different from 1.   
+      TIM8CLK = 2 * PCLK2  
+      PCLK2 = HCLK / 2 
+      => TIM8CLK = 2 * HCLK / 2 = HCLK = SystemCoreClock
+  
+  
+       
+    Note: 
+     SystemCoreClock variable holds HCLK frequency and is defined in system_stm32f4xx.c file.
+     Each time the core clock (HCLK) changes, user had to update SystemCoreClock 
+     variable value. Otherwise, any configuration based on this variable will be incorrect.
+     This variable is updated in three ways:
+      1) by calling CMSIS function SystemCoreClockUpdate()
+      2) by calling HAL API function HAL_RCC_GetSysClockFreq()
+      3) each time HAL_RCC_ClockConfig() is called to configure the system clock frequency  
+  ----------------------------------------------------------------------- */  
+  
+  /* Compute the prescaler value to have TIM8 counter clock equal to 10KHz */
+  //uwPrescalerValue = ((SystemCoreClock) / 10000) - 1;
+  /* in this case TIM8 is programmed to count every 0 transition of Vamin 230Vac. */
+  /** so we declare the come back of 230Vac when we dected 10 transition This require about 100msec of V230 ON */
+  uwPrescalerValue = (uint32_t)0; // no prescaler 
+  
+  /* Set TIM_V230_WD instance (TIM8) */
+  htimV230.Instance = TIM_V230_WD;
+   
+  /* Initialize TIM8 peripheral as follows:
+       + Period = 20 zero crossing time = 20 *10 = 200msec
+       + Prescaler = 0
+       + ClockDivision = 0
+       + Counter direction = Up
+  */
+  htimV230.Init.Prescaler     = uwPrescalerValue;
+  htimV230.Init.Period        = V230_RETURN_PERIOD_VALUE;      // now 200 * 10ms = 2000msec 
+  htimV230.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;    //                      
+  htimV230.Init.CounterMode   = TIM_COUNTERMODE_UP;
+  //if (HAL_TIM_Base_Init(&htimV230) != HAL_OK)
+  if(HAL_TIM_PWM_Init(&htimV230) != HAL_OK)
+  {
+    /* Initialization Error */
+    wrapper_Handler();
+  }
+
+  /* Common configuration for all channels */
+  sConfig.OCMode     = TIM_OCMODE_INACTIVE; //TIM_OCMODE_PWM2;
+  sConfig.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfig.OCFastMode = TIM_OCFAST_DISABLE;
+
+  /* Set the pulse value for channel 1 */
+  sConfig.Pulse = V230_RETURN_MIN_DC;          // 100ms: dichiariamo 230V presente dopo almeno 10  passaggi per lo zero
+  if(HAL_TIM_PWM_ConfigChannel(&htimV230, &sConfig, V230_RESTORE_TIM_CHx) != HAL_OK)
+  {
+    /* Configuration Error */
+    wrapper_Handler();
+  }
+
+  /*##-2- Select clock source Pin PC8 = VAC230_KO = TIM8_CH3 #######################################*/
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_TI1;
+  sClockSourceConfig.ClockPolarity = sClockSourceConfig.ClockPrescaler = sClockSourceConfig.ClockFilter = (uint32_t)0;
+  
+  if (HAL_TIM_ConfigClockSource(&htimV230, &sClockSourceConfig) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  /*##-3- configure TI1S for reset on XOR   #######################################*/
+  if(HAL_TIM_ConfigTI1Input(&htimV230, TIM_TI1SELECTION_XORCOMBINATION) != HAL_OK)
+  {  
+    /* PWM error  */
+    wrapper_Handler();
+  }
+
+  /*##-4- start timer and enable interrupt  #######################################*/
+  /* TIM8  enable and interrupt on compare TIM8 channel 2 */
+  if(HAL_TIM_IC_Start_IT(&htimV230, V230_RESTORE_TIM_CHx) != HAL_OK)   // 
+  //if(HAL_TIM_Base_Start_IT(&htimV230) != HAL_OK)
+  {  
+    /* PWM error  */
+    wrapper_Handler();
+  }
+
+  /*##-5- Configure the NVIC for TIMx #########################################*/
+
+  HAL_NVIC_SetPriority(TIM_V230_WD_IRQn, 6, 1);
+
+  /* Enable the TIMx global Interrupt */
+  HAL_NVIC_EnableIRQ(TIM_V230_WD_IRQn);
+
+}
+
+/**
+  * @brief  Input Capture callback in non-blocking mode
+  * @param  htim TIM IC handle
+  * @retval None
+  */
+void HAL_TIM_PWM_PulseFinishedCallback(TIM_HandleTypeDef *htim)
+{
+  uint32_t flagRtc;
+
+  if (htim->Instance == TIM_V230_WD)
+  {
+    if ((htim->Channel == HAL_TIM_ACTIVE_CHANNEL_3) && (__HAL_TIM_GET_IT_SOURCE(htim, TIM_FLAG_CC3)))
+    {
+      /* if we arrive here, the the 230V is down, so safety action must be do immediatly  */
+      
+      //if ((getFlagV230() != BACKUP_230VAC_SEND_OPEN_SOCKET) && (getFlagV230() != BACKUP_230VAC_SEND_RECHARGE))
+      if (__HAL_TIM_GET_COUNTER(htim) != (uint32_t)0)
+      {
+#ifdef V230_MON_ACTIVE
+        if (HAL_GPIO_ReadPin(IN2_GPIO_Port, IN2_Pin) == GPIO_PIN_SET)
+        {
+          //GPIOD->ODR ^= (uint32_t)0x00000002; /* only for debug */
+          /* check the status pin is in emrgency condition => "1" */
+          setFlagV230(BACKUP_230VAC_TRIGGER_OFF_VAL);   /* emergency condition detected -->V230 assente*/
+#ifdef SOSPESA
+          deInitSBCUsart();           // stop USART5 comunication to/from SBC
+          deInitRS485Usart();         // stop USART1 comunication to/from RS485
+#endif
+        }
+#endif
+        disableTimV230();
+      }
+    }
+    else
+    {
+      if ((__HAL_TIM_GET_IT_SOURCE(htim, TIM_IT_CC2))  && (htim->Channel == HAL_TIM_ACTIVE_CHANNEL_2))
+      {
+        flagRtc = getFlagV230();
+        /* if we arrive here, the the 230V is up, so the system can restart normally  */
+        setFlagV230(BACKUP_230VAC_ON_VAL);
+        if (flagRtc  == BACKUP_FAIL_BOARD)
+        {
+          /* reset uP and restart */
+          setFlagForNvic();
+          NVIC_SystemReset();
+        }
+        else
+        {
+          disableTimV230();
+        }
+      }
+    }
+  }
+}
+
+/**
+  * @brief  Wake Up Timer callback
+  * @param  hrtc : hrtc handle
+  * @retval None
+  */
+void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc)
+{
+  /* check the status pin is in emrgency condition => "1" */
+  setFlagV230(BACKUP_TIMEOUT_RTC);   /* out of emergency condition for RTC timeout -->V230 assente ma è un falso */
+}
+
+
+/**
+  * @brief Start the timer to check when the Vac come back 
+  * @param none
+  * @retval None
+  */
+void forceVacTimerStartDetect(void)
+{
+  disableTimV230();
+  /* start V230ac goes UP phase*/
+  setTimer230Restore();
+}
+
+/**
+  * @brief Start the timer to check when the Vac goes off 
+  * @param none
+  * @retval uint8_t: V230  present 
+  */
+uint8_t checkVbusFlag(void)
+{
+#ifdef COME_ERA
+  uint32_t  tim, timEnd;
+  statusFlag_e   flagVbus; 
+  uint8_t        result, v230Trigged;
+
+  v230Trigged = (uint8_t)0xFF;
+
+  if (getStationV230FlagStatus() == ENABLED)
+  {
+    tim = HAL_GetTick();
+    timEnd = tim +(uint32_t)100;
+    result = v230Trigged = (uint8_t)0;
+    /* se entro 50 msec non vedo mai il pin VAC230 a 0, sono partito senza 230 --> non attivo il controllo  */
+    while ((tim < timEnd) && (result == 0))
+    {
+      /* set station V230 control from   CONTROL_BYTE1_EADD bit  VBUS_CRL1  */
+      eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
+      flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
+      if (flagVbus == DISABLED) result = 1;
+
+      if (checkV230T20msecFromHwPin() != 0) 
+      {
+        v230Trigged = 1;
+        break;
+      }
+      tim = HAL_GetTick();
+    }
+  }
+  if ((flagVbus == ENABLED) && (v230Trigged == 0))
+  {
+    v230Trigged = 0;  // assenza tensione con flag abilitata
+  }
+  if ((flagVbus == ENABLED) && (v230Trigged == 1))
+  {
+    v230Trigged = 1;  // presenza tensione con flag abilitata
+  }
+  if ((flagVbus == DISABLED))
+  {
+    v230Trigged = 2; //flag disabilitata
+  }
+#else
+  uint8_t        v230Trigged;
+  statusFlag_e   flagVbus; 
+
+  /* set station V230 control from   CONTROL_BYTE1_EADD bit  VBUS_CRL1  */
+  eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
+  flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
+  
+  if ((flagVbus == ENABLED) && (infoV230.statusV230 == V230_ABSENT))
+  {
+    v230Trigged = 0;  // assenza tensione con flag abilitata
+  }
+  if ((flagVbus == ENABLED) && (infoV230.statusV230 == V230_PRESENT))
+  {
+    v230Trigged = 1;  // presenza tensione con flag abilitata
+  }
+  if ((flagVbus == DISABLED))
+  {
+    v230Trigged = 2; //flag disabilitata
+  }
+#endif
+
+  return(v230Trigged);
+}
+
+/**
+  * @brief  DeInitializes TIM PWM MSP.
+  * @param  htim TIM PWM handle
+  * @retval None
+  */
+void HAL_TIM_PWM_MspDeInit(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM_V230_WD)
+  {
+    htim->Instance->CR1   = (uint32_t)0;
+    htim->Instance->SMCR  = (uint32_t)0;
+    htim->Instance->DIER  = (uint32_t)0;
+    htim->Instance->SR    = (uint32_t)0;
+  }
+}
+
+/**
+  * @brief EXTI line detection callbacks
+  * @param GPIO_Pin: Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  ioMngMsg_st   ioExpMsg;
+  portBASE_TYPE xHigherPriorityTaskWoken;
+
+  if (GPIO_Pin == V230_WD_PIN)
+  {
+    /* to do: the 230Vac is now present  */
+    infoV230.edgeCounter++;
+  }
+  if ((GPIO_Pin == INTx_Pin) && (filteringPEN == ENABLED))
+  {
+    /* PEN alarm pin edge detected from U39 */
+
+    xHigherPriorityTaskWoken = pdFALSE;
+
+    /* disattivazione audio amplifier  */
+    ioExpMsg.taskEv = IO_EVENT_PEN_PIN_EDGE;
+    ioExpMsg.outRegId = NUM_OUT_IOEXP;
+    ioExpMsg.val = 0;
+    configASSERT(xQueueSendToBackFromISR(getIoMngQueueHandle(), (void *)&ioExpMsg, &xHigherPriorityTaskWoken) == pdPASS);
+  }
+
+}
+
+/**
+*
+* @brief        get the energy meter model       
+*
+* @param [in]   emEnum_e: EM position
+*
+* @retval       uint32_t: code for energy model status  
+*
+***********************************************************************************************************************/
+uint32_t getEmModelReg(emEnum_e position)
+{
+  uint32_t  val;
+
+  
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_EM_MODEL);
+  if (position == INTERNAL_EM)
+  {
+    val &= MASK_FOR_EM_INT_MODEL;
+  }
+  else
+  {
+    if (position == EXTERNAL_EM)
+    {
+      val &= MASK_FOR_EM_EXT_MODEL;
+      val = ((val >> 16) & MASK_FOR_EM_INT_MODEL);
+    }
+  }
+  return (val);
+}
+
+/**
+* @brief  set the new state energy meter model
+*  
+* @param [in ]  uint32_t: EM model
+* @param [in ]  emEnum_e: EM position (INTernal or EXTernal) 
+*  
+* @retval None
+*/
+void setEmModelReg(uint32_t statusIn, emEnum_e position)
+{
+  uint32_t status;
+
+  status = getEmModelReg(EM_MAX_NUM);
+  if (position == INTERNAL_EM)
+  {
+    status &= (~MASK_FOR_EM_INT_MODEL);
+    status |= ((uint32_t)statusIn & MASK_FOR_EM_INT_MODEL);
+  }
+  else
+  {
+    status &= (~MASK_FOR_EM_EXT_MODEL);
+    status |= (((uint32_t)statusIn << 16) & MASK_FOR_EM_EXT_MODEL);
+  }
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_EM_MODEL, status);
+}
+
+/**
+* @brief  set the new state for V230 presence
+*  
+* @param [in ]  uint8_t: V230 status flag ON/OFF
+* @retval None
+*/
+void setFlagV230(uint32_t statusIn)
+{
+  uint32_t status;
+
+  status = getFlagV230Reg() & (~MASK_FOR_V230_BACKUP);
+  status |= (statusIn & MASK_FOR_V230_BACKUP);
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG, status);
+}
+
+/**
+*
+* @brief        get the status of 230 Vac flag      
+*
+* @param [in]   none
+*
+* @retval       uint32_t: code for 230 Vac status  
+*
+***********************************************************************************************************************/
+static uint32_t getFlagV230Reg(void)
+{
+  uint32_t  val;
+
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG);
+  return (val);
+}
+
+/**
+* @brief  set the new state for V230 presence
+*  
+* @param [in ]  uint8_t: V230 status flag ON/OFF
+* @retval None
+*/
+void setFlagV230Msg(uint32_t statusIn)
+{
+  uint32_t status;
+
+  if (infoV230.lastMsgV230Sent != statusIn)
+  {
+    if (statusIn != (uint32_t)0) infoV230.lastMsgV230Sent = statusIn;
+    status = getFlagV230Reg() & (~MASK_FOR_V230_MSG);
+    status |= (statusIn & MASK_FOR_V230_MSG);
+    HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG, status);
+  }
+}
+
+/**
+*
+* @brief        get the status of 230 Vac flag      
+*
+* @param [in]   none
+*
+* @retval       uint32_t: code for 230 Vac status  
+*
+***********************************************************************************************************************/
+uint32_t getFlagV230(void)
+{
+  uint32_t  val;
+
+  val = (HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG) & MASK_FOR_V230_BACKUP);
+  return (val);
+}
+
+/**
+*
+* @brief        get the status of 230 Vac flag      
+*
+* @param [in]   none
+*
+* @retval       uint32_t: code for 230 Vac status  
+*
+***********************************************************************************************************************/
+uint32_t getFlagV230Msg(void)
+{
+  uint32_t  val;
+
+  val = (HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG) & MASK_FOR_V230_MSG);
+  return (val);
+}
+
+
+/**
+*
+* @brief        set VAC230 as interrupt EXTI9_5 interrupt      
+*
+* @param [in]   none
+*
+* @retval       none  
+*
+***********************************************************************************************************************/
+void setVac230PinAsIntrpt (void)
+{
+  GPIO_InitTypeDef   GPIO_InitStructure;
+
+  infoV230.edgeCounter = 0;
+
+  /* Enable GPIOC clock */
+  V230_WD_GPIO_CLK_ENABLE();
+
+  /* Configure PC.8 pin as input pull-up */
+  GPIO_InitStructure.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStructure.Pull = GPIO_PULLUP;
+  GPIO_InitStructure.Pin = V230_WD_PIN;
+  HAL_GPIO_Init(V230_WD_GPIO_PORT, &GPIO_InitStructure);
+
+  /* Enable and set EXTI lines 9 to 5 Interrupt to the lowest priority */
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 4, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+}
+
+/**
+* @brief  uP wakeup from Vin under treshold (13V) It is necessary unblock the socket and to stop the charging (if running) 
+*  
+* @param [in ]  ADC_HandleTypeDef*: adc handler 
+*  
+* @retval None
+*/
+void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *hadc)
+{
+  if (hadc->Instance == ADCxVIN)
+  {
+    /* if we arrive here, the the 230V is down yet, so the system close the current charging phase and when V230 will be present a normal restart occured  */
+    setFlagV230(BACKUP_230VAC_OFF_V24_LOW);
+    /** need to store this time: when the system will restart this time must be sent, with OCPP to central station  */
+
+    /** To do here if Vania hasn't already done it somewhere!!!! nik  */
+  }
+}
+
+
+/**
+* @brief  manager for transmit UART complete using DMA (remember: the DMA, on Tx complete, enable end Tx interrupt bit on UART) 
+*         This maean we arrive here not for DMA interrpt but for UART interrupt i.e. UART_EM_IRQHandler() from stm32f7xx_it.c 
+*  
+* @param [in ]  UART_HandleTypeDef*: uart handler 
+*  
+* @retval None
+*/
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  if(huart->Instance == UART_EM)
+  {
+    /* the DE change wouldn't necessary. The microprocessor do that for us */
+    // HAL_GPIO_WritePin(UART_EM_DE_GPIO_PORT, UART_EM_DE_PIN, GPIO_PIN_RESET);
+    // the receiver is automatically enabled when DE goes low at the end of transmission 	
+    // so I think that no particular action must be do on this event --> Nick
+    //update 24/02/2021 because the DMA1 Stream7 is shared between EM and Voice a semaphore is necessary 
+    // so here the semaphore will be released 
+    dma1S7SemaphoreRelease();  // wait until the semaphore is available 
+  }
+  else
+  {
+    if(huart->Instance == UART_SBC)
+    {
+      freeSemTxBuffer();
+    }
+    else
+    {
+      if(huart->Instance == UART_SCU)
+      {
+        /* free buffer previous acquired by malloc */
+        freeTxBuffer();
+      }
+    }
+  } 
+}
+
+/**
+  * @brief  Conversion complete callback in non blocking mode for Channel2 
+  * @param  hdac: pointer to a DAC_HandleTypeDef structure that contains
+  *         the configuration information for the specified DAC.
+  * @retval None
+  */
+void HAL_DACEx_ConvCpltCallbackCh2(DAC_HandleTypeDef* hdac)
+{
+  ioMngMsg_st   ioExpMsg;
+  portBASE_TYPE xHigherPriorityTaskWoken;
+
+  xHigherPriorityTaskWoken = pdFALSE;
+
+  /* disattivazione audio amplifier  */
+  ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+  ioExpMsg.outRegId = V_MUTE;
+  ioExpMsg.val = 0;
+  configASSERT(xQueueSendToBackFromISR(getIoMngQueueHandle(), (void *)&ioExpMsg, &xHigherPriorityTaskWoken) == pdPASS);
+}
+
+/**
+*
+* @brief  		  set motor driver command for STSPIN840 as the previous device   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setOutBL1_M (void)
+{
+  /* as reported in data sheet pag 13 Table 7 this condition means PHA=PWMA=1 */
+  PWMA_GPIO_Port->BSRR=((uint32_t)PWMA_Pin | (uint32_t)PHA_Pin);
+}
+
+/**
+*
+* @brief  		  set motor driver command for STSPIN840 as the previous device   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setOutBL1_P (void)
+{
+  /* as reported in data sheet pag 13 Table 7 this condition means PHA=OUTBL1_P=PD.8=0 and PWMA=OUTBL1_M=PD3=1 */
+  PWMA_GPIO_Port->BSRR=((uint32_t)PWMA_Pin | (uint32_t)PHA_Pin<<16);
+}
+
+/**
+*
+* @brief  		  set motor driver command for STSPIN840 as the previous device   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void brakePhase (void)
+{
+  /* as reported in data sheet pag 13 Table 7 this condition means PHA=0 and PWMA=0 (or  PHA=1 and PWMA=1) */
+  PWMA_GPIO_Port->BSRR=((uint32_t)PWMA_Pin<<16 | (uint32_t)PHA_Pin<<16);
+}
+
+/**
+*
+* @brief  		  Function to control SBC power   
+*
+* @param [in ]  uint8_t: ON / OFF
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void sbcPowerStatus (uint8_t status)
+{
+  GPIO_InitTypeDef  GPIO_InitStruct;
+
+  // all led off 
+  setLed((ledIdx_e)0, LED_EVENT_OFF_ALL, (uint16_t)0, (uint8_t)0);
+
+  if (status == ON)
+  {
+    HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, GPIO_PIN_RESET);
+  }
+  else
+  {
+    HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, GPIO_PIN_SET);
+  }
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = SBC_PWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FAST;
+
+  HAL_GPIO_Init(SBC_PWR_GPIO_Port, &GPIO_InitStruct);
+}
+
+/**
+*
+* @brief  		  Function to put all external HW in low power mode (first phase)   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setFirstLevelPwdnState (void)
+{
+  GPIO_InitTypeDef  GPIO_InitStruct;
+
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+
+  /* Configure the GPIO_LED pin in push-pull output mode */ 
+  GPIO_InitStruct.Pin = PWMLCD4X20_PIN;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(PWMLCD4X20_GPIO_PORT, &GPIO_InitStruct);
+
+  /* retroilluminazione display LCD o TFT OFF*/
+  //HAL_GPIO_WritePin(PWMLCD4X20_GPIO_PORT, PWMLCD4X20_PIN, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(PWMLCD4X20_GPIO_PORT, PWMLCD4X20_PIN, GPIO_PIN_SET);  /* per LCD possiamo rimanere accesi */
+
+  /** all led R-G-B off **/
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(PWMLED_A_GPIO_PORT, PWMLED_A_PIN | PWMLED_B_PIN | PWMLED_C_PIN, GPIO_PIN_RESET);
+
+  /* GPIOx Configuration: Output to 0   */
+  GPIO_InitStruct.Pin       = PWMLED_A_PIN | PWMLED_B_PIN | PWMLED_C_PIN;
+  GPIO_InitStruct.Mode      = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull      = GPIO_PULLUP;
+  GPIO_InitStruct.Speed     = GPIO_SPEED_LOW;
+  GPIO_InitStruct.Alternate = (uint32_t)0;
+
+  HAL_GPIO_Init(PWMLED_A_GPIO_PORT, &GPIO_InitStruct); 
+
+  /** ETH, BT, Audio, 12V   */
+  HAL_GPIO_WritePin(PWRDWN1L_GPIO_Port, PWRDWN1L_Pin, GPIO_PIN_RESET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = PWRDWN1L_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(PWRDWN1L_GPIO_Port, &GPIO_InitStruct);
+
+  /** RFID Off   *  */
+  HAL_GPIO_WritePin(SMB0_RFID_PWR_GPIO_Port, SMB0_RFID_PWR_Pin, GPIO_PIN_SET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = SMB0_RFID_PWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(SMB0_RFID_PWR_GPIO_Port, &GPIO_InitStruct);
+
+
+}
+
+/**
+*
+* @brief  		  Function to put all external HW in low power mode (second phase)   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setSecondLevelPwdnState (void)
+{
+  GPIO_InitTypeDef  GPIO_InitStruct;
+
+  /** RFID Off   *  */
+  HAL_GPIO_WritePin(SMB0_RFID_PWR_GPIO_Port, SMB0_RFID_PWR_Pin, GPIO_PIN_SET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = SMB0_RFID_PWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(SMB0_RFID_PWR_GPIO_Port, &GPIO_InitStruct);
+
+  /** SBC and router OFF  OSC OFF **/
+  HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, GPIO_PIN_RESET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = SBC_PWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(SBC_PWR_GPIO_Port, &GPIO_InitStruct);
+
+  /** ETH, BT, Audio    *  */
+  HAL_GPIO_WritePin(PWRDWN1L_GPIO_Port, PWRDWN1L_Pin, GPIO_PIN_RESET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = PWRDWN1L_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(PWRDWN1L_GPIO_Port, &GPIO_InitStruct);
+
+}
+
+#ifdef COLLAUDO_PEN
+/**
+*
+* @brief  		  Function to set the relays in the gig testing suite    
+*
+* @param [in ]  uint16:   current settings 
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setRelaysGigPen (uint16_t rSetting)
+{
+  uint8_t     tmp;
+  ioMngMsg_st ioExpMsg;
+  ledEvents_e tmpLedEvents;
+
+  uint16_t    locSetting = swapW(rSetting);
+
+  if (locSetting == (uint16_t)0)
+  {
+    /* attivazione/disattivazione relè 1 207Vrms */
+    ioExpMsg.val = 0;
+    ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+    ioExpMsg.outRegId = REM_ACT_OFF;
+    while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+    {
+      ; // no message sent within 100msec; retry
+    }
+    osDelay(100);
+    /* attivazione/disattivazione relè 2 230Vrms */
+    ioExpMsg.val = 0;
+    ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+    ioExpMsg.outRegId = REM_ACT_ON;
+    while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+    {
+      ; // no message sent within 100msec; retry
+    }
+    /* attivazione/disattivazione relè 3 253Vrms */
+    tmp = (uint8_t)10;
+    tmpLedEvents = LED_EVENT_OFF;
+    setLed(LED_A_BLU, tmpLedEvents, (uint16_t)0, tmp);
+    setLed(LED_B_GREEN, tmpLedEvents, (uint16_t)0, tmp);
+    setLed(LED_C_RED, tmpLedEvents, (uint16_t)0, tmp);
+    HAL_GPIO_WritePin(SGCBOB_GPIO_Port, SGCBOB_Pin, GPIO_PIN_RESET);
+  }
+  else
+  {
+    /* attivazione/disattivazione Relè 1 */
+    tmp = ((locSetting & (uint16_t)0x0001) == (uint16_t)0x0001) ? (uint8_t)1 : (uint8_t)0;
+    /* attivazione/disattivazione relè 1 207Vrms */
+    ioExpMsg.val = tmp;
+    ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+    ioExpMsg.outRegId = REM_ACT_OFF;
+    while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+    {
+      ; // no message sent within 100msec; retry
+    }
+    osDelay(100);
+    /* attivazione/disattivazione Relè 2 */
+    tmp = ((locSetting & (uint16_t)0x0002) == (uint16_t)0x0002) ? (uint8_t)1 : (uint8_t)0;
+    /* attivazione/disattivazione relè 1 207Vrms */
+    ioExpMsg.val = tmp;
+    ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+    ioExpMsg.outRegId = REM_ACT_ON;
+    while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+    {
+      ; // no message sent within 100msec; retry
+    }
+    osDelay(100);
+    /* attivazione/disattivazione relè 3 253Vrms */
+    tmp = ((locSetting & (uint16_t)0x0004) == (uint16_t)0x0004) ? (uint8_t)90 : (uint8_t)10;
+    tmpLedEvents = ((locSetting & (uint16_t)0x0004) == (uint16_t)0x0004) ? LED_EVENT_ON : LED_EVENT_OFF;
+    setLed(LED_A_BLU, tmpLedEvents, (uint16_t)0, tmp);
+
+    /* attivazione/disattivazione relè 4 (24V alla scheda PEN) */
+    tmp = ((locSetting & (uint16_t)0x0008) == (uint16_t)0x0008) ? (uint8_t)90 : (uint8_t)10;
+    tmpLedEvents = ((locSetting & (uint16_t)0x0008) == (uint16_t)0x0008) ? LED_EVENT_ON : LED_EVENT_OFF;
+    setLed(LED_B_GREEN, tmpLedEvents, (uint16_t)0, tmp);
+
+    /* attivazione/disattivazione relè 5 (calibrazione scheda PEN) */
+    tmp = ((locSetting & (uint16_t)0x0010) == (uint16_t)0x0010) ? (uint8_t)90 : (uint8_t)10;
+    tmpLedEvents = ((locSetting & (uint16_t)0x0010) == (uint16_t)0x0010) ? LED_EVENT_ON : LED_EVENT_OFF;
+    setLed(LED_C_RED, tmpLedEvents, (uint16_t)0, tmp);
+
+    /* attivazione/disattivazione relè 6 (SWDIO scheda PEN) */
+    if ((locSetting & (uint16_t)0x0020) == (uint16_t)0x0020)
+    {
+      HAL_GPIO_WritePin(SGCBOB_GPIO_Port, SGCBOB_Pin, GPIO_PIN_SET);
+    }
+    else
+    {
+      HAL_GPIO_WritePin(SGCBOB_GPIO_Port, SGCBOB_Pin, GPIO_PIN_RESET);
+    }
+	
+    /* attivazione/disattivazione relè K1, ossia quello che apre/chiude la terra, sulla scheda PEN */
+    if ((locSetting & (uint16_t)0x0040) == (uint16_t)0x0040)
+    {
+      HAL_GPIO_WritePin(CNTCT_GPIO_Port, CNTCT_Pin, GPIO_PIN_SET);
+    }
+    else
+    {
+      HAL_GPIO_WritePin(CNTCT_GPIO_Port, CNTCT_Pin, GPIO_PIN_RESET);
+    }
+	
+  }
+}
+#endif
+
+/**
+* @brief  This function is executed in case of error occurrence.
+* @param  None
+* @retval None
+*/
+static void wrapper_Handler(void)
+{
+  while(1)
+  {
+  }
+}
+    
+#ifndef TRANSACTION_SIMULATION
+/**
+*
+* @brief  		  Function to restore previous transactions    
+*
+* @param [in ]  sck_register_t*:   pointer to struct where store the data 
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void populateTransactionRegister(sck_register_t *reg, socket_t *pCurrSocket)
+{
+  uint16_t *pNumItem;
+  uint32_t srcAddr;
+  uint16_t len, ckSum;
+  uint8_t  *pData;
+
+  transactionReg = reg;
+  pSocket = pCurrSocket;
+
+  pArea = (uint16_t *)malloc(FLASH_TRANSACTION_SIZE);
+  maxNumTransaction = (FLASH_TRANSACTION_SIZE - sizeof(uint16_t) * 2)/ sizeof(transaction_t);
+  if (pArea != NULL)
+  {
+
+    srcAddr = getTransactionAddress();
+    if (FlashRead(srcAddr, (uint8_t*)pArea, FLASH_TRANSACTION_SIZE) == QSPI_OK)
+    {
+      for (len = ckSum = 0, pData = (uint8_t*)pArea; len < FLASH_TRANSACTION_SIZE; len++)
+      {
+        ckSum += pData[len];
+      }
+      if (ckSum == FLASH_CHECKSUM_VALUE)
+      {
+        pNumItem = (uint16_t*)((uint32_t)pArea + sizeof(uint16_t));  // pointer to first structure field 
+        reg->num = *pNumItem;
+        pNumItem++;
+        reg->transactions = (transaction_t *)pNumItem;
+      }
+      else
+      {
+        pNumItem = (uint16_t*)((uint32_t)pArea + sizeof(uint16_t));  // pointer to first structure field 
+        reg->num = (uint32_t)0;
+        pNumItem++;
+        reg->transactions = (transaction_t *)pNumItem;
+      }
+    }
+  }
+}
+
+/**
+*
+* @brief  		  Function to clear transaction area     
+*
+* @param [in ]  sck_register_t*:   pointer to struct where store the data 
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void clearTransactionList(void)
+{
+  uint32_t srcAddr;
+
+  srcAddr = getTransactionAddress();
+
+  if (pArea != NULL)
+  {
+    /**** clear all area  ******/
+    memset((void*)pArea, (int)0xFF, FLASH_TRANSACTION_SIZE);
+    
+    if (FlashWrite(srcAddr, (uint8_t*)pArea, FLASH_TRANSACTION_SIZE, FLASH_TRANSACTION_SIZE) == 0)
+    {
+      tPrintf("Transaction list cleared\n\r");
+    }
+  }
+
+}
+
+/**
+*
+* @brief  		  Function to store a new incoming transactions    
+*
+* @param [in ]  uint8_t*:   pointer to uid transaction originator (00000 if FREE, FFFFF if from DSO) 
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void startNewTransaction(uint8_t *uid)
+{
+  void  *pSrc, *pDest;
+
+
+  if (transactionReg->num >= (uint32_t)maxNumTransaction)
+  {
+    pSrc = (void*)&transactionReg->transactions[1];
+    pDest = (void*)&transactionReg->transactions[0];
+    /* the queue is FIFO --> in first position there is alway oldest transaction */
+    memmove(pDest, pSrc, (sizeof(transaction_t) * (maxNumTransaction - 1)));
+    transactionReg->num = (uint32_t) maxNumTransaction - (uint32_t)1;
+  }
+
+  if ((uint32_t)uid == UID_TRANSACTION_FREE) 
+  {
+    memset((void*)transactionReg->transactions[transactionReg->num].uid, (int)'0', (UID_SIZE - 1));
+  }
+  else
+  {
+    if ((uint32_t)uid == UID_TRANSACTION_DSO) 
+    {
+      memset((void*)transactionReg->transactions[transactionReg->num].uid, (int)'F', (UID_SIZE - 1));
+    }
+    else
+    {
+      /***                              destination                                 source              len */
+      memcpy((void*)transactionReg->transactions[transactionReg->num].uid, (const void *)uid, (size_t)(UID_SIZE - 1));
+    }
+  }
+  transactionReg->transactions[transactionReg->num].uid[UID_SIZE - 1] = '\0';
+  /** set the start time for current transaction  */
+  transactionReg->transactions[transactionReg->num].start = getCurrentUnixTime();
+  /** set the default stop time for current transaction  */
+  transactionReg->transactions[transactionReg->num].stop = 0;
+  /** set the default active energy  for current transaction  */
+  transactionReg->transactions[transactionReg->num].active_energy = (uint32_t)0;
+  /** set the default duration  for current transaction  */
+  transactionReg->transactions[transactionReg->num].duration = (uint32_t)0;
+
+  init_measures(&measureSck);
+  
+  // Update current transaction information
+  BtTaskReq_t task_req;
+  task_req.type = SEND_START_ACTIVE_TRANS;
+  osMessageQueuePut(getBlueMngQueueHandle(), &task_req, 0, 0);
+}
+
+/**
+*
+* @brief  		  Function to stop and store the current transaction     
+*
+* @param [in ]  uint32_t:   active energy for current transaction  
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void stopNewTransaction(uint32_t activeEnergy)
+{
+  uint32_t srcAddr;
+  uint16_t ix, ckSum;
+  uint8_t* pByte;
+
+  /** check if the default active energy  and duration are right */
+  if ((transactionReg->transactions[transactionReg->num].stop == 0) /*&&
+      (transactionReg->transactions[transactionReg->num].active_energy == 0)*/)
+  {
+    
+    /** set the stop time for current transaction  */
+    transactionReg->transactions[transactionReg->num].stop = getCurrentUnixTime();
+
+    /** set the energy for current transaction  */
+    //transactionReg->transactions[transactionReg->num].active_energy = (uint32_t)getEmRegisterValue(EM_SES_ACTIVE_ENERGY);
+    transactionReg->transactions[transactionReg->num].active_energy = activeEnergy * 100;
+
+    /** set the duration for current transaction  */
+    transactionReg->transactions[transactionReg->num].duration = (uint32_t)(difftime(
+                                                                                   transactionReg->transactions[transactionReg->num].stop,
+                                                                                   transactionReg->transactions[transactionReg->num].start
+                                                                             ));
+
+    srcAddr = getTransactionAddress();
+
+    /* inc number of stored transaction */
+    transactionReg->num++;
+    /**** set new number of records  ******/
+    pArea[1] = transactionReg->num;
+
+    for (ix = 0, ckSum = 0, pByte = (uint8_t*)pArea; ix < FLASH_TRANSACTION_SIZE - sizeof(uint16_t); ix++)
+    {
+      ckSum += pByte[ix];
+    }
+    /**** set KEY ******/
+    pArea[0] = (uint16_t)((uint32_t)0x10000 - (uint32_t)ckSum);
+
+    if (FlashWrite(srcAddr, (uint8_t*)pArea, FLASH_TRANSACTION_SIZE, FLASH_TRANSACTION_SIZE) == 0)
+    {
+      tPrintf("Transaction %d stored\n\r", transactionReg->num);
+    }else{
+      tPrintf("Transaction not stored!\n\r");
+    }
+    
+    // Update and clear current transaction information
+    BtTaskReq_t task_req;
+    task_req.type = SEND_STOP_ACTIVE_TRANS;
+    osMessageQueuePut(getBlueMngQueueHandle(), &task_req, 0, 0);
+  }
+}
+
+/**
+*
+* @brief  		  Function to set new duration and energy on current transaction      
+*
+* @param [in ]  sck_measures_t*: puntatore alla struttura delle misure da visualizzare su app 
+*                               duration for current transaction  (0xFFFFFFFF for unchanged)
+*                               active energy for current transaction  (0xFFFFFFFF for unchanged)
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setTransactionParam(sck_measures_t *pMeasureSck, evs_state_en evStatus, uint8_t update)
+{
+  BtTaskReq_t task_req;
+  uint8_t send_update;
+#ifdef SINAPSI_TEST
+  uint16_t sinapsiState;
+#endif
+  
+  if  (update == 1)
+  {
+    /** set the duration for current transaction  */
+    transactionReg->transactions[transactionReg->num].duration = (uint32_t)pMeasureSck->duration;
+    pSocket->measures.duration = (uint32_t)pMeasureSck->duration;
+
+    /** set the duration for current transaction  */
+    transactionReg->transactions[transactionReg->num].active_energy = (uint32_t)pMeasureSck->Etot;
+    pSocket->measures.Etot = (uint32_t)pMeasureSck->Etot * 100;
+
+    /** set the duration for current transaction  mono phase or L1   */
+    pSocket->measures.currentL1 = (uint32_t)pMeasureSck->currentL1 * 100;
+
+    /** set the duration for current transaction three phase L2 */
+    pSocket->measures.currentL2 = (uint32_t)pMeasureSck->currentL2 * 100;
+
+    /** set the duration for current transaction three phase L3 */
+    pSocket->measures.currentL3 = (uint32_t)pMeasureSck->currentL3 * 100;
+
+    /** set the active instantaneous internal power for current  transaction  */
+    pSocket->measures.Pist = (uint32_t)pMeasureSck->Pist * 100;
+
+    /** set the active instantaneous external power for current  transaction  */
+    pSocket->measures.Pest = (uint32_t)pMeasureSck->Pest;
+
+    /** set the active instantaneous phase 1 power for current  transaction  */
+    pSocket->measures.Pest1 = (uint32_t)pMeasureSck->Pest1;
+
+    /** set the active instantaneous phase 2 power for current  transaction  */
+    pSocket->measures.Pest2 = (uint32_t)pMeasureSck->Pest2;
+
+    /** set the active instantaneous phase 3 power for current  transaction  */
+    pSocket->measures.Pest3 = (uint32_t)pMeasureSck->Pest3;
+    
+    /** send update for measurements */
+    task_req.type = UPDATE_MEASURES;
+    task_req.measures = pSocket->measures;
+    requestToBtTask(&task_req);
+    //osMessageQueuePut(getBlueMngQueueHandle(), &task_req, 0, 0);
+  }
+
+  task_req.type = WRITE_STATE;
+  send_update = 1;
+  switch (evStatus)
+  {
+    case EVSTATE_S2_WAITING:            // wait for S2 closing
+    case EVSTATE_DISABLED:              // No user allowed
+    case EVSTATE_AUTH_WAIT:             // wait for user authorization / remote supervisor action
+    case EVSTATE_SOCKET_AVAILABLE:      // evs_mode == EVS_FREE_MODE
+    case EVSTATE_BLOCK_UP_DELAY:        // wait timeout before drive block up
+    case EVSTATE_SOCKET_CHECK:          // inserted plug
+    case EVSTATE_CHARGING:              // EV in charge
+    case EVSTATE_INTERRUPTING:          // wait for S2 opening or timeout
+    case EVSTATE_PLUG_OUT:              // wait for EVS_PLUG_OUT
+    case EVSTATE_RES_ERROR:             // show evs error
+    case EVSTATE_PLUG_WAIT:             // evs_mode = EVS_PERS_MODE, EVS_NET_MODE o EVS_OCPP_MODE
+    case EVSTATE_ERROR_WAIT:            // wait for resettable error clear
+    case EVSTATE_SUSPENDING:            // forced suspension
+      task_req.state.value = evStatus;
+      task_req.state.error = getErrorStateCoding();
+      break;
+
+    default:
+        /* unchanged state */
+      send_update = 0;
+      break;
+    
+  }
+
+  /* set station charge status in modbus map */
+if (evStatus != EVSTATE_NULL)
+{
+#ifdef SINAPSI_TEST
+  switch (evStatus)
+  {
+    case EVSTATE_CHARGING:           // EV in charge
+      sinapsiState = (uint16_t)2;
+      break;
+
+    case EVSTATE_SOCKET_AVAILABLE:   // evs_mode == EVS_FREE_MODE
+      sinapsiState = (uint16_t)1;
+      break;
+
+    default:
+      sinapsiState = (uint16_t)4;
+      break;
+  }
+  setStationStatusInModbusMap(sinapsiState);
+#else
+  setStationStatusInModbusMap((uint16_t)evStatus);
+#endif
+}
+
+  if(send_update == 1)
+    osMessageQueuePut(getBlueMngQueueHandle(), &task_req, 0, 0);
+}
+
+#endif
+
+/*
+*
+* @brief        get pointer to FW string  
+*
+* @param [in]   unsigned char: 
+*
+* @retval       uint_8_t: value
+*
+***********************************************************************************************************************/
+uint8_t*  getFwVer (void)
+{
+  return(fwInfo.infoNewFw.fwVersion);
+}
+
+/**
+  * @brief  get stations general parameters   
+  *         
+  * @param  infoStation_t*: pointer where store data
+  * 
+  * @retval none
+  */
+void  setGeneralStationParameters(void)
+{
+  infoStation_t* pInfoStation;
+  uint8_t tmp;
+
+  pInfoStation = (infoStation_t*)&infoStation;
+
+  // recupero i parametri generale della stazione / WB
+  ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)pInfoStation, sizeof(infoStation_t));
+  if (pInfoStation->key != 0xA6)
+  { 
+    /*         destination       source */
+    strcpy((char *)pInfoStation->name, (char *)"ChargePoint");
+    /*         destination       source */
+    strcpy((char *)pInfoStation->serial, (char *)"100182270");
+    /* reset info on energy meter */
+    infoStation.emTypeExt = infoStation.emTypeInt = UNKNOW;
+    /* reset authorization */
+    strcpy((char *)pInfoStation->auth.user, (char *)"");
+    strcpy((char *)pInfoStation->auth.pass, (char *)"");
+    pInfoStation->auth.auth_state = NO_AUTH;
+    /* reset schedulation */
+    for(int i = 0; i < MAX_SCHEDS; i++)
+    {
+      pInfoStation->scheds[i].days = 0;
+      pInfoStation->scheds[i].id = 0;
+      pInfoStation->scheds[i].start_hour = 0;
+      pInfoStation->scheds[i].start_min = 0;
+      pInfoStation->scheds[i].end_hour = 0;
+      pInfoStation->scheds[i].end_min = 0;
+      pInfoStation->scheds[i].power = 0;
+      pInfoStation->scheds[i].enable = 0;
+    }
+    pInfoStation->key = 0xA6;
+  }
+  /*         destination       source */
+  strcpy((char *)pInfoStation->firmware, (char *)getFwVer());
+
+
+  /* set socket type  from SOCKET_TYPE_EADD   */
+  eeprom_param_get(SOCKET_TYPE_EADD, (uint8_t *)&pInfoStation->wiring, 1);
+  set_sck_wiring((uint8_t)pInfoStation->wiring);
+  /* set standard current  from M3T_CURRENT_EADD   */
+  //eeprom_param_get(M3T_CURRENT_EADD, (uint8_t *)&pInfoStation->max_current, 1);
+  eeprom_param_get(M3T_CURRENT_EADD, (uint8_t *)&tmp, 1);
+  pInfoStation->max_current = (int32_t)tmp * 1000;
+  set_sck_max_current(pInfoStation->max_current); 
+  /* set station working mode from  EVS_MODE_EADD   */
+  eeprom_param_get(EVS_MODE_EADD, (uint8_t *)&pInfoStation->evs_mode, 1);
+  set_sck_mode((modeFun_e)pInfoStation->evs_mode);
+  /* set semplificated current  from M3S_CURRENT_EADD   */
+  //eeprom_param_get(M3S_CURRENT_EADD, (uint8_t *)&pInfoStation->max_currentSemp, 1);
+  eeprom_param_get(M3S_CURRENT_EADD, (uint8_t *)&tmp, 1);
+  pInfoStation->max_currentSemp = (int32_t)tmp * 1000;
+  /* set station triphase pm mode  from  PMNG_MODE_EADD   */
+  eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&pInfoStation->pmModeEn, 1);
+  /* set station triphase bal/unbal mode from  PMNG_UNBAL_EADD   */
+  eeprom_param_get(PMNG_UNBAL_EADD, (uint8_t *)&pInfoStation->pmUnbalEn, 1);
+  /* set station emergency behaviour  mode from  BATTERY_CONFIG_EADD   */
+  eeprom_param_get(BATTERY_CONFIG_EADD, (uint8_t *)&pInfoStation->batteryBackup, 1);
+  /* set station V230 control from   CONTROL_BYTE1_EADD bit  VBUS_CRL1  */
+  eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&pInfoStation->v230MonFlag, 1);
+  pInfoStation->v230MonFlag = (((uint8_t)pInfoStation->v230MonFlag & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
+
+  /* save on EEPROM */
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)pInfoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  send event to bluetooth task  
+  *         
+  * @param  bt_req_type_e: bluetooth event
+  * 
+  * @retval char*: pointer string station name
+  */
+void send_to_bt(bt_req_type_e bt_req_type)
+{
+  BtTaskReq_t task_req;
+  
+  task_req.type = bt_req_type;
+  configASSERT(xQueueSendToBack(getBlueMngQueueHandle(), (void *)&task_req, portMAX_DELAY) == pdPASS);
+}
+
+/**
+  * @brief  get stations name   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string station name
+  */
+char*  getStationName(void)
+{
+  return((char*)infoStation.name);
+}
+   
+/**
+  * @brief  set stations name   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string station name
+  */
+void  setStationName(char* strName, int length)
+{
+  /*         destination            source */
+  if(length == 0)
+    strcpy((char *)&infoStation.name, strName);
+  else 
+  {
+    strncpy((char *)&infoStation.name, strName, length);
+    infoStation.name[length] = '\0';
+  }
+  
+  
+  /* save new parameter in EEPROM */
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  get stations id   
+  *         
+  * @param  none
+  * 
+  * @retval int: number of stations id 
+  */
+uint8_t getStationId(void)
+{
+  uint8_t pass = 0;
+  eeprom_param_get(RS485_ADD_EADD, &pass, 1);
+  return pass + 1;
+}
+ 
+/**
+  * @brief  get stations serial number   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string serial number 
+  */
+char*  getStationSerialNumber(void)
+{
+  return((char*)infoStation.serial);
+}
+    
+/**
+  * @brief  get stations socket type   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string serial number 
+  */
+sck_wiring_e  getStationSocketType(void)
+{
+  return(infoStation.wiring);
+}
+ 
+/**
+  * @brief  get energy meter type type   
+  *         
+  * @param  emEnum_e: internal or external
+  * 
+  * @retval energy_meter_e: enumerate for energy meter type 
+  */
+energy_meter_e  getStationEmType(emEnum_e emPos)
+{
+  EmeterType_en   locEmType;
+  energy_meter_e  emTypeVal;
+
+  locEmType = (EmeterType_en)get_emeter_type(emPos);
+  switch (locEmType)
+  {
+    case EMETER_TYPE_NULL:
+      emTypeVal = NONE;
+      break;
+    case EMETER_TAMP:           
+      emTypeVal = TA;
+      break;
+    case EMETER_MONO_PH_GAVAZZI:
+      emTypeVal = MONO_GAVAZZI;
+      break;
+    case EMETER_MONO_PH_ALGO2:
+      emTypeVal = MONO_ALGO2;
+      break;
+    case EMETER_THREE_PH_GAVAZZI:
+      emTypeVal = TRI_GAVAZZI;
+      break;
+    case EMETER_THREE_PH_ALGO2: 
+      emTypeVal = TRI_ALGO2;
+      break;
+    default:
+      emTypeVal = UNKNOW;
+      break;
+  }
+  return(emTypeVal);
+}
+    
+/**
+  * @brief  get stations internal Energy meter type   
+  *         
+  * @param  none
+  * 
+  * @retval energy_meter_e: code for internal energy meter 
+  */
+energy_meter_e  getStationEmTypeInt(void)
+{
+  return(infoStation.emTypeInt);
+}
+ 
+/**
+  * @brief  get stations external Energy meter type   
+  *         
+  * @param  none
+  * 
+  * @retval energy_meter_e: code for external energy meter 
+  */
+energy_meter_e  getStationEmTypeExt(void)
+{
+  return(infoStation.emTypeExt);
+}
+ 
+/**
+  * @brief  get stations working mode   
+  *         
+  * @param  none
+  * 
+  * @retval modeFun_e: code for working mode 
+  */
+modeFun_e  getStationModeWorking(void)
+{
+  return((modeFun_e)infoStation.evs_mode);
+}
+ 
+
+
+/**
+  * @brief  set stations external/internal Energy meter type   
+  *         
+  * @param  energy_meter_e: code for external energy meter
+  * @param  emEnum_e: external/internal
+  * 
+  * @retval  
+  */
+void  setStationEmType(energy_meter_e emType,  emEnum_e pos)
+{
+  if (pos == INTERNAL_EM)
+  {
+    infoStation.emTypeInt = emType;
+  }
+  else
+  {
+    infoStation.emTypeExt = emType;
+  }
+  if (infoStation.emTypeExt != UNKNOW)
+  {
+    switch (infoStation.emTypeExt)
+    {
+      case MONO_GAVAZZI:
+      case MONO_ALGO2:
+        if (infoStation.pmModeEn == PMNG_NULL_MODE)
+        {
+          infoStation.modePwr = MODE_MONO_PH_NO_PM;
+        }
+        else
+        {
+          infoStation.modePwr = MODE_MONO_PH_PM;
+        }
+        break;
+
+      default:
+        /* all triphase cases */
+        if (infoStation.pmModeEn == PMNG_NULL_MODE)
+        {
+          infoStation.modePwr = MODE_TRI_PH_NO_PM;
+        }
+        else
+        {
+          if (infoStation.pmUnbalEn == PMNG_UNBAL_OFF)
+          {
+            infoStation.modePwr = MODE_TRI_PH_PM_UMBAL;
+          }
+          else
+          {
+            infoStation.modePwr = MODE_TRI_PH_PM_BAL;
+          }
+        }
+        break;
+    }
+  }
+  else
+  {
+    switch(infoStation.emTypeInt)
+    {
+      case MONO_GAVAZZI:
+      case MONO_ALGO2:
+        infoStation.modePwr = MODE_MONO_PH_NO_PM;
+        break;
+      default:
+        infoStation.modePwr = MODE_TRI_PH_NO_PM;
+        break;
+    }
+  }
+  set_sck_pwr_mode(infoStation.modePwr);
+}
+
+/**
+  * @brief  get stations max current in traditional mode   
+  *         
+  * @param  none
+  * 
+  * @retval int32_t: current value 
+  */
+int32_t  getStationMaxCurrentT(void)
+{
+  return(infoStation.max_current);
+}
+ 
+/**
+  * @brief  get stations max current in semplificated mode   
+  *         
+  * @param  none
+  * 
+  * @retval int32_t: current value 
+  */
+int32_t  getStationMaxCurrentS(void)
+{
+  return(infoStation.max_currentSemp);
+}
+ 
+/**
+  * @brief  get stations power and working mode   
+  *         
+  * @param  none
+  * 
+  * @retval modePwr_e: code for power and working mode 
+  */
+modePwr_e  getStationPowerModeWorking(void)
+{
+  return(infoStation.modePwr);
+}
+ 
+/**
+  * @brief  get stations error code    
+  *         
+  * @param  none
+  * 
+  * @retval sck_error_e: state linked to the error 
+  */
+sck_error_e  getErrorStateCoding(void)
+{
+  word32_u    errStatus;
+  uint8_t     bitForRow[3];
+  uint8_t     numErr, row, bit, bitCnt, mask;
+  sck_error_e sckState;
+  
+  sckState = ERROR_NONE;
+  numErr = evs_error_get(errStatus.w32Byte, (uint8_t)1, (uint8_t)1);
+  if (numErr != 0)
+  {
+    bitForRow[0] = bitForRow[1] = 8;  // 8 errori, uno per ogni bit 
+    bitForRow[2] = 2;                 // il terzo byte ha solo due possibili errori 
+    for (row = 0; row < 3; row++)
+    {
+      bitCnt = bitForRow[row];
+      for (bit = 0, mask = 1; bit < bitCnt; bit++, mask = mask << 1)
+      {
+        if ((errStatus.w32Byte[row] & mask) != 0)
+        {
+          sckState = (sck_error_e)((uint8_t)sckState + row * 8 + bit + 1);  //from ERR_RCDM_ANOM0 to ERR_EMETER_EXT_CRL2
+          return(sckState);
+        }
+      }
+    }
+  }
+  return(sckState);
+}
+
+/**
+  * @brief  get stations backup emergency working mode   
+  *         
+  * @param  none
+  * 
+  * @retval batteryBackup_e: code for emergency mode 
+  */
+batteryBackup_e  getStationBatteryBackupMode(void)
+{
+  return(infoStation.batteryBackup);
+}
+ 
+/**
+  * @brief  get stations v230 monitor flag status   
+  *         
+  * @param  none
+  * 
+  * @retval statusFlag_e: ENABLED / DISABLED  
+  */
+statusFlag_e  getStationV230FlagStatus(void)
+{
+  return(infoStation.v230MonFlag);
+}
+ 
+/**
+  * @brief  get info on SBC presence    
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: 1 = true = SBC present  
+  */
+uint8_t sbcPresence (void)
+{
+  if (HAL_GPIO_ReadPin(SBC_CONN_GPIO_Port, SBC_CONN_Pin) == GPIO_PIN_SET)
+  {
+    return((uint8_t)1);
+  }
+  return((uint8_t)0); 
+}
+
+/*************** FUNZIONI PER SINAPSI   ******************************************************************************************/
+
+/**
+  * @brief  get potenza contrattuale    
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: potenza in watt  
+  */
+uint32_t getPotenzaContrattuale (void)
+{
+  return((uint32_t)0xFFFFFFFF);
+}
+
+/**
+  * @brief  get potenza disponibile    
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: potenza in watt  
+  */
+uint32_t getPotenzaDisponibile (void)
+{
+  return((uint32_t)0xFFFFFFFF);
+}
+
+/**
+  * @brief  get potenza prelevata    
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: potenza in watt  
+  */
+uint32_t getPotenzaPrelevata (void)
+{
+  return((uint32_t)0xFFFFFFFF);
+}
+
+/**
+  * @brief  get tempo al distacco    
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: secondi al distacco  
+  */
+uint32_t getTempoDistacco (void)
+{
+  return((uint32_t)0xFFFFFFFF);
+}
+
+/**
+  * @brief  abilitazione periodo di ricarica a Potenza maggiorata    
+  *         
+  * @param  uint32_t*: puntatore alla potenza in W massima ammessa Pmaxt
+  * @param  uint32_t*: puntatore alla durata in secondi per cui si può andare a Pmaxt
+  * 
+  * @retval uint8_t: 1 = ricarica a tempo a potenza maggiorata abilitata  
+  */
+uint8_t enaDurataPmaxT (uint32_t* pPmaxT, uint32_t* pDurataPmax)
+{
+  *pPmaxT = (uint32_t)0xFFFFFFFF;
+  *pDurataPmax = (uint32_t)0xFFFFFFFF;
+
+  return((uint8_t)0);
+}
+
+/**
+  * @brief  get sospenzione forzata    
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: 1 sospensione forzata 0=condizione normale  
+  */
+uint8_t enaSospensioneTempoDistacco (void)
+{
+  return((uint8_t)0);
+}
+
+/**
+  * @brief  get authorization   
+  *         
+  * @param  none
+  * 
+  * @retval sck_auth_t*: pointer authorization
+  */
+sck_auth_t*  getAuthorization(void)
+{
+  return((sck_auth_t*)&infoStation.auth);
+}
+
+/**
+  * @brief  salvataggio credenziali in memoria eeprom    
+  *         
+  * @param  char *user nome utente
+  *         char *pass password
+  * 
+  * @retval none  
+  */
+void saveAuthorization(char *user, char *pass)
+{
+  infoStation_t* pInfoStation;
+  
+  pInfoStation = (infoStation_t*)&infoStation;
+  
+  pInfoStation->auth.auth_state = AUTH_SETTED;
+  strcpy(pInfoStation->auth.user, user);
+  strcpy(pInfoStation->auth.pass, pass);
+  
+  /* save on EEPROM */
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)pInfoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  get schedulation   
+  *         
+  * @param  none
+  * 
+  * @retval sck_auth_t*: pointer authorization
+  */
+sck_schedule_t * getSchedulation(void)
+{
+  return (sck_schedule_t*)&infoStation.scheds;
+}
+
+/**
+  * @brief  salvataggio schedulazione in memoria eeprom    
+  *         
+  * @param  sck_schedule_t *schedulation array di schedulazioni
+  * 
+  * @retval none  
+  */
+void saveSchedulation(sck_schedule_t *schedulation)
+{
+  infoStation_t* pInfoStation;
+ 
+  pInfoStation = (infoStation_t*)&infoStation;
+  
+  for(int i = 0; i < MAX_SCHEDS; i++)
+  {
+    pInfoStation->scheds[i].days = schedulation[i].days;
+    pInfoStation->scheds[i].id = i;
+    pInfoStation->scheds[i].start_hour = schedulation[i].start_hour;
+    pInfoStation->scheds[i].start_min = schedulation[i].start_min;
+    pInfoStation->scheds[i].end_hour = schedulation[i].end_hour;
+    pInfoStation->scheds[i].end_min = schedulation[i].end_min;
+    pInfoStation->scheds[i].power = schedulation[i].power;
+    pInfoStation->scheds[i].enable = schedulation[i].enable;
+  }
+  
+  /* save on EEPROM */
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)pInfoStation, sizeof(infoStation_t));
+}
+
+
+/**
+  * @brief  get sospenzione forzata    
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: 1 sospensione forzata 0=condizione normale  
+  */
+void disableTimV230 (void)
+{
+  /* stop V230ac watch dog */
+  HAL_TIM_IC_Stop_IT(&htimV230, TIM_IT_CC3);
+  HAL_TIM_PWM_DeInit(&htimV230);
+}
+
+
+/**
+* @brief  set the new state for hardware configuration
+*  
+* @param [in ]  uint32_t: flag status
+* @param [in ]  uint32_t: flag mask
+* @retval None
+*/
+void setFlagHwInfo(uint32_t statusIn, uint32_t mask)
+{
+  uint32_t status;
+  uint32_t  val;
+
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO);
+
+  status = val & (~mask); 
+  status |= statusIn;
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO, status);
+}
+
+/**
+* @brief  get the info on lcd hw management type
+*  
+* @param [in ]  none
+* 
+* @retval uint32_t: type of lcd management 
+*/
+uint32_t getLcdHwMng(void)
+{
+  uint32_t status;
+  uint32_t  val;
+
+  status = LCD_MODE_FULL_BIDIR;
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO);
+
+  if (((val & MASK_FOR_LCD_MODE) & KEY_FOR_LCD_MODE) == KEY_FOR_LCD_MODE)
+  {
+    /* info on RTC backup is valid */
+    if ((val & LCD_MODE_OPEN_DRAIN) == LCD_MODE_OPEN_DRAIN)
+    {
+      status = LCD_MODE_OPEN_DRAIN;
+    }
+  }
+  return(status);
+}
+
+/**
+* @brief  get the info on rs485 address validity
+*  
+* @param [in ]  none
+* 
+* @retval uint32_t: 0 if no address is present  
+*/
+uint32_t getAddrSetting(void)
+{
+  uint32_t status;
+  uint32_t  val;
+
+  status = 0;
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO);
+
+  if (((val & MASK_FOR_RS485_ADD_SET) & KEY_FOR_RS485_ADD) == KEY_FOR_RS485_ADD)
+  {
+    /* info on RTC backup is valid */
+    if ((val & RS485_ADD_SET) == RS485_ADD_SET)
+    {
+      status = RS485_ADD_SET;
+    }
+  }
+  return(status);
+}
+
+/**
+*
+* @brief        set PEN signal filtering   
+*
+* @param [in]   statusFlag_e: status  ENABLED / DISABLED
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void  setPenFilteringStatus (statusFlag_e penSt)
+{
+  filteringPEN = penSt;
+}
+
+/**
+*
+* @brief        send a message to ioExp manager to start with polling on pEN pin   
+*
+* @param [in]   none
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void startIoExpPenFiltering (void)
+{
+  ioMngMsg_st   ioExpMsg;
+
+  /* attivazione filtering on PEN pin   */
+  ioExpMsg.taskEv = IO_EVENT_PEN_FILTERING;
+  ioExpMsg.outRegId = NUM_OUT_IOEXP;
+  ioExpMsg.val = 0;
+  xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, portMAX_DELAY);
+}
+
+/**
+* @brief  set the new state for Power down pin 
+*  
+* @param [in ]  statusFlag_e: ENABLED / DISABLED 
+* @retval None
+*/
+void powerDownPin(statusFlag_e statusIn)
+{
+  GPIO_PinState       pinSt;
+  RCC_OscInitTypeDef  RCC_OscInitStruct = {0};
+
+  pinSt = GPIO_PIN_RESET;
+  if(statusIn == DISABLED)
+  {
+    pinSt = GPIO_PIN_SET;
+    /** Initializes the CPU, AHB and APB busses clocks 
+    */
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+    RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+    RCC_OscInitStruct.HSIState = RCC_HSI_OFF;
+    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+    RCC_OscInitStruct.PLL.PLLM = 25; // 50MHz / 25 = 2MHz
+    RCC_OscInitStruct.PLL.PLLN = 216;
+    RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+    RCC_OscInitStruct.PLL.PLLQ = 9;
+  }
+  else
+  {
+    /** Initializes the CPU, AHB and APB busses clocks 
+    */
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+    RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+    RCC_OscInitStruct.HSIState = RCC_CR_HSION;
+    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+    RCC_OscInitStruct.PLL.PLLM = 8; // 16MHz / 8 = 2MHz
+    RCC_OscInitStruct.PLL.PLLN = 216;
+    RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+    RCC_OscInitStruct.PLL.PLLQ = 9;
+  }
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** SBC and router OFF  OSC OFF **/
+  HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, pinSt);
+}
+
+
+/**
+*
+* @brief        starting from local time save date and time in GMT in according to time zone and DST   
+*
+* @param [in]   (struct DataAndTime_t*: pointer to local date and time structure 
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void setDateTimeWithTimeZone (struct DataAndTime_t* pLocDateTime)
+{
+  struct tm             structUnixTime = {0} ;
+  uint32_t              currentUnixTime;
+  char                  timeZone;
+
+  structUnixTime.tm_sec  = (int)pLocDateTime->Second;
+  structUnixTime.tm_min  = (int)pLocDateTime->Minute;
+  structUnixTime.tm_hour = (int)pLocDateTime->Hour;
+  structUnixTime.tm_mday = (int)pLocDateTime->Day;
+  structUnixTime.tm_mon  = (int)pLocDateTime->Month - 1;
+  structUnixTime.tm_year = (int)pLocDateTime->Year - 1900;
+  currentUnixTime = (uint32_t)mktime((struct tm *)&structUnixTime); 
+
+  /* get time zone         */
+  eeprom_param_get(TIME_ZONE_EADD, (uint8_t *)timeZone, 1);
+  /* get abilitazione ora legale      */
+  eeprom_param_get(DST_EADD, (uint8_t *)&pLocDateTime->dstFlag, 1);
+
+  currentUnixTime = (uint32_t)((int32_t)currentUnixTime + (int32_t)timeZone * (int32_t)3600);
+
+  if ((pLocDateTime->dstFlag != (char)0) && (structUnixTime.tm_isdst > (int)0))
+  {
+    /* ora legale abilitata ed attiva */
+    currentUnixTime -= (uint32_t)3600;
+  }
+  ptm = gmtime (&currentUnixTime); 
+  pLocDateTime->.Year    = ptm->tm_year + 1900; 
+  pLocDateTime->Month   = ptm->tm_mon + 1;
+  pLocDateTime->Day     = ptm->tm_mday;
+  pLocDateTime->Hour    = ptm->tm_hour;
+  pLocDateTime->Minute  = ptm->tm_min;
+  pLocDateTime->Second  = ptm->tm_sec;
+  pLocDateTime->DayWeek = ptm->tm_wday;  // 0 =sunday 6= Saturday 
+  DateTimeSet(&locDateTime);
+  // Aggiorno data e ora nella struttura globale 
+  UpdateGlobalDT();
+  data8u = (uint8_t)1;
+  eeprom_param_set(RTC_VALID_EADD, &data8u, 1);
+}
+
+
+/*************** FUNZIONI PER BLUETHOOT   ******************************************************************************************/
+
+
+
+
+    /*************** END OF FILE ******************************************************************************************/
+

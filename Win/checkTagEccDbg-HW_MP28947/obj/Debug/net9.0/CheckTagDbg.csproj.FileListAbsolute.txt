@@ -1,0 +1,14 @@
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\bin\Debug\net9.0\CheckTagDbg.exe
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\bin\Debug\net9.0\CheckTagDbg.deps.json
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\bin\Debug\net9.0\CheckTagDbg.runtimeconfig.json
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\bin\Debug\net9.0\CheckTagDbg.dll
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\bin\Debug\net9.0\CheckTagDbg.pdb
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\obj\Debug\net9.0\CheckTagDbg.GeneratedMSBuildEditorConfig.editorconfig
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\obj\Debug\net9.0\CheckTagDbg.AssemblyInfoInputs.cache
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\obj\Debug\net9.0\CheckTagDbg.AssemblyInfo.cs
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\obj\Debug\net9.0\CheckTagDbg.csproj.CoreCompileInputs.cache
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\obj\Debug\net9.0\CheckTagDbg.dll
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\obj\Debug\net9.0\refint\CheckTagDbg.dll
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\obj\Debug\net9.0\CheckTagDbg.pdb
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\obj\Debug\net9.0\CheckTagDbg.genruntimeconfig.cache
+C:\project\scame\SCU_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEcc\obj\Debug\net9.0\ref\CheckTagDbg.dll

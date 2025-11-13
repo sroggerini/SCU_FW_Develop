@@ -1,0 +1,166 @@
+/**
+  ******************************************************************************
+  * @file    metroTask.h
+  * @author  AMG/IPC Application Team
+  * @brief   This file contains all the functions prototypes for the metroTask
+  @verbatim
+  @endverbatim
+
+  ******************************************************************************
+  * @attention
+  *
+  * <h2><center>&copy; COPYRIGHT(c) 2018 STMicroelectronics</center></h2>
+  *
+  * Redistribution and use in source and binary forms, with or without modification,
+  * are permitted provided that the following conditions are met:
+  *   1. Redistributions of source code must retain the above copyright notice,
+  *      this list of conditions and the following disclaimer.
+  *   2. Redistributions in binary form must reproduce the above copyright notice,
+  *      this list of conditions and the following disclaimer in the documentation
+  *      and/or other materials provided with the distribution.
+  *   3. Neither the name of STMicroelectronics nor the names of its contributors
+  *      may be used to endorse or promote products derived from this software
+  *      without specific prior written permission.
+  *
+  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+  * AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+  * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+  * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+  * FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+  * DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+  * SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+  * CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  *
+  ******************************************************************************
+  */
+
+#ifndef METROTASK_H
+#define METROTASK_H
+
+/*******************************************************************************
+* INCLUDE FILES:
+*******************************************************************************/
+#include "stpm_metrology.h"
+#include "metrology.h"
+#include "metroTask.h"
+#include "handler_metrology.h"
+#include "nvram.h"
+
+
+/** @addtogroup LEGAL
+  * @{
+  */
+
+/*******************************************************************************
+* CONSTANTS & MACROS:
+*******************************************************************************/
+
+#define METRO_PHASE_1                      0
+#define METRO_PHASE_2                      1
+#define METRO_PHASE_3                      2
+#define METRO_MAX_PHASES                   3
+                                 
+#define METRO_DATA_ACTIVE                  0
+#define METRO_DATA_REACTIVE                1
+#define METRO_DATA_APPARENT                2
+
+#define NVRAM_SIZE_LEG                     512
+
+#define METRO_TIMER                        (1) // 10ms
+
+#define NBR_OF_SAMPLES_FOR_CALIB           50
+
+#define CURRENT_ANOMALY_VAL                1000   /* Current value read from EM when there is an anomaly in functioning */
+#define MAX_ERRORS_FOR_ANOMALY             5
+
+/*******************************************************************************
+* TYPES:
+*******************************************************************************/
+
+typedef union
+{
+  struct
+  {
+    uint8_t _ON        :1;   /*!< bit:  0  Calibration ON */
+    uint8_t Start      :1;   /*!< bit:  1  Calibration Running */
+  } bit;  
+  
+  uint8_t Value;             
+  
+} CalibSR_t;
+
+typedef struct{
+  
+  uint32_t      Vrms_Ref;       /* RMS voltage used as reference from Algo 2 (valid for all the phases) */
+  uint32_t      Irms_Ref;       /* RMS current used as reference from Algo 2 (valid for all the phases) */
+  CalibSR_t     Flags;          /* Status flags */
+} calib_t;
+
+typedef struct
+{
+  uint8_t       metroTimerActive;
+  uint8_t       nbPhase;
+  uint16_t      metroInactiveTime;
+  int32_t       powerActive;
+  int32_t       powerReactive;
+  int32_t       powerApparent;
+  int32_t       energyActive;
+  int32_t       energyReactive;
+  int32_t       energyApparent;
+  int32_t       chanPower[3][METRO_MAX_PHASES];
+  uint32_t      rawEnergy[3][METRO_MAX_PHASES];
+  int32_t       rawEnergyExt[3][METRO_MAX_PHASES];
+  uint32_t      rmsvoltage[METRO_MAX_PHASES];
+  uint32_t      rmscurrent[METRO_MAX_PHASES];
+  nvmLeg_t      *nvm;
+  calib_t       Calib;
+} metroData_t;
+
+typedef struct
+{
+  union
+  {
+    struct
+    {
+      uint8_t _at_1Hz         :1;   /*!< bit:  0  Blink at 1Hz */
+      uint8_t _at_2Hz         :1;   /*!< bit:  1  Blink at 2Hz */
+      uint8_t _at_4Hz         :1;   /*!< bit:  2  Blink at 4Hz */
+    } Blink;  
+    
+    uint8_t BlinkMask;             
+  }; 
+  
+  uint16_t PulseTime;
+  
+} LED_t;
+
+/*******************************************************************************
+* GLOBAL VARIABLES:
+*******************************************************************************/
+extern metroData_t metroData;
+
+/*******************************************************************************
+* FUNCTIONS:
+*******************************************************************************/
+void METRO_Init();
+void METRO_Init_p2();
+void METRO_Task();
+void METRO_UpdateData();
+void METRO_Latch_Measures();
+void METRO_Get_Measures();
+void METRO_Set_TA_Type();
+
+EM_CurrSens_type_e EM_Get_TA_Type (uint8_t nPhase);
+
+METRO_STPM_LINK_IRQ_Status_Type_t METRO_CheckStatus(); 
+
+uint8_t METRO_Calibrate(void);
+/**
+  * @}
+  */
+#endif /* METROTASK_H */
+
+/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/
+

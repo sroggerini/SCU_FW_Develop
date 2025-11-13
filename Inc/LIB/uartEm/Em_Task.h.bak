@@ -1,0 +1,748 @@
+/**
+* @file        Em_Task.h
+*
+* @brief       Uart Energy meter  protocol - Definition -
+*
+* @author      Nick
+*
+* @riskClass   C
+*
+* @moduleID
+*
+* @vcsInfo
+*     $Id: Em_Task.h 751 2025-05-12 14:43:24Z stefano $
+*
+*     $Revision: 751 $
+*
+*     $Author: stefano $
+*
+*     $Date: 2025-05-12 16:43:24 +0200 (lun, 12 mag 2025) $
+*
+*
+* @copyright
+*       Copyright (C) 2016 SCAME S.p.A. All rights reserved. This file is copyrighted and the property of Aesys
+*       S.p.A.. It contains confidential and proprietary information. Any copies of this file (in whole or in part)
+*       made by any method must also include a copy of this legend. Developed by:  SCAME S.p.A.
+***********************************************************************************************************************/
+
+#ifndef __EM_TASK_H 
+#define __EM_TASK_H
+
+/************************************************************
+ * Include
+ ************************************************************/
+#include <stdint.h>
+#include <stdlib.h>
+#ifdef GD32F4xx
+#include "stm32f4xx_hal.h"
+#else
+#include "stm32h5xx_hal.h"
+#endif
+#include "Em_uart.h"
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**           LOCAL MACROS, TYPEDEF, STRUCTURE, ENUM                         **
+**                                                                          **
+******************************************************************************
+*/
+#define   MIN_SETUP_EM_ANSWER_TIME      ((uint32_t)5)
+#define   MAX_SETUP_EM_ANSWER_TIME      ((uint32_t)30)
+#define   MIDDLE_SETUP_EM_ANSWER_TIME   ((uint32_t)((MIN_SETUP_ANSWER_TIME + MAX_SETUP_ANSWER_TIME)/2))
+
+#define   DEFAULT_STATUS_LEN            ((uint16_t)6)
+
+#define   ALGO2_SIGN_BIT_MASK           ((uint64_t)0x0000000000000080)
+
+#define   EM_ALGO_EXT_SIM               ((uint16_t)0x8008)                /* EM ALGO Extern Simulated from PC  */ 
+#define   EM_BIT_MASK                   ((uint16_t)0x7FFF)                /* bit15 is for Extern Simulated from PC  */ 
+
+/* Dimensione massimo campo dati del messaggio   */
+#define EM_DATA_MAX_LEN                 ((uint16_t)128)
+#define EM_MSG_MAX_LEN                  ((uint16_t)(EM_DATA_MAX_LEN + (uint16_t)8))
+#define DMA_RX_EM_BUFFER_SIZE           EM_MSG_MAX_LEN
+
+#define MAX_NUM_RETRY_DISCOVERY         ((uint16_t)1)    /* maxmim nun consecutive fail at discovery time */
+#define MAX_NUM_RETRY                   ((uint16_t)10)    /* maxmim nun consecutive fail in working mode   */
+
+/* define error code for energy meters */
+typedef enum
+{
+  EM_NO_ERROR     = 0,            /* no error                          */ 
+  EM_REG_UNDEF,                   /* Register undefined                */ 
+  EM_WRONG_ANSWER,                /* wrong answer                      */ 
+  EM_NO_ANSWER                    /* EM not answering                  */ 
+} emError_e;
+ 
+#define LAST_ITEM                       ((uint16_t)0xFFFF)
+#define MAX_NUM_ITEMS                   ((uint16_t)12)    
+
+/* define EM type  */
+typedef enum
+{
+  EM_ALGO     = 0,                /* EM Gavazzi identifier             */ 
+  EM_GAVAZZI,                     /* EM Algodue identifier             */ 
+  EM_LOVATO,                      /* EM Lovato identifier              */
+  EM_SCAME,                       /* EM Scame identifier               */  
+  EM_IOM2G,                       /* EM SINAPSI identifier             */  
+#ifdef HW_MP28947
+  EM_PA775,                      /* EM internal as a plugin board     */
+#endif  
+  EM_UNKNOW,                      /* EM unknow                         */ 
+  LAST_EM = EM_UNKNOW,            /* Last index reg                    */ 
+} emType_e;
+
+/* define EM model  */
+typedef enum
+{
+  EM_MONO_PH = 1,                 /* EM mono-phase AlgoDue identifier     */ 
+  EM_THREE_PH = 3,                /* EM 3-phase AlgoDue identifier        */ 
+} emPhase_e;
+
+/* define events for the task  */
+typedef enum
+{
+  EVT_TIMEOUT     = 0,            /* timeout event (polling)              */ 
+  EVT_ASK_REG,                    /* Wait for detecting EM                */ 
+  EVT_START_ENRG_ACT_SESS_MEAS,   /* Start measure session active energy  */ 
+  EVT_STOP_ENRG_ACT_SESS_MEAS,    /* Start measure session active energy  */ 
+  EVT_STOP_FOR_V230_KO,           /* Stop EM for 230Vac off               */ 
+  EVT_START_FOR_V230_OK,          /* Start when 230Vac goes ON            */ 
+  EVT_NUM_EM                      /* notify the EM number                 */ 
+} emEvents_e;
+
+
+/* define EM index registers  */
+typedef enum
+{
+  EM_SN_INDEX     = 0,          /* identifier for serial number             */ 
+  EM_MODEL_INDEX,               /* identifier for model                     */ 
+  EM_BR_INDEX,                  /* identifier baude rate                    */ 
+  EM_REG_IDX_NUM                /* Last index reg                           */ 
+} emRegIdx_e;
+
+/* define EM reading registers  */
+/* La mappa di MODBUS di SINAPSI occupa 52 Word Dato che SINAPSI è solo energy meter esterno uso     */
+/* la zona dei registri interni per memorizzare la mappa , e riporto negli EXT quello che serve per */
+/* il power management (pero ora solo EM_EXT_ACTIVE_POWER) Adesso non c'è sovrapposizione della     */ 
+/* mappa SINAPSI col parametro EM_EXT_ACTIVE_POWER (13  x 8 = 104 byte = 52 word = 52) .            */
+/*  NON si possono aggiungere altri parametri                                                       */
+typedef enum
+{
+  EM_SYS_VOLTAGE     = 0,       /*  0 - system voltage (monofase)            */ 
+  EM_SYS_PH1_VOLTAGE,           /*  1 - system voltage (trifase)             */ 
+  EM_CURRENT_L1,                /*  2 - Corrente fase 1                      */ 
+  EM_CURRENT_L2,                /*  3 - Corrente fase 2                      */ 
+  EM_CURRENT_L3,                /*  4 - Corrente fase 3                      */ 
+  EM_CURRENT_L,                 /*  5 - Corrente monofase                    */ 
+  EM_COS_PHI,                   /*  6 - cos Phi  (monofase)                  */ 
+  EM_COS_PH1_PHI,               /*  7 - cos Phi  (trifase)                   */ 
+  EM_ACTIVE_POWER,              /*  8 - active power                         */ 
+  EM_REACTIVE_POWER,            /*  9 - reactive power                       */ 
+  EM_TOT_ACTIVE_ENERGY,         /* 10 - active energy                        */ 
+  EM_TOT_REACT_ENERGY,          /* 11 - reactive energy                      */ 
+  EM_SES_ACTIVE_ENERGY,         /* 12 - active energy in the current session */ 
+  EM_EXT_ACTIVE_POWER,          /* 13 - active power  external em            */ 
+  EM_EXT_L1_ACTIVE_POWER,       /* 14 - L1 active power external em          */ 
+  EM_EXT_L2_ACTIVE_POWER,       /* 15 - L2 active power external em          */ 
+  EM_EXT_L3_ACTIVE_POWER,       /* 16 - L3 active power external em          */ 
+  EM_EXT_SIGN_POWER,            /* 17 - */ 
+  EM_READ_REG_NUM               /* 18 - Last index em internal read reg      */ 
+} emReadReg_e;
+
+typedef enum
+{
+  IOM2G_INFO1_R_ID     = (uint8_t)EM_SYS_VOLTAGE,         /*  SINAPSI INFO 1 READ MODBUS MAP info ID             */ 
+  IOM2G_INFO1_W_ID     = (uint8_t)EM_SYS_PH1_VOLTAGE,     /*  SINAPSI INFO 1 WRITE MODBUS MAP info ID             */ 
+  IOM2G_INFO2_R_ID     = (uint8_t)EM_CURRENT_L1,          /*  SINAPSI INFO 1 READ MODBUS MAP info ID             */ 
+  IOM2G_INFO3_R_ID     = (uint8_t)EM_CURRENT_L2,          /*  SINAPSI INFO 1 READ MODBUS MAP info ID             */ 
+  IOM2G_INFO4_R_ID     = (uint8_t)EM_CURRENT_L3,          /*  SINAPSI INFO 1 READ MODBUS MAP info ID             */ 
+  IOM2G_INFO5_R_ID     = (uint8_t)EM_CURRENT_L,           /*  SINAPSI INFO 1 READ MODBUS MAP info ID             */ 
+  IOM2G_READ_REG_NUM                                      /* 6 - Last index IOM2G read reg                        */ 
+} iom2gReadReg_e;
+
+/* define SINAPSI CHAIN2 STATUs  */
+typedef enum
+{
+  CHAIN2_BAD     = 0,          /* identifier for chain2 status working     */ 
+  CHAIN2_GOOD,                 /* identifier for chain2 status fail        */ 
+  CHAIN2_UNDEF,                /* identifier for chain2 status undefined   */ 
+} chain2Status_e;
+
+/* define SINAPSI PLC STATUs  */
+typedef enum
+{
+  CHAIN2_PLC_IDLE     = 0,          /* plc chain2 status idle     */ 
+  CHAIN2_PLC_ERROR,                 /* plc chain2 status error    */ 
+  CHAIN2_PLC_INIT,                  /* plc chain2 status init     */ 
+  CHAIN2_PLC_OK,                    /* plc chain2 status OK     */ 
+} chain2PlcStatus_e;
+
+
+
+
+#define NULL_REG                    ((uint16_t)0x0000)
+#define NULL_REG_SIZE               ((uint16_t)0x0000)
+
+/* Define for AlgoDue/SCAME energy meter registers */
+/* NOTE: the acronim "_SYS_" means TOTAL           */
+
+#define EC_AD_SN_REG                ((uint16_t)0x0500)        /* Request to read Serial Number     */
+#define EC_AD_MODEL_REG             ((uint16_t)0x0505)        /* Request to read model             */
+#define EC_AD_BAUDERATE_REG         ((uint16_t)0x0515)        /* Request to change baude rate      */
+#define EC_FW_VERS_MAJOR_REG        ((uint16_t)0x0516)        /* FW version MAJOR */
+#define EC_FW_VERS_MINOR_SUB_REG    ((uint16_t)0x0517)        /* FW version MINOR and SUB */
+
+#define AD_SYS_VOLT_1PH_REG         ((uint16_t)0x000C)        /* tensione monofase                         */
+#define AD_SYS_VOLT_3PH_REG         ((uint16_t)0x0000)        /* tensione trifase                          */
+#define AD_SYS_VOLT_SIZE            ((uint16_t)0x0003)        /* size, in word, for voltage                */
+#define AD_SYS_CURR_REG             ((uint16_t)0x0016)        /* corrente monofase                         */
+#define AD_SYS_CURR_L1_REG          ((uint16_t)0x000E)        /* corrente fase 1                           */
+#define AD_SYS_CURR_L2_REG          ((uint16_t)0x0010)        /* corrente fase 1                           */
+#define AD_SYS_CURR_L3_REG          ((uint16_t)0x0012)        /* corrente fase 1                           */
+#define AD_SYS_CURR_SIZE            ((uint16_t)0x0003)        /* size, in word, for current                */
+#define AD_COS_PHI_1PH_REG          ((uint16_t)0x001B)        /* Request to read system cos PHI            */
+#define AD_COS_PHI_3PH_REG          ((uint16_t)0x001B)        /* Request to read system cos PHI trifase    */
+#define AD_COS_PHI_SIZE             ((uint16_t)0x0001)        /* size, in word, for cos Phi                */
+#define AD_ACT_PWR_REG              ((uint16_t)0x0025)        /* Request to read active power              */
+#define AD_ACT_PWR_SIZE             ((uint16_t)0x0004)        /* size, in word, for active power           */
+#define AD_RACT_PWR_REG             ((uint16_t)0x003D)        /* Request to read reactive power            */
+#define AD_RACT_PWR_SIZE            ((uint16_t)0x0004)        /* size, in word, for reactive power         */
+#define AD_ACT_ENRG_REG             ((uint16_t)0x0109)        /* Request to read active energy             */
+#define AD_ACT_ENRG_SIZE            ((uint16_t)0x0004)        /* size, in word, for active energy          */
+#define AD_RACT_ENRG_REG            ((uint16_t)0x0151)        /* Request to read reactive energy           */
+#define AD_RACT_ENRG_SIZE           ((uint16_t)0x0004)        /* size, in word, for reactive energy        */
+#define AD_SACT_ENRG_REG            ((uint16_t)0x0400)        /* Request to read session active energy     */
+#define AD_SACT_ENRG_SIZE           ((uint16_t)0x0004)        /* size, in word, for session active energy  */
+#define AD_EXT_ACT_PWR_REG          ((uint16_t)0x0025)        /* Request active power on ext em            */
+#define AD_EXT_L1_ACT_PWR_REG       ((uint16_t)0x001C)        /* Request to read active power on L1 phase  */
+#define AD_EXT_L2_ACT_PWR_REG       ((uint16_t)0x001F)        /* Request to read active power on L2 phase  */
+#define AD_EXT_L3_ACT_PWR_REG       ((uint16_t)0x0022)        /* Request to read active power on L3 phase  */
+
+/* define for Carlo Gavazzi energy meter registers */
+#define EC_CG_SN_REG            ((uint16_t)0x5000)            /* Request to read Serial Number     */
+#define EC_CG_MODEL_REG         ((uint16_t)0x000B)            /* Request to read model             */
+#define EC_CG_BAUDERATE_REG     ((uint16_t)0x2001)            /* Request to change baude rate      */
+ 
+#define EC_CG_BK1_REG               ((uint16_t)0x0100)        /* Request to read block 1     */
+#define EC_CG_BK1_SIZE              ((uint16_t)0x000E)        /* size, in word, for block 1  */
+#define EC_CG_BK2_REG               ((uint16_t)0x0112)        /* Request to read block 2     */
+#define EC_CG_BK2_SIZE              ((uint16_t)0x0002)        /* size, in word, for block 2  */
+#define EC_CG_BK3_REG               ((uint16_t)0x0114)        /* Request to read block 3     */
+#define EC_CG_BK3_SIZE              ((uint16_t)0x0002)        /* size, in word, for block 3  */
+#define EC_CG_BK4_REG               ((uint16_t)0x0148)        /* Request to read block 4     */
+#define EC_CG_BK4_SIZE              ((uint16_t)0x0002)        /* size, in word, for block 4  */
+#define EC_CG_EXT_ACT_PWR_REG       ((uint16_t)0x0106)        /* Request active power on ext em     */
+#define EC_CG_EXT_ACT_PWR_SIZE      ((uint16_t)0x0002)        /* size, in word, ext active power    */
+
+#define CG_SYS_VOLT_1PH_REG         ((uint16_t)0x0102)        /* tensione monofase                        */
+#define CG_SYS_VOLT_3PH_REG         ((uint16_t)0x0102)        /* tensione trifase                        */
+#define CG_SYS_VOLT_SIZE            ((uint16_t)0x0002)        /* size, in word, for voltage               */
+#define CG_SYS_CURR_REG             ((uint16_t)0x0100)        /* corrente monofase                        */
+#define CG_SYS_CURR_L1_REG          ((uint16_t)0x0122)        /* corrente fase 1                          */
+#define CG_SYS_CURR_L2_REG          ((uint16_t)0x0130)        /* corrente fase 1                          */
+#define CG_SYS_CURR_L3_REG          ((uint16_t)0x013E)        /* corrente fase 1                          */
+#define CG_SYS_CURR_SIZE            ((uint16_t)0x0002)        /* size, in word, for current               */
+#define CG_COS_PHI_1PH_REG          ((uint16_t)0x010C)        /* Request to read system cos PHI mono       */
+#define CG_COS_PHI_3PH_REG          ((uint16_t)0x012A)        /* Request to read system cos PHI trifase    */
+#define CG_COS_PHI_SIZE             ((uint16_t)0x0002)        /* size, in word, for cos Phi                */
+#define CG_ACT_PWR_REG              ((uint16_t)0x0106)        /* Request to read active power              */
+#define CG_ACT_PWR_SIZE             ((uint16_t)0x0002)        /* size, in word, for active power           */
+#define CG_RACT_PWR_REG             ((uint16_t)0x010A)        /* Request to read reactive power            */
+#define CG_RACT_PWR_SIZE            ((uint16_t)0x0002)        /* size, in word, for reactive power         */
+#define CG_ACT_ENRG_REG             ((uint16_t)0x0112)        /* Request to read active energy             */
+#define CG_ACT_ENRG_SIZE            ((uint16_t)0x0002)        /* size, in word, for active energy          */
+#define CG_RACT_ENRG_REG            ((uint16_t)0x0114)        /* Request to read reactive energy           */
+#define CG_RACT_ENRG_SIZE           ((uint16_t)0x0002)        /* size, in word, for reactive energy        */
+#define CG_SACT_ENRG_REG            ((uint16_t)0x0148)        /* Request to read session active energy     */
+#define CG_SACT_ENRG_SIZE           ((uint16_t)0x0002)        /* size, in word, for session active energy  */
+#define CG_EXT_ACT_PWR_REG          ((uint16_t)0x0106)        /* Request active power on ext em            */
+#define CG_EXT_L1_ACT_PWR_REG       ((uint16_t)0x0012)        /* Request to read active power on L1 phase  */
+#define CG_EXT_L2_ACT_PWR_REG       ((uint16_t)0x0014)        /* Request to read active power on L2 phase  */
+#define CG_EXT_L3_ACT_PWR_REG       ((uint16_t)0x0016)        /* Request to read active power on L3 phase  */
+                               
+/* Modbus address for Lovato DMED111 (Monophase) - DMED121 (Monophase) - DMED301 (Threephase) */
+/* NOTE: The address of the registers defined below doesn't match with the ones present in the document I315IGB06_16.doc. 
+   This is because they strictly follow the standard Modbus and so such values must be incremented by 1. */
+
+#define EC_LV_SN_REG                ((uint16_t)0x1FEF)        /* Serial number register on DMED121 - DMED301 */
+#define EC_LV_BAUDERATE_REG         ((uint16_t)0x5301)        /* Serial speed setting */
+
+#define LV_PH_VOLTAGE_MONO_REG      ((uint16_t)0x0001)        /* Phase voltage for Monophase */
+#define LV_PH_VOLTAGE_THREE_REG     ((uint16_t)0x0001)        /* Phase voltage for Threephase */
+#define LV_VOLT_L1_TO_L2_REG        ((uint16_t)0x000D)        /* Concateneted voltage for L1 - L2 */
+#define LV_VOLTAGE_REG_SIZE         ((uint16_t)0x0002)        /* Voltage register size */
+#define LV_CURRENT_L1_REG           ((uint16_t)0x0007)        /* Current for L1 */
+#define LV_CURRENT_L2_REG           ((uint16_t)0x0009)        /* Current for L2 */
+#define LV_CURRENT_L3_REG           ((uint16_t)0x000B)        /* Current for L3 */
+#define LV_SYS_CURRENT_REG          ((uint16_t)0x0007)        /* System current (means TOTAL but the isn't a register for that purpose) */
+#define LV_CURRENT_REG_SIZE         ((uint16_t)0x0002)        /* Current register size */
+#define LV_COS_PHI_1P_REG           ((uint16_t)0x0025)        /* Cosphi for Monophase (Equiv. Power factor) */
+#define LV_COS_PHI_3P_REG           ((uint16_t)0x003F)        /* Cosphi for Threephase (Equiv. Power factor) */
+#define LV_COS_PHI_REG_SIZE         ((uint16_t)0x0002)        /* Cosphi register size */
+#define LV_SYS_ACT_PWR_THREE_REG    ((uint16_t)0x0039)        /* System Active Power (Equiv. Active power) in Lovato three-phase meter D301      */
+#define LV_SYS_ACT_PWR_MONO_REG     ((uint16_t)0x0013)        /* System Active Power (Equiv. Active power) in Lovato mono-phase meter D111 e D121*/
+#define LV_ACT_PWR_REG_SIZE         ((uint16_t)0x0002)        /* Active power register size */
+#define LV_SYS_REACT_PWR_REG        ((uint16_t)0x003B)        /* System Reactive power (Equiv. Reactive power) */
+#define LV_REACT_PWR_REG_SIZE       ((uint16_t)0x0002)        /* Reactive power register size */
+#define LV_TOT_ACT_ENERGY_REG       ((uint16_t)0x1A1F)        /* Total Active energy */
+#define LV_TOT_REACT_ENERGY_REG     ((uint16_t)0x1A23)        /* Total Reactive energy */
+#define LV_REACT_ENERGY_REG_SIZE    ((uint16_t)0x0004)        /* Reactive energy register size */
+#define LV_PART_ACT_ENERGY_REG      ((uint16_t)0x1A29)        /* Partial Active Power Energy */
+#define LV_ACT_ENERGY_REG_SIZE      ((uint16_t)0x0002)        /* Active energy register size */
+#define LV_ACT_PWR_L1_REG           ((uint16_t)0x0013)        /* Active power for L1 */
+#define LV_ACT_PWR_L2_REG           ((uint16_t)0x0015)        /* Active power for L2 */
+#define LV_ACT_PWR_L3_REG           ((uint16_t)0x0017)        /* Active power for L3 */
+#define LV_ACT_PWR_SIGN_REG         ((uint16_t)0x2200)        /* Sign for Active power */
+#define LV_ACT_PWR_SIGN_SIZE        ((uint16_t)0x0002)        /* Size for Sign for Active power */
+#define LV_ACT_PWR_SIGN_MASK        ((uint64_t)0x0200)        /* Mask to select Sign for Active power */
+#define LV_SYS_ACT_PWR_3PH_REG      ((uint16_t)0x0039)        /* System Active Power (Equiv. Active power) in Lovato 3-phase meter D301*/
+
+#define LV_MONO_ACT_PWR_FACTOR      ((int16_t)-10)            /* in mono-phase Lovato product to have W it is necessary to multiplier with 10  */
+#define LV_THREE_ACT_PWR_FACTOR     ((int16_t)100)           /* in three-phase Lovato product to have W it is necessary to divide by 100  */
+
+/* define for SINAPSI external  energy meter registers */
+#define EC_SI_SN_REG        ((uint16_t)1280)          /* Request to read Serial Number     */
+#define EC_SI_MODEL_REG     ((uint16_t)1280)          /* Request to read model             */
+
+#define SI_INFO1_R_REG              ((uint16_t)0)             /* Address for info1 SINAPSI block    */
+#define SI_INFO1_R_REG_SIZE         ((uint16_t)3)             /* size, in word, for info1 SINAPSI block   */
+#define SI_INFO0_R_IDX              ((uint16_t)0)             /* Index for info1     */
+#define SI_INFO1_W_REG              ((uint16_t)3)             /* SET Config mode  SINAPSI block    */
+#define SI_INFO1_W_REG_SIZE         ((uint16_t)0)             /* size, in word, for SET Config mode SINAPSI block  0 = means no write */
+#define SI_INFO1_W_IDX              ((uint16_t)1)             /* Index for info1 W    */
+#define SI_INFO2_R_REG              ((uint16_t)4)             /* Address for info2 SINAPSI block    */
+#define SI_INFO2_R_REG_SIZE         ((uint16_t)26)            /* size, in word, for info2 SINAPSI block   */
+#define SI_INFO2_R_IDX              ((uint16_t)2)             /* Index for info2 R    */
+#define SI_INFO3_W_REG              ((uint16_t)8)             /* SET CFG_DU Address for info3 SINAPSI block    */
+#define SI_INFO3_W_IDX              ((uint16_t)3)             /* Index for info3 R    */
+#define SI_INFO3_W_REG_SIZE         ((uint16_t)0)             /* size, in word, for info3 SINAPSI block   */
+#define SI_INFO4_R_REG              ((uint16_t)31)            /* Address for info4 SINAPSI block    */
+#define SI_INFO4_R_IDX              ((uint16_t)4)             /* Index for info4 R    */
+#define SI_INFO4_R_REG_SIZE         ((uint16_t)2)             /* size, in word, for info4 SINAPSI block   */
+#define SI_INFO5_R_REG              ((uint16_t)35)            /* Address for info5 SINAPSI block    */
+#define SI_INFO5_R_IDX              ((uint16_t)5)             /* Index for info5 R    */
+#define SI_INFO5_R_REG_SIZE         ((uint16_t)16)            /* size, in word, for info5 SINAPSI block   */
+#define SI_INFO6_R_REG              ((uint16_t)1270)          /* Address for info6 SINAPSI block    */
+#define SI_INFO6_R_IDX              ((uint16_t)6)             /* Index for info6 R    */
+#define SI_INFO6_R_REG_SIZE         ((uint16_t)4)             /* size, in word, for info6 SINAPSI block   */
+#define SI_INFO7_W_REG              ((uint16_t)0)             /* Watchdog register address     */
+#define SI_INFO7_W_REG_SIZE         ((uint16_t)1)             /* size, in word, for Watchdog  0x00FF = means retrigger WD */
+#define SI_INFO7_W_IDX              ((uint16_t)7)             /* Index for info7 W    */
+#define SI_NUM_INFO                 ((uint16_t)8)             /* numero di info block R e W di SINAPSI    */
+
+/* define for PA775 internal energy meter registers */
+
+#define PA_SYS_VOLT_1PH_REG         ((uint16_t)0xE00C)        /* tensione monofase                         */
+#define PA_SYS_VOLT_3PH_REG         ((uint16_t)0xE000)        /* tensione trifase                          */
+#define PA_SYS_VOLT_SIZE            ((uint16_t)0xE003)        /* size, in word, for voltage                */
+#define PA_SYS_CURR_REG             ((uint16_t)0xE016)        /* corrente monofase                         */
+#define PA_SYS_CURR_L1_REG          ((uint16_t)0xE00E)        /* corrente fase 1                           */
+#define PA_SYS_CURR_L2_REG          ((uint16_t)0xE010)        /* corrente fase 1                           */
+#define PA_SYS_CURR_L3_REG          ((uint16_t)0xE012)        /* corrente fase 1                           */
+#define PA_SYS_CURR_SIZE            ((uint16_t)0xE003)        /* size, in word, for current                */
+#define PA_COS_PHI_1PH_REG          ((uint16_t)0xE01B)        /* Request to read system cos PHI            */
+#define PA_COS_PHI_3PH_REG          ((uint16_t)0xE01B)        /* Request to read system cos PHI trifase    */
+#define PA_COS_PHI_SIZE             ((uint16_t)0xE001)        /* size, in word, for cos Phi                */
+#define PA_ACT_PWR_REG              ((uint16_t)0xE025)        /* Request to read active power              */
+#define PA_ACT_PWR_SIZE             ((uint16_t)0xE004)        /* size, in word, for active power           */
+#define PA_RACT_PWR_REG             ((uint16_t)0xE03D)        /* Request to read reactive power            */
+#define PA_RACT_PWR_SIZE            ((uint16_t)0xE004)        /* size, in word, for reactive power         */
+#define PA_ACT_ENRG_REG             ((uint16_t)0xE109)        /* Request to read active energy             */
+#define PA_ACT_ENRG_SIZE            ((uint16_t)0xE004)        /* size, in word, for active energy          */
+#define PA_RACT_ENRG_REG            ((uint16_t)0xE151)        /* Request to read reactive energy           */
+#define PA_RACT_ENRG_SIZE           ((uint16_t)0xE004)        /* size, in word, for reactive energy        */
+#define PA_SACT_ENRG_REG            ((uint16_t)0xE400)        /* Request to read session active energy     */
+#define PA_SACT_ENRG_SIZE           ((uint16_t)0xE004)        /* size, in word, for session active energy  */
+#define PA_EXT_ACT_PWR_REG          ((uint16_t)0xE025)        /* Request active power on ext em            */
+#define PA_EXT_L1_ACT_PWR_REG       ((uint16_t)0xE01C)        /* Request to read active power on L1 phase  */
+#define PA_EXT_L2_ACT_PWR_REG       ((uint16_t)0xE01F)        /* Request to read active power on L2 phase  */
+#define PA_EXT_L3_ACT_PWR_REG       ((uint16_t)0xE022)        /* Request to read active power on L3 phase  */
+
+/* define for energy meter MP28947: these are just IDs used to translate query from modbus via RS485, to SPI  */
+#define EM_MP28947_SN_REG           ((uint16_t)0xE0FF)        /* Dummy value since it's not used in this case */
+#define EM_MP28947_MODEL_REG        ((uint16_t)0xE000)        /* It has the same value as STPM_DSPCTRL1, is checked in the discovering phase */  
+#define EM_MP28947_BAUDERATE_REG    ((uint16_t)0xE0FF)        /* Dummy value since it's not used in this case */
+
+/* General defines */
+#define RS485_to_SPI_QUERY_MSK      ((uint16_t)0xE000)
+
+#define EM_DEF_ADDR                 ((uint8_t)1)              /* Default address for Carlo Gavazzi / AlgoDUE  Meter               */
+#define EM_DEF_EXT_ADDR             ((uint8_t)2)              /* Default address for Carlo Gavazzi / AlgoDUE / SINAPSI  external Meter      */
+
+/* Define identifier for all EM  */
+typedef enum
+{
+  INTERNAL_EM     = 0,            /* Energy meter inside SCAME product                                */ 
+  EXTERNAL_EM,                    /* Energy meter external (tipically in Power management enviroment) */ 
+  EM_MAX_NUM
+} emEnum_e;
+
+/* define EM addresses  */
+typedef enum
+{
+  EM_INT_ADDR     = EM_DEF_ADDR,      /* Internal Energy meter  address on RS485                          */ 
+  EM_EXT_ADDR     = EM_DEF_EXT_ADDR  /* External Energy meter  address on RS485                          */ 
+} emAddr_e;
+
+
+
+/* define for EM map registers  */
+typedef __packed struct
+{
+  uint16_t    regAdd;
+  uint16_t    size;           /* number of word to be read/write for the specified reg address */
+  int16_t     value;           /* default value for this register or scale factor               */
+} emRegInfo_st;
+
+/* define for EM map registers  */
+typedef __packed struct
+{
+  emType_e    type;           /* model val for a manufacturer  */
+  emPhase_e   emPhase;
+  uint16_t    modelVal;
+  uint8_t     modelName[10];
+  uint16_t    numRetry;
+  uint16_t    modelType;
+  uint8_t     modelSN[16];
+} emModelInfo_st;
+
+/* define for task request */
+typedef enum
+{
+  TX_TO_EM      = 0x00,      /* Request to send a msg to Energy Meter     */ 
+  RX_FROM_EM    = 0x01,      /* Request to take a msg from Energy Meter   */ 
+  EM_ERROR      = 0xFFFF     /* Error on uart   */ 
+} emMsgDir_e;
+
+
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint16_t    regAdd;
+  uint16_t    value;
+} nodeRWsingleReg_st;
+
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint16_t    regAdd;
+  uint16_t    numWords;
+} headerRIR_t;
+
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint16_t    regAdd;
+  uint16_t    numBytes;
+} headerRHR_t;
+
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+} headerRSID_t;
+
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint16_t    regAdd;
+  uint16_t    numWords;
+  uint8_t     numBytes;
+  uint16_t    data[EM_MSG_MAX_LEN];
+} nodeRWmultipleReg_st;
+
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint16_t    regAdd;
+  uint16_t    data;
+} nodeWsingleReg_st;
+
+typedef __packed union
+{
+  nodeRWsingleReg_st    nodeRWsingleReg;
+  headerRIR_t           nodeReadInputReg;
+  headerRHR_t           nodeReadHoldingReg;
+  headerRSID_t          nodeReportSlaveIdReg;
+  nodeRWmultipleReg_st  nodeRWmultipleReg;
+  nodeWsingleReg_st     nodeWsingleReg;
+} messageTx_u;
+
+typedef __packed struct
+{
+  uint16_t            totalLen;
+  messageTx_u         messageTx;
+  uint16_t            crc;
+  emMsgDir_e          emMsgDir;
+  emModelInfo_st      emModelInfo[EM_MAX_NUM];
+  emEvents_e          taskEvent;
+  emReadReg_e         emReadReg;
+} frameEm_st;
+
+typedef __packed struct
+{
+  uint16_t            totalLen;
+  messageTx_u         messageTx; 
+} frameTxEm_st;                     /* ex frameRxEm_st */
+
+typedef __packed struct
+{
+  emEvents_e            eventRx;
+} algo2EvRx_st;                     
+
+/* define for answer modbus messages */
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint16_t    regAdd;
+  uint16_t    numWords;
+  uint16_t    crc;
+} nodeAnswWRmReg_st;
+
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint8_t     numBytes;
+} headerAnswRHR_t;
+
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint8_t     numBytes;
+  uint8_t     data[EM_DATA_MAX_LEN];
+} headerAnswRIR_t; 
+  
+typedef __packed struct
+{
+  uint8_t     unitId;
+  uint8_t     function;
+  uint16_t    regAdd;
+  uint16_t    data;
+  uint16_t    crc;
+} nodeAnswWRsReg_st;
+
+
+typedef __packed union
+{
+  headerAnswRIR_t       nodeReadAnswInputReg;
+  nodeAnswWRmReg_st     nodeAnswWMmReg;
+  nodeAnswWRsReg_st     nodeAnswWRsReg;
+} messageRx_u;
+
+typedef __packed struct
+{
+  uint16_t            totalLen;
+  messageRx_u         messageRx;
+} frameRxEm_st;
+
+typedef __packed union
+{
+  uint16_t  crcW;
+  uint8_t   crcA[2];
+  __packed struct 
+  {
+    uint8_t crcL;
+    uint8_t crcH;
+  }crcLH_st;
+}crcMode_u;
+
+typedef __packed union
+{
+  uint32_t  dataDW;
+  uint8_t   dataD[4];
+}dataAsDw_u;
+
+typedef __packed union
+{
+  struct 
+  {
+    dataAsDw_u tmp32_a;
+    uint16_t   tmp16_a;
+    uint16_t   tmp16_b;
+  }double32_st;
+  int64_t   dataQW;
+  uint8_t   dataQ[8];
+}data64_u;
+
+/* remember endian in ST micro:       */
+/* uint64_t --> 0x0103050702040608    */
+/* address + 0  --> dataQ[0] = 08     */
+/* address + 1  --> dataQ[1] = 06     */
+/* address + 2  --> dataQ[2] = 04     */
+/* address + 3  --> dataQ[3] = 02     */
+/* address + 4  --> dataQ[4] = 07     */
+/* address + 5  --> dataQ[5] = 05     */
+/* address + 6  --> dataQ[6] = 03     */
+/* address + 7  --> dataQ[7] = 01     */
+typedef __packed union
+{
+  int64_t   dataQW;
+  uint8_t   dataQ[8];
+}dataAsQw_u;
+
+typedef __packed struct
+{
+  uint32_t    SysVoltage;
+  int32_t     currentL1;
+  int32_t     currentL2;
+  int32_t     currentL3;
+  uint32_t    neutralCurrent;
+  int32_t     currentL;
+  int16_t     cosPh1;
+  int16_t     cosPh2;
+  int16_t     cosPh3;
+  int16_t     cosPh;
+}emAlgoBk1_st;
+
+typedef __packed struct
+{
+  uint16_t    activePower[3];
+  int16_t     spare2[21];
+  uint16_t    reactivePower[3];
+}emAlgoBk2_st;
+
+
+typedef __packed struct
+{
+  emAlgoBk1_st    emAlgoBk1;
+  emAlgoBk2_st    emAlgoBk2;
+  uint16_t        extActiveEnergy[3];
+}emAlgoUserReg_st;
+
+/* define states for the task  */
+typedef enum
+{
+  STATE_IDLE     = 0,             /* initial state                          */ 
+  EM_POLLING,                     /* opeartive EM, polling state            */ 
+  EM_FAST_RESTORE,                /* fast operation after V230 come back    */ 
+  EM_STOP_FOR_V230KO              /* stop operation after V230 goes off     */ 
+} emStates_e;
+
+typedef __packed struct
+{
+  int32_t   startActEnrgValue;
+  int32_t   currentActEnrgValue;
+  int32_t   sessionEnrgValue;
+}sessActEnergy_t;
+
+typedef __packed struct
+{
+  emStates_e        state[EM_MAX_NUM];
+  emAddr_e          emAddr[EM_MAX_NUM];
+  uint16_t          curIx[EM_MAX_NUM];
+  uint16_t          nextTimeout[EM_MAX_NUM];
+  emEvents_e        taskEvent;
+  uint64_t          emUserReg[EM_MAX_NUM][EM_READ_REG_NUM];
+  sessActEnergy_t   sessActEnergy;
+  uint16_t          triggerEnrgMeas;
+  uint16_t          numRetryBeforeError[EM_MAX_NUM];
+  uint16_t          numRetryLimit[EM_MAX_NUM];
+  uint32_t          sinapsiCfgUpgrade;
+  uint16_t          sinapsiBtUpgrade;
+  uint16_t          sinapsiChain2Status;
+  uint16_t          emFault;
+  uint16_t          initMasterMeasRegs;
+}emTaskState_st;
+
+typedef __packed struct
+{
+  uint32_t       oldPwm;
+  emStates_e     state;
+  uint8_t        events;
+  uint16_t       numError;
+  uint16_t       tick;
+}emAlgo2State_st;
+
+/***************** define data structure in SINAPSI   **********************/
+typedef __packed struct                        
+{                                              
+  uint16_t    m1PlcState;                      /*    SI_INFO1_R_REG              ((uint16_t)0) --> M1_PLC_STATE, M2_PLC_STATE, FW_VER  + WD retrigger when written */
+  uint16_t    m2PlcState;                      /*    SI_INFO1_R_REG_SIZE         ((uint16_t)3)                                         */
+  uint16_t    duFwVer;                         
+
+  uint16_t    setConfigMode;                   /*    SI_INFO1_W_REG              ((uint16_t)3) --> SET_CONFIG_MODE  */ 
+                                               /*    SI_INFO1_W_REG_SIZE         ((uint16_t)1) --->4                */ 
+  uint16_t    getConfigMode;                   /*    SI_INFO2_R_REG              ((uint16_t)4) -->      GET_CONFIG_MODE, M1_PLC_RSSI, M2_PLC_RSSI, DELIBERA541, CFG_DU  */
+  uint16_t    m1PlccRssi;                      /*                                                       POT_ATT_IMM_IST_TS, POT_ATT_IMM_IST, POT_ATT_IMM_IST_TS_M2      */ 
+  uint16_t    m2PlccRssi;                      /*                                                       POT_ATT_IMM_IST_M2, POT_CONTR, POT_DISP, CONST_TRASF, T_DIST_TS */  
+  uint16_t    delibera541;                     /*                                                       T_DIST, FASCIA_CORR_TS, FASCIA_CORR, BIU                        */                                                 
+  uint32_t    cfgDU;                           /* Read / write register                                                                                                 */
+  uint32_t    potAttImmIstTs;                  
+  uint8_t     potAttImmIst[6];                 
+  uint32_t    potAttImmIstTsM2;                
+  uint8_t     potAttImmIstM2[6];               
+  uint16_t    potContrattuale;               
+  uint16_t    potDisponibile;               
+  uint16_t    costTrasf;                    
+  uint32_t    tempoDistaccoTs;              
+  uint16_t    tempoDistacco;                
+  uint32_t    fasciaCorrenteTs;             
+  uint16_t    fasciaCorrente;               
+  uint16_t    biu;                             /*    SI_INFO2_R_REG_SIZE         ((uint16_t)26)--->30                                                              */
+                                            
+  uint32_t    duUpTime;                        /*    SI_INFO4_R_REG              ((uint16_t)31)--> DU_UPTIME                                                       */ 
+                                               /*    SI_INFO4_R_REG_SIZE         ((uint16_t)2)--> 32                                                               */
+                                            
+  uint32_t    potAttPreIstTs;                  /*    SI_INFO5_R_REG              ((uint16_t)35)--> POT_ATT_PRE_IST_TS, POT_ATT_PRE_IST, CNT_TOT_M1, CNT_LOST_TOT_M1*/ 
+  uint8_t     potAttPreIst[6];                 /*                                                  CNT_TOT_M2, CNT_LOST_TOT_M2, DU_MAC                             */
+  uint32_t    cfCountTotM1;                 
+  uint32_t    cfCountLostTotM1;             
+  uint32_t    cfCountTotM2;                 
+  uint32_t    cfCountLostTotM2;             
+  uint8_t     duMAC[6];                        /*    SI_INFO5_R_REG_SIZE         ((uint16_t)16)--> 48                                                              */
+                                            
+  int32_t     potAttPreMax;                    /*    SI_INFO6_R_REG              ((uint16_t)1270)--> POT_ATT_PRE_MAX, COR_ATT_PRE_MAX                              */ 
+  int32_t     corAttPreMax;                    /*    SI_INFO6_R_REG_SIZE         ((uint16_t)4) --> 52 word = 104 bytes                                                                     */
+}emSinapsiInfo_st;                                 
+                                               
+/***************** define data structure for EM SCAME total Energy   **********************/
+typedef __packed struct                        
+{                                              
+  uint16_t       keyActEnrg;
+  uint32_t       actEnrgEmScame;
+  uint16_t       keyActEnrgE0;
+  uint32_t       actEnrgEmScameE0;
+}emSscameTotEnrg_st;
+
+/****************** FUNCTIONS IMPLEMENTATION **************************************************************************/
+void            emGestTask                        (void * pvParameters);
+xQueueHandle    getEmQueueHandle                  (void);
+xQueueHandle    getEmAnswerQueueHandle            (void);
+uint16_t        swapW                             (uint16_t word);
+uint16_t        crcEvaluation                     (uint8_t* puchMsg, uint16_t usDataLen);
+emError_e       getEmRegister                     (uint16_t regAddr, uint8_t size, uint8_t* pReadBuff, uint8_t emId, uint8_t flagRegCheck);
+emError_e       setEmRegister                     (uint16_t regAddr, uint8_t* pData, uint16_t lenData, uint8_t emId, uint8_t flagRegCheck);
+emModelInfo_st* discoveryEm                       (uint8_t emId);
+uint8_t         isDigitalMeterPresent             (emEnum_e emIx);
+int32_t         getEmRegisterValue                (emReadReg_e regId, uint8_t emeter_type);
+void            sendMainV230Info                  (uint32_t status);
+                                                  
+uint8_t         get_emeter_type                   (emEnum_e emNum);
+uint8_t         initEmParameter                   (emEvents_e emEvent);
+                                                  
+int64_t         arrayTo64                         (uint8_t * pData);
+void            sinapsiBTflagAct                  (uint16_t value);
+void            sinapsiCWFlagSet                  (uint32_t cfgVal);
+uint8_t         get_emeter_detected_type          (emEnum_e emNum);
+void            manageBTactFlagSinapsi            (char flagBt);
+uint32_t        getSinapsiActivePowerTS           (void);
+uint16_t        getSinapsiStatusPlc               (void);
+void            resetPowerCurrentValues           (void);
+uint8_t         isEmScamePresent                  (void);
+int32_t         getEepromTotalActiveEnergy        (void);
+void            setEepromTotalActiveEnergy        (int32_t totActEnrg);
+void            semSlaveSendActEnrg               (void);
+int32_t         getTotalActiveEnergyFromModbusReg (void);
+
+#endif //  __EM_TASK_H
+

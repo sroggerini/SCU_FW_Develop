@@ -1,0 +1,52 @@
+{
+  "Version": 1,
+  "WorkspaceRootPath": "C:\\Progetti\\SVN_Repos\\SCAME_GD_RED\\SCAME_CONTROL_UNIT\\trunk\\Win\\checkTagEccDbg\\",
+  "Documents": [
+    {
+      "AbsoluteMoniker": "D:0:0:{94B24AED-5B04-AA31-BF5D-F4EBCCF74209}|CheckTagDbgGD.csproj|c:\\progetti\\svn_repos\\scame_gd_red\\scame_control_unit\\trunk\\win\\checktageccdbg\\program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{94B24AED-5B04-AA31-BF5D-F4EBCCF74209}|CheckTagDbgGD.csproj|solutionrelative:program.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{94B24AED-5B04-AA31-BF5D-F4EBCCF74209}|CheckTagDbgGD.csproj|c:\\progetti\\svn_repos\\scame_gd_red\\scame_control_unit\\trunk\\win\\checktageccdbg\\checktagdbggd.csproj||{04B8AB82-A572-4FEF-95CE-5222444B6B64}|",
+      "RelativeMoniker": "D:0:0:{94B24AED-5B04-AA31-BF5D-F4EBCCF74209}|CheckTagDbgGD.csproj|solutionrelative:checktagdbggd.csproj||{04B8AB82-A572-4FEF-95CE-5222444B6B64}|"
+    }
+  ],
+  "DocumentGroupContainers": [
+    {
+      "Orientation": 0,
+      "VerticalTabListWidth": 256,
+      "DocumentGroups": [
+        {
+          "DockedWidth": 200,
+          "SelectedChildIndex": 1,
+          "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 1,
+              "Title": "CheckTagDbgGD",
+              "DocumentMoniker": "C:\\Progetti\\SVN_Repos\\SCAME_GD_RED\\SCAME_CONTROL_UNIT\\trunk\\Win\\checkTagEccDbg\\CheckTagDbgGD.csproj",
+              "RelativeDocumentMoniker": "CheckTagDbgGD.csproj",
+              "ToolTip": "C:\\Progetti\\SVN_Repos\\SCAME_GD_RED\\SCAME_CONTROL_UNIT\\trunk\\Win\\checkTagEccDbg\\CheckTagDbgGD.csproj",
+              "RelativeToolTip": "CheckTagDbgGD.csproj",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2025-08-07T09:19:30.274Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Program.cs",
+              "DocumentMoniker": "C:\\Progetti\\SVN_Repos\\SCAME_GD_RED\\SCAME_CONTROL_UNIT\\trunk\\Win\\checkTagEccDbg\\Program.cs",
+              "RelativeDocumentMoniker": "Program.cs",
+              "ToolTip": "C:\\Progetti\\SVN_Repos\\SCAME_GD_RED\\SCAME_CONTROL_UNIT\\trunk\\Win\\checkTagEccDbg\\Program.cs",
+              "RelativeToolTip": "Program.cs",
+              "ViewState": "AgIAALIAAAAAAAAAAAAYwKMAAAAOAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2025-06-17T14:28:42.063Z",
+              "EditorCaption": ""
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

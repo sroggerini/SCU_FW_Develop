@@ -1,0 +1,211 @@
+/******************* (C) COPYRIGHT 2009 STMicroelectronics *********/
+/**
+* @file        ioExp.h
+*
+* @brief       Manager IO expander on I2C - Definition -
+*
+* @riskClass   C
+*
+* @moduleID
+*
+* @vcsInfo
+*     $Id: ioExp.h 520 2024-06-14 10:15:55Z stefano $
+*
+*     $Revision: 520 $
+*
+*     $Author: stefano $
+*
+*     $Date: 2024-06-14 12:15:55 +0200 (ven, 14 giu 2024) $
+*
+*
+* @copyright
+*       Copyright (C) 2017 SCAME S.p.A. All rights reserved.
+*       This file is copyrighted and the property of Aesys S.p.A.. It contains confidential and proprietary
+*       information. Any copies of this file (in whole or in part) made by any method must also include a copy of this
+*       legend.
+*       Developed by:  SCAME S.p.A.
+***********************************************************************************************************************/
+
+/************************************************************
+ * Include
+ ************************************************************/
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __IOEXP_H
+#define __IOEXP_H
+
+#ifdef __cplusplus
+ extern "C" {
+#endif
+#include <stdint.h>
+#include "telnet.h"
+#include "i2c.h"
+#include "wrapper.h"
+
+/*
+*********************************** BM ***************************************
+**                                                                          **
+**           LOCAL MACROS, TYPEDEF, STRUCTURE, ENUM                         **
+**                                                                          **
+******************************************************************************
+*/
+#define   SETUP_TIME_TICK                pdMS_TO_TICKS((uint16_t)500)
+
+#define   TIMEOUT_CHECK_BOARD            ((uint16_t)6)   /* 6 tick * 0,5 3 sec per il check power board */ 
+
+/* input  message size   */
+#define   IOEXP_MAX_MESSAGE_NUM     ((uint8_t)4)
+
+/* io expander registers  */
+#define DEVICEID_CTRL_REG       ((uint8_t)0x01)
+#define IO_DIR_REG              ((uint8_t)0x03)
+#define OUTPUT_STATE_REG        ((uint8_t)0x05)
+#define OUTPUT_STATE_HIZ_REG    ((uint8_t)0x07)
+#define INPUT_DEFAULT_STATE_REG ((uint8_t)0x09)
+#define PULL_ENABLE_REG         ((uint8_t)0x0B)
+#define PULL_UP_DOWN_REG        ((uint8_t)0x0D)
+#define INPUT_STATE_REG         ((uint8_t)0x0F)
+#define INPUT_INTPR_MASK_REG    ((uint8_t)0x11)
+#define INTPR_STATUS_REG        ((uint8_t)0x13)
+
+/* output pins mask */
+#define R_ACT_ON                ((uint8_t)0x10)
+#define R_ACT_OFF               ((uint8_t)0x20)
+#define VMUTE_OFF               ((uint8_t)0x02)
+#define MIRROR_EN_MASK          ((uint8_t)0x10)  /* IO4 Mirror contact enable */
+
+/* input pins mask */
+#define R_ACT_STATUS            ((uint8_t)0x40)
+
+#define GPIO_INTX_CLK_ENABLE()  __HAL_RCC_GPIOE_CLK_ENABLE();
+#ifdef GD32F4xx
+#define GPIO_PEN_MASK           ((uint8_t)0x02)
+#else
+#define GPIO_PEN_MASK           ((uint8_t)0x08)
+#endif
+#define PEN_PERIOD_MIN          ((uint32_t)110)
+#define PEN_PERIOD_MAX          ((uint32_t)160)
+
+#define PEN_PERIOD_DIS_MIN      ((uint32_t)3)
+#define PEN_PERIOD_DIS_MAX      ((uint32_t)11)
+
+#define PEN_ALARM_ENABLE_MASK   ((uint16_t)0x0001)
+#define PEN_ALARM_ACTIVE_MASK   ((uint16_t)0x0002)
+#define PEN_ALARM_MSG_OFF_MASK  ((uint16_t)0x0004)
+
+#define I2C_ERRATUM_TIMEOUT_VALUE  500  /* Timeout value for clear flag erratum procedure */
+
+typedef enum
+{
+  DEVICEID_CTRL_IDX = 0,      
+  IO_DIR_IDX,              
+  OUTPUT_STATE_IDX,
+  OUTPUT_STATE_HIZ_IDX,    
+  INPUT_DEFAULT_STATE_IDX, 
+  PULL_ENABLE_IDX,   
+  PULL_UP_DOWN_IDX,        
+  INPUT_STATE_IDX,         
+  INPUT_INTPR_MASK_IDX,    
+  INTPR_STATUS_IDX        
+} ioIdx_e;
+
+
+typedef enum
+{
+  IO_STATE_IDLE         = 0x0000,       /* initial state   */ 
+  IO_SETTING            = 0x0001,       /* I/O expander FXL6408 UMX programming    */ 
+  IO_STATE_OPERATIVE    = 0x0002,       /* IO expander operative  */ 
+  IO_STATE_DUMMY        = 0xFFFF
+} ioStates_e;
+
+typedef enum
+{
+  PWR_BOARD_UNKNOW      = 0x0000,       /* initial state   */ 
+  PWR_BOARD_BACKUP      = 0x0001,       /* scheda BACKUP   */
+  PWR_BOARD_MON         = 0x0002,       /* scheda momintor */ 
+  PWR_BOARD_PEN         = 0x0003,       /* scheda PEN      */ 
+  PWR_BOARD_UNDEF       = 0xFFFF,       /* scheda UNDEFINED */   
+} pwrBoard_e;
+
+
+typedef enum
+{
+  IO_EVENT_RESET              = 0x00,      /* reset event                     */ 
+  IO_EVENT_IOEXP_CHECK,                    /* check I/O expander and program it */ 
+  IO_EVENT_IO_POLLING,                     /* operation on I/O                */ 
+  IO_EVENT_IO_WRITING,                     /* write on output port            */ 
+  IO_EVENT_IO_READING,                     /* read on input port            */ 
+  IO_EVENT_START_IOEXP_POLLING,
+  IO_EVENT_PEN_PIN_EDGE,                   /* detected an edge on PEN_ALM pin */
+  IO_EVENT_PEN_FILTERING,                  /* start filtering on PEN_ALM pin */
+  IO_EVENT_DUMMY = 0xFFFF
+} ioEvents_e;
+
+typedef struct
+{
+  uint16_t        idIO;
+  ioEvents_e      taskEv;
+  ioIn_TypeDef_e  inRegId;
+  ioOut_TypeDef_e outRegId;
+  uint8_t         val;
+} ioMngMsg_st;
+
+typedef struct
+{
+  ioIdx_e       idx_reg;
+  uint8_t       addr_reg;
+  uint8_t       val_reg;
+}ioItemReg_st;
+
+typedef struct
+{
+  ioItemReg_st       deviceIdCtrl;
+  ioItemReg_st       direction;
+  ioItemReg_st       outState;
+  ioItemReg_st       outStateHiZ;
+  ioItemReg_st       inDefStat;
+  ioItemReg_st       pullEnable;
+  ioItemReg_st       pullUpPullDown;
+  ioItemReg_st       inStatus;
+  ioItemReg_st       intrMask;
+  ioItemReg_st       intrStatus;
+} ioExpMap_st;
+
+typedef struct
+{
+  ioStates_e    stato;
+  ioExpMap_st   ioExpMap;
+  ioExpMap_st   ioExp2Map;
+  uint16_t      ioExpInpStatus;
+  uint16_t      penAlarmInpVal;
+  uint16_t      penAlarmStatus;
+  uint32_t      penTickFirst;
+  uint32_t      penTickLast;
+  uint16_t      tickBoard;
+  pwrBoard_e    pwrBoardDetected;
+} ioMng_t;
+
+
+/****************** FUNCTIONS IMPLEMENTATION **************************************************************************/
+void            ioMngTask                (void * pvParameters);
+xQueueHandle    getIoMngQueueHandle      (void);
+GPIO_PinState   getIoExpInput            (ioIn_TypeDef_e pinId);
+uint32_t        getDigitalIoExpInput     (void);
+void            HAL_GPIO_EXTI_Callback   (uint16_t GPIO_Pin);
+void            I2C_ClearBusyFlagErratum (I2C_HandleTypeDef* hi2c);
+void            powerOutageUodate        (void);
+
+/**
+  * @}
+  */
+
+
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* __IOEXP_H */
+
+
+/******************* (C) COPYRIGHT 2009 STMicroelectronics *****END OF FILE****/
+

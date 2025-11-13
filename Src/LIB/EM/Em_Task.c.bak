@@ -1,0 +1,3037 @@
+/**
+* @file        em_Task.c
+*
+* @brief       Uart Energy meter  protocol - Implementation -
+*
+* @author      Nick
+*
+* @riskClass   C
+*
+* @moduleID
+*
+* @vcsInfo
+*     $Id: Em_Task.c 765 2025-06-10 07:53:52Z npiergi $
+*
+*     $Revision: 765 $
+*
+*     $Author: npiergi $
+*
+*     $Date: 2025-06-10 09:53:52 +0200 (mar, 10 giu 2025) $
+*
+*
+* @copyright
+*       Copyright (C) 2017 SCAME S.p.A. All rights reserved.
+*       This file is copyrighted and the property of Aesys S.p.A.. It contains confidential and proprietary
+*       information. Any copies of this file (in whole or in part) made by any method must also include a copy of this
+*       legend.
+*       Developed by:  SCAME S.p.A.
+***********************************************************************************************************************/
+
+/************************************************************
+ * Include
+ ************************************************************/
+//#include <main.h>
+#include <stddef.h>
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
+#ifdef GD32F4xx
+#include "stm32f4xx_hal.h"
+#include "stm32f4xx_ll_rcc.h"
+#else
+#include "stm32h5xx_hal.h"
+#include "stm32h5xx_ll_rcc.h"
+#endif
+#include "cmsis_os.h"
+#include "Em_Task.h"
+#include "prot_OnUsart.h"
+#include "wrapper.h"
+#include "EvsMng.h"
+#include "PwmMng.h"
+#include "EnergyMng.h"
+#include "eeprom.h"
+#include "telnet.h"
+#include "scuMdb.h"
+#include "rtcApi.h"
+#include "sinapsi.h"
+#ifdef HW_MP28947
+#include "metrology.h"
+#include "stpm_metrology.h"
+#include "metrology_hal.h"   
+#include "handler_metrology.h"
+#include "metroTask.h"
+#endif
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**           LOCAL MACROS, TYPEDEF, STRUCTURE, ENUM                         **
+**                                                                          **
+******************************************************************************
+*/
+
+#define     TIMER_TICK_500                ((uint16_t)500)
+#define     TIMER_TICK_POLL_REGS          ((uint16_t)100)
+#define     TIMER_TICK_NEW_DISC           ((uint16_t)2000 / TIMER_TICK_POLL_REGS)
+#define     TIMER_TICK_NORMAL_POLL        ((uint16_t)100  / TIMER_TICK_POLL_REGS)
+#define     TIMER_TICK_FIRST_POLL         ((uint16_t)3500)
+
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Local Const                                   **
+**                                                                          **
+****************************************************************************** 
+*/ 
+
+static const emRegInfo_st   emRegister[LAST_EM][EM_REG_IDX_NUM]    = { 
+  
+   /*****  ALGO DUE default  info register structure ***************/
+   /**  Address              Size             Value     **/  
+  {{EC_AD_SN_REG,            6U,              0U}, 
+  {EC_AD_MODEL_REG,          2U,              0U}, 
+  {EC_AD_BAUDERATE_REG,      1U,              0U}},
+  
+   /*****  GAVAZZI  default  info register structure ***************/
+   /**  Address              Size             Value     **/
+  {{EC_CG_SN_REG,            7U,              0U}, 
+  {EC_CG_MODEL_REG,          1U,              0U}, 
+  {EC_CG_BAUDERATE_REG,      1U,              2U}},
+
+   /*****  LOVATO  default  info register structure **********************/ 
+   /** NOTE: These informations are not in modbus map for this topology, */
+   /** so they are put there just to fill the gap                        */
+   /**  Address              Size             Value                     **/
+  {{EC_LV_SN_REG,            2U,              0U}, 
+  {NULL_REG,                 1U,              0U},    /* Put the size at 1 byte to match the checks */
+  {EC_LV_BAUDERATE_REG,      1U,              4U}},
+  
+   /*****  SCAME default  info register structure ***************/
+   /**  Address              Size             Value     **/
+  {{EC_AD_SN_REG,            6U,              0U}, 
+  {EC_AD_MODEL_REG,          2U,              0U}, 
+  {EC_AD_BAUDERATE_REG,      1U,              0U}},
+  
+   /*****  SINAPSI default  info register structure ***************/
+   /**  Address              Size             Value     **/
+  {{EC_SI_SN_REG,            5U,              0U},  
+  {EC_SI_MODEL_REG,          6U,              0U}, 
+  {0,                        0U,              0U}},
+
+#ifdef HW_MP28947
+  /*****  Energy Meter in MP28947: info register structure ***************/
+  /**  Address              Size             Value     **/
+  {{EM_MP28947_SN_REG,       6U,              0U}, 
+  {EM_MP28947_MODEL_REG,     2U,              0U}, 
+  {EM_MP28947_BAUDERATE_REG, 1U,              0U}},
+  
+#endif
+  };
+    
+static const emRegInfo_st   emDataRegister[LAST_EM][EM_READ_REG_NUM]    = {
+  
+   /*****  ALGO DUE default  register structure ***************/
+  
+   /**  Address                 Size                         Multiplier            Idx                  Required UoM  **/
+  
+  {{AD_SYS_VOLT_1PH_REG,        AD_SYS_VOLT_SIZE,            1000U},            // EM_SYS_VOLTAGE             V
+   {AD_SYS_VOLT_3PH_REG,        AD_SYS_VOLT_SIZE,            1000U},            // EM_SYS_PH1_VOLTAGE         V
+   {AD_SYS_CURR_L1_REG,         AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L1              A
+   {AD_SYS_CURR_L2_REG,         AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L2              A
+   {AD_SYS_CURR_L3_REG,         AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L3              A
+   {AD_SYS_CURR_REG,            AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L               A
+   {AD_COS_PHI_1PH_REG,         (uint16_t)0,                 1000U},            // EM_COS_PHI                 1
+   {AD_COS_PHI_3PH_REG,         (uint16_t)0,                 1000U},            // EM_COS_PH1_PHI             1 
+   {AD_ACT_PWR_REG,             AD_ACT_PWR_SIZE,             1000U},            // EM_ACTIVE_POWER            W
+   {AD_RACT_PWR_REG,            AD_RACT_PWR_SIZE,            1000U},            // EM_REACTIVE_POWER        Var
+   {AD_ACT_ENRG_REG,            AD_ACT_ENRG_SIZE,              10U},            // EM_TOT_ACTIVE_ENERGY      Wh 
+   {AD_RACT_ENRG_REG,           AD_RACT_ENRG_SIZE,             10U},            // EM_TOT_REACT_ENERGY      Varh 
+   {AD_SACT_ENRG_REG,           AD_SACT_ENRG_SIZE,             10U},            // EM_SAS_ACTIVE_ENERGY      Wh 
+   {AD_EXT_ACT_PWR_REG,         AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_ACTIVE_POWER        W
+   {AD_EXT_L1_ACT_PWR_REG,      AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_L1_ACTIVE_POWER   mW*10
+   {AD_EXT_L2_ACT_PWR_REG,      AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_L2_ACTIVE_POWER   mW*10  
+   {AD_EXT_L3_ACT_PWR_REG,      AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_L3_ACTIVE_POWER   mW*10
+   {SI_INFO7_W_REG,             (uint16_t)0,                   1U}},           // Registro in scrittura PWM, Contattore, Unbalance per ALGO2 ext su PC
+                                                                                
+   /*****  GAVAZZI  default  register structure ***************/
+   
+   /**  Address                 Size                         Multiplier            Idx                  Required UoM  **/
+   
+   {{CG_SYS_VOLT_1PH_REG,       CG_SYS_VOLT_SIZE,              10U},            // EM_SYS_VOLTAGE             V
+   {CG_SYS_VOLT_3PH_REG,        CG_SYS_VOLT_SIZE,              10U},            // EM_SYS_PH1_VOLTAGE         V
+   {CG_SYS_CURR_L1_REG,         CG_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L1              A
+   {CG_SYS_CURR_L2_REG,         CG_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L2              A
+   {CG_SYS_CURR_L3_REG,         CG_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L3              A
+   {CG_SYS_CURR_REG,            CG_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L               A
+   {CG_COS_PHI_1PH_REG,         (uint16_t)0,                 1000U},            // EM_COS_PHI                 1
+   {CG_COS_PHI_3PH_REG,         (uint16_t)0,                 1000U},            // EM_COS_PH1_PHI             1 
+   {CG_ACT_PWR_REG,             CG_ACT_PWR_SIZE,                10},            // EM_ACTIVE_POWER            W
+   {CG_RACT_PWR_REG,            CG_RACT_PWR_SIZE,               10},            // EM_REACTIVE_POWER        Var
+   {CG_ACT_ENRG_REG,            CG_ACT_ENRG_SIZE,             -100},            // EM_TOT_ACTIVE_ENERGY      Wh 
+   {CG_RACT_ENRG_REG,           CG_RACT_ENRG_SIZE,            -100},            // EM_TOT_REACT_ENERGY      Varh 
+   {CG_SACT_ENRG_REG,           CG_SACT_ENRG_SIZE,            -100},            // EM_SAS_ACTIVE_ENERGY      Wh 
+   {CG_EXT_ACT_PWR_REG,         CG_ACT_PWR_SIZE,                10},            // EM_EXT_ACTIVE_POWER        W
+   {CG_EXT_L1_ACT_PWR_REG,      CG_ACT_PWR_SIZE,                10},            // EM_EXT_L1_ACTIVE_POWER   mW*10
+   {CG_EXT_L2_ACT_PWR_REG,      CG_ACT_PWR_SIZE,                10},            // EM_EXT_L2_ACTIVE_POWER   mW*10
+   {CG_EXT_L3_ACT_PWR_REG,      CG_ACT_PWR_SIZE,                10},            // EM_EXT_L3_ACTIVE_POWER   mW*10
+   {(uint16_t)0,                0,                              1U}},           // EM_ signed bit 
+
+   /*****  LOVATO  default  register structure ***************/ 
+   
+   /**  Address                 Size                         Multiplier            Idx                  Required UoM  **/
+   
+   {{LV_PH_VOLTAGE_MONO_REG,    LV_VOLTAGE_REG_SIZE,            100},           // EM_SYS_VOLTAGE             V
+   {LV_PH_VOLTAGE_THREE_REG,    LV_VOLTAGE_REG_SIZE,            100},           // EM_SYS_PH1_VOLTAGE         V
+   {LV_CURRENT_L1_REG,          LV_VOLTAGE_REG_SIZE,           1000},           // EM_CURRENT_L1              A
+   {LV_CURRENT_L2_REG,          LV_CURRENT_REG_SIZE,           1000},           // EM_CURRENT_L2              A
+   {LV_CURRENT_L3_REG,          LV_CURRENT_REG_SIZE,           1000},           // EM_CURRENT_L3              A
+   {LV_SYS_CURRENT_REG,         LV_CURRENT_REG_SIZE,              1},           // EM_CURRENT_L               A
+   {LV_COS_PHI_1P_REG,          (uint16_t)0,                  10000},           // EM_COS_PHI                 1
+   {LV_COS_PHI_3P_REG,          (uint16_t)0,                  10000},           // EM_COS_PH1_PHI             1 
+   {LV_SYS_ACT_PWR_MONO_REG,    LV_ACT_PWR_REG_SIZE,            -10},           // EM_ACTIVE_POWER            W
+   {LV_SYS_REACT_PWR_REG,       LV_REACT_PWR_REG_SIZE,          100},           // EM_REACTIVE_POWER        Var
+   {LV_TOT_ACT_ENERGY_REG,      LV_ACT_ENERGY_REG_SIZE,           1},           // EM_TOT_ACTIVE_ENERGY      Wh 
+   {LV_TOT_REACT_ENERGY_REG,    LV_REACT_ENERGY_REG_SIZE,      1000},           // EM_TOT_REACT_ENERGY      Varh 
+   {LV_PART_ACT_ENERGY_REG,     LV_ACT_ENERGY_REG_SIZE,        1000},           // EM_SAS_ACTIVE_ENERGY      Wh 
+   {LV_SYS_ACT_PWR_MONO_REG,    LV_ACT_PWR_REG_SIZE,            -10},           // EM_EXT_ACTIVE_POWER        W
+   {LV_ACT_PWR_L1_REG,          LV_ACT_PWR_REG_SIZE,            100},           // EM_EXT_L1_ACTIVE_POWER   mW*10
+   {LV_ACT_PWR_L2_REG,          LV_ACT_PWR_REG_SIZE,            100},           // EM_EXT_L2_ACTIVE_POWER   mW*10
+   {LV_ACT_PWR_L3_REG,          LV_ACT_PWR_REG_SIZE,            100},           // EM_EXT_L3_ACTIVE_POWER   mW*10
+   {LV_ACT_PWR_SIGN_REG,        LV_ACT_PWR_SIGN_SIZE,            1U}},          // EM_ signed bit 
+
+   /*****  EM SCAME default  register structure ***************/ 
+   
+   /**  Address                 Size                         Multiplier            Idx                  Required UoM  **/
+   
+  {{AD_SYS_VOLT_1PH_REG,        AD_SYS_VOLT_SIZE,            1000U},            // EM_SYS_VOLTAGE             V              
+  {AD_SYS_VOLT_3PH_REG,         AD_SYS_VOLT_SIZE,            1000U},            // EM_SYS_PH1_VOLTAGE         V
+  {AD_SYS_CURR_L1_REG,          AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L1              A
+  {AD_SYS_CURR_L2_REG,          AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L2              A
+  {AD_SYS_CURR_L3_REG,          AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L3              A
+  {AD_SYS_CURR_REG,             AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L               A
+  {AD_COS_PHI_1PH_REG,          (uint16_t)0,                 1000U},            // EM_COS_PHI                 1
+  {AD_COS_PHI_3PH_REG,          (uint16_t)0,                 1000U},            // EM_COS_PH1_PHI             1 
+  {AD_ACT_PWR_REG,              AD_ACT_PWR_SIZE,             1000U},            // EM_ACTIVE_POWER            W
+  {AD_RACT_PWR_REG,             AD_RACT_PWR_SIZE,            1000U},            // EM_REACTIVE_POWER        Var
+  {AD_ACT_ENRG_REG,             AD_ACT_ENRG_SIZE,              10U},            // EM_TOT_ACTIVE_ENERGY      Wh 
+  {AD_RACT_ENRG_REG,            AD_RACT_ENRG_SIZE,             10U},            // EM_TOT_REACT_ENERGY      Varh 
+  {AD_SACT_ENRG_REG,            AD_SACT_ENRG_SIZE,             10U},            // EM_SAS_ACTIVE_ENERGY      Wh 
+  {AD_EXT_ACT_PWR_REG,          AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_ACTIVE_POWER        W
+  {AD_EXT_L1_ACT_PWR_REG,       AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_L1_ACTIVE_POWER   mW*10    /* Fixed SCU-34  */
+  {AD_EXT_L2_ACT_PWR_REG,       AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_L2_ACTIVE_POWER   mW*10    /* Fixed SCU-34  */
+  {AD_EXT_L3_ACT_PWR_REG,       AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_L3_ACTIVE_POWER   mW*10    /* Fixed SCU-34  */
+  {(uint16_t)0,                 0,                              1U}},           // EM_ signed bit 
+
+   /*****  EM SINAPSI default  register structure ***************/ 
+   
+   /**  Address                 Size                         Multiplier                               **/
+   
+  {{SI_INFO1_R_REG,             SI_INFO1_R_REG_SIZE,            1U},            // Primo blocco PLC STATE e FW Version 
+  {SI_INFO1_W_REG,              SI_INFO1_W_REG_SIZE,            1U},            // Registro in scrittura SET_CONFIG_MODE            
+  {SI_INFO2_R_REG,              SI_INFO2_R_REG_SIZE,            1U},            // Secondo blocco GET CONFIG MODE ...BiU
+  {SI_INFO3_W_REG,              SI_INFO3_W_REG_SIZE,            1U},            // Terzo blocco registro scrittura configurazione DU
+  {SI_INFO4_R_REG,              SI_INFO4_R_REG_SIZE,            1U},            // Quarto blocco DU_UPTIME
+  {SI_INFO5_R_REG,              SI_INFO5_R_REG_SIZE,            1U},            // Quinto blocco POT_ATT_PRE_IST_TS ...MAC_DU
+  {SI_INFO6_R_REG,              SI_INFO6_R_REG_SIZE,            1U},            // Sesto blocco POT_ATT_PRE_MAX ...CORRENTE_ATT_PRE_MAX
+  {SI_INFO7_W_REG,              SI_INFO7_W_REG_SIZE,            1U},            // Registro in scrittura retrigger watchdog 
+  {(uint16_t)0,                 0,                              1U},            // 
+  {(uint16_t)0,                 0,                              1U},            // 
+  {(uint16_t)0,                 0,                              1U},            // 
+  {(uint16_t)0,                 0,                              1U},            // 
+  {(uint16_t)0,                 0,                              1U},            // 
+  {(uint16_t)0,                 0,                              1U},            // 
+  {(uint16_t)0,                 0,                              1U},            // 
+  {(uint16_t)0,                 0,                              1U},            // 
+  {(uint16_t)0,                 0,                              1U},            // 
+  {(uint16_t)0,                 0,                              1U}},           // 
+  
+#ifdef HW_MP28947
+  
+   /*****  EM MP28947 onboard meter - default  register structure ***************/ 
+   
+   /**  Address                 Size                         Multiplier            Idx                  Required UoM  **/
+  
+ {{PA_SYS_VOLT_1PH_REG,        AD_SYS_VOLT_SIZE,            1000U},            // EM_SYS_VOLTAGE             V              
+  {PA_SYS_VOLT_3PH_REG,         AD_SYS_VOLT_SIZE,            1000U},            // EM_SYS_PH1_VOLTAGE         V
+  {PA_SYS_CURR_L1_REG,          AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L1              A
+  {PA_SYS_CURR_L2_REG,          AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L2              A
+  {PA_SYS_CURR_L3_REG,          AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L3              A
+  {PA_SYS_CURR_REG,             AD_SYS_CURR_SIZE,               1U},            // EM_CURRENT_L               A
+  {PA_COS_PHI_1PH_REG,          (uint16_t)0,                 1000U},            // EM_COS_PHI                 1
+  {PA_COS_PHI_3PH_REG,          (uint16_t)0,                 1000U},            // EM_COS_PH1_PHI             1 
+  {PA_ACT_PWR_REG,              AD_ACT_PWR_SIZE,             1000U},            // EM_ACTIVE_POWER            W
+  {PA_RACT_PWR_REG,             AD_RACT_PWR_SIZE,            1000U},            // EM_REACTIVE_POWER        Var
+  {PA_ACT_ENRG_REG,             AD_ACT_ENRG_SIZE,              10U},            // EM_TOT_ACTIVE_ENERGY      Wh 
+  {PA_RACT_ENRG_REG,            AD_RACT_ENRG_SIZE,             10U},            // EM_TOT_REACT_ENERGY      Varh 
+  {PA_SACT_ENRG_REG,            AD_SACT_ENRG_SIZE,             10U},            // EM_SAS_ACTIVE_ENERGY      Wh 
+  {PA_EXT_ACT_PWR_REG,          AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_ACTIVE_POWER        W
+  {PA_EXT_L1_ACT_PWR_REG,       AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_L1_ACTIVE_POWER   mW*10    
+  {PA_EXT_L2_ACT_PWR_REG,       AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_L2_ACTIVE_POWER   mW*10    
+  {PA_EXT_L3_ACT_PWR_REG,       AD_ACT_PWR_SIZE,             1000U},            // EM_EXT_L3_ACTIVE_POWER   mW*10    
+  {(uint16_t)0,                 0,                              1U}},           // EM_ signed bit 
+  
+#endif
+  
+};
+
+static const emModelInfo_st emModel[LAST_EM][MAX_NUM_ITEMS] = 
+
+  {{{EM_ALGO,     EM_MONO_PH,     (uint16_t)0x0010,                 "UEM40-2",  0}, 
+    {EM_ALGO,     EM_MONO_PH,     (uint16_t)0x000C,                 "UEM80-2",  0},
+    {EM_ALGO,     EM_THREE_PH,    (uint16_t)0x0003,                 "UEM1P5",   0},      
+    {EM_ALGO,     EM_THREE_PH,    (EM_ALGO_EXT_SIM & EM_BIT_MASK),  "UEM80-4",  0},  /* nel caso del simulatore del su PC il model info è 0x8008 --> 0x0008 */
+    {EM_ALGO,     EM_THREE_PH,    (uint16_t)0x0012,                 "UEM63-4",  0},      
+    {EM_ALGO,     EM_MONO_PH,     (uint16_t)0x0014,                 "UEM45-2",  0},      
+    {EM_ALGO,     EM_MONO_PH,     (uint16_t)0x0015,                 "UEM100-2", 0},      
+    {EM_ALGO,     EM_THREE_PH,    (uint16_t)0x0016,                 "UEM100-A", 0},      
+    {EM_ALGO,     EM_THREE_PH,    (uint16_t)0x001A,                 "UEMCT-A",  0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                        "",         0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                        "",         0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                        "",         0}},
+      
+   {{EM_GAVAZZI,  EM_MONO_PH,     (uint16_t)103,                "EM111",        0},      
+    {EM_GAVAZZI,  EM_MONO_PH,     (uint16_t)104,                "EM112",        0},
+    {EM_GAVAZZI,  EM_THREE_PH,    (uint16_t)341,                "EM340",        0}, 
+    {EM_GAVAZZI,  EM_MONO_PH,     (uint16_t)0x700,              "EM511",        0},   // EM511 Standard 
+    {EM_GAVAZZI,  EM_MONO_PH,     (uint16_t)0x702,              "EM511MID",     0},   // EM511 MID / No MID Bidirection / Absolute
+    {EM_GAVAZZI,  EM_MONO_PH,     (uint16_t)0x704,              "EM511MID70",   0},   // EM511 MID Absolute 70° 
+    {EM_GAVAZZI,  EM_MONO_PH,     (uint16_t)0x705,              "EM511MID70",   0},   // EM511 MID Bidirectional 70°
+    {EM_GAVAZZI,  EM_THREE_PH,    (uint16_t)0x06E0,             "EM540",        0},   /* Fixed ticket SCU-101 */ // EM540 Standard device 
+    {EM_GAVAZZI,  EM_THREE_PH,    (uint16_t)0x06E1,             "EM540MID",     0},   /* Fixed ticket SCU-101 */ // EM540 MID Absolute
+    {EM_GAVAZZI,  EM_THREE_PH,    (uint16_t)0x06E2,             "EM540MID",     0},   /* Fixed ticket SCU-101 */ // EM540 MID Counter according to phase sign
+    {EM_GAVAZZI,  EM_THREE_PH,    (uint16_t)0x06E3,             "EM540MID",     0},   /* Fixed ticket SCU-101 */ // EM540 MID Bidirectional counter
+    {EM_GAVAZZI,  EM_THREE_PH,    (uint16_t)0x06E5,             "EM540MID",     0}},  /* Fixed ticket SCU-101 */ // EM540 70° ??
+
+/* NOTE: for LOVATO devices, informations about model and type are not in Modbus map */    
+/* They are present only to have the check working */    
+    
+   {{EM_LOVATO,   EM_MONO_PH,     (uint16_t)0xD3,               "D111",         0},    /* DME D111 identifier */
+    {EM_LOVATO,   EM_MONO_PH,     (uint16_t)0xD4,               "D121",         0},    /* DME D121 identifier */
+    {EM_LOVATO,   EM_THREE_PH,    (uint16_t)0xEA,               "D301",         0},    /* DME D301 identifier */
+    {EM_LOVATO,   EM_THREE_PH,    (uint16_t)0xF0,               "D3017",        0},    /* DME D301 MID7 identifier       */
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0}}, 
+      
+   {{EM_SCAME,    EM_MONO_PH,     (uint16_t)0x0020,             "",             0},      
+    {EM_SCAME,    EM_MONO_PH,     (uint16_t)0x0020,             "",             0},      
+    {EM_SCAME,    EM_THREE_PH,    (uint16_t)0x0030,             "",             0},      
+    {EM_SCAME,    EM_THREE_PH,    (uint16_t)0x0030,             "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0}},     
+                                                            
+/* NOTE: for SINAPSI IOM2G a special management is need  */    
+   {{EM_IOM2G,    EM_MONO_PH,     (uint16_t)0x4455,             "IOM2G",        0},      // DU=0x4455 sono le prime due lettere del serial number usate come model type 
+    {EM_IOM2G,    EM_MONO_PH,     (uint16_t)0x5343,             "IOM2G",        0},      // SC=0x5343 sono le prime due lettere del serial number usate come model type 
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0},      
+    {(emType_e)0, (emPhase_e)0,   LAST_ITEM,                    "",             0}},                                                              
+
+#ifdef HW_MP28947    
+   {{EM_PA775,     EM_MONO_PH,     (uint16_t)0xE320,           "",              0},       // ModelVal value is invented, 'E3' is the suffix for this type of energy meter
+    {EM_PA775,     EM_MONO_PH,     (uint16_t)0xE320,           "",              0},       // ModelVal value is invented, 'E3' is the suffix for this type of energy meter
+    {EM_PA775,     EM_THREE_PH,    (uint16_t)0xE330,           "",              0},       // ModelVal value is invented, 'E3' is the suffix for this type of energy meter
+    {EM_PA775,     EM_THREE_PH,    (uint16_t)0xE330,           "",              0},       // ModelVal value is invented, 'E3' is the suffix for this type of energy meter
+    {(emType_e)0, (emPhase_e)0,    LAST_ITEM,                  "",              0},      
+    {(emType_e)0, (emPhase_e)0,    LAST_ITEM,                  "",              0},      
+    {(emType_e)0, (emPhase_e)0,    LAST_ITEM,                  "",              0},      
+    {(emType_e)0, (emPhase_e)0,    LAST_ITEM,                  "",              0},      
+    {(emType_e)0, (emPhase_e)0,    LAST_ITEM,                  "",              0},      
+    {(emType_e)0, (emPhase_e)0,    LAST_ITEM,                  "",              0},      
+    {(emType_e)0, (emPhase_e)0,    LAST_ITEM,                  "",              0},      
+    {(emType_e)0, (emPhase_e)0,    LAST_ITEM,                  "",              0}},     
+#endif
+    
+  };
+
+static const emRegInfo_st   emDataRegisterLovato3Ph[EM_READ_REG_NUM]    = {
+   /*****  LOVATO  default  register structure ***************/ 
+   
+   /**  Address                 Size                         Multiplier            Idx                  Required UoM  **/
+   
+   {LV_PH_VOLTAGE_MONO_REG,    LV_VOLTAGE_REG_SIZE,            100},           // EM_SYS_VOLTAGE             V
+   {LV_PH_VOLTAGE_THREE_REG,    LV_VOLTAGE_REG_SIZE,            100},           // EM_SYS_PH1_VOLTAGE         V
+   {LV_CURRENT_L1_REG,          LV_VOLTAGE_REG_SIZE,             10},           // EM_CURRENT_L1              A
+   {LV_CURRENT_L2_REG,          LV_CURRENT_REG_SIZE,             10},           // EM_CURRENT_L2              A
+   {LV_CURRENT_L3_REG,          LV_CURRENT_REG_SIZE,             10},           // EM_CURRENT_L3              A
+   {LV_SYS_CURRENT_REG,         LV_CURRENT_REG_SIZE,              1},           // EM_CURRENT_L               A
+   {LV_COS_PHI_1P_REG,          LV_COS_PHI_REG_SIZE,          10000},           // EM_COS_PHI                 1
+   {LV_COS_PHI_3P_REG,          LV_COS_PHI_REG_SIZE,          10000},           // EM_COS_PH1_PHI             1 
+   {LV_SYS_ACT_PWR_3PH_REG,     LV_ACT_PWR_REG_SIZE,            100},           // EM_ACTIVE_POWER            W
+   {LV_SYS_REACT_PWR_REG,       LV_REACT_PWR_REG_SIZE,          100},           // EM_REACTIVE_POWER        Var
+   {LV_TOT_ACT_ENERGY_REG,      LV_ACT_ENERGY_REG_SIZE,           1},           // EM_TOT_ACTIVE_ENERGY      Wh 
+   {LV_TOT_REACT_ENERGY_REG,    LV_REACT_ENERGY_REG_SIZE,      1000},           // EM_TOT_REACT_ENERGY      Varh 
+   {LV_PART_ACT_ENERGY_REG,     LV_ACT_ENERGY_REG_SIZE,        1000},           // EM_SAS_ACTIVE_ENERGY      Wh 
+   {LV_SYS_ACT_PWR_MONO_REG,    LV_ACT_PWR_REG_SIZE,            -10},           // EM_EXT_ACTIVE_POWER        W
+   {LV_ACT_PWR_L1_REG,          LV_ACT_PWR_REG_SIZE,            100},           // EM_EXT_L1_ACTIVE_POWER   mW*10
+   {LV_ACT_PWR_L2_REG,          LV_ACT_PWR_REG_SIZE,            100},           // EM_EXT_L2_ACTIVE_POWER   mW*10
+   {LV_ACT_PWR_L3_REG,          LV_ACT_PWR_REG_SIZE,            100},           // EM_EXT_L3_ACTIVE_POWER   mW*10
+   {LV_ACT_PWR_SIGN_REG,        LV_ACT_PWR_SIGN_SIZE,            1U}            // EM_ signed bit 
+};
+
+/* Table of CRC values for high–order byte */
+static const unsigned char auchCRCHi[] = {
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 
+0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40, 0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41,
+0x00, 0xC1, 0x81, 0x40, 0x01, 0xC0, 0x80, 0x41, 0x01, 0xC0, 0x80, 0x41, 0x00, 0xC1, 0x81, 0x40
+};
+
+/* Table of CRC values for low–order byte */
+static const char auchCRCLo[] = {
+0x00, 0xC0, 0xC1, 0x01, 0xC3, 0x03, 0x02, 0xC2, 0xC6, 0x06, 0x07, 0xC7, 0x05, 0xC5, 0xC4, 0x04, 
+0xCC, 0x0C, 0x0D, 0xCD, 0x0F, 0xCF, 0xCE, 0x0E, 0x0A, 0xCA, 0xCB, 0x0B, 0xC9, 0x09, 0x08, 0xC8, 
+0xD8, 0x18, 0x19, 0xD9, 0x1B, 0xDB, 0xDA, 0x1A, 0x1E, 0xDE, 0xDF, 0x1F, 0xDD, 0x1D, 0x1C, 0xDC, 
+0x14, 0xD4, 0xD5, 0x15, 0xD7, 0x17, 0x16, 0xD6, 0xD2, 0x12, 0x13, 0xD3, 0x11, 0xD1, 0xD0, 0x10, 
+0xF0, 0x30, 0x31, 0xF1, 0x33, 0xF3, 0xF2, 0x32, 0x36, 0xF6, 0xF7, 0x37, 0xF5, 0x35, 0x34, 0xF4, 
+0x3C, 0xFC, 0xFD, 0x3D, 0xFF, 0x3F, 0x3E, 0xFE, 0xFA, 0x3A, 0x3B, 0xFB, 0x39, 0xF9, 0xF8, 0x38, 
+0x28, 0xE8, 0xE9, 0x29, 0xEB, 0x2B, 0x2A, 0xEA, 0xEE, 0x2E, 0x2F, 0xEF, 0x2D, 0xED, 0xEC, 0x2C, 
+0xE4, 0x24, 0x25, 0xE5, 0x27, 0xE7, 0xE6, 0x26, 0x22, 0xE2, 0xE3, 0x23, 0xE1, 0x21, 0x20, 0xE0, 
+0xA0, 0x60, 0x61, 0xA1, 0x63, 0xA3, 0xA2, 0x62, 0x66, 0xA6, 0xA7, 0x67, 0xA5, 0x65, 0x64, 0xA4, 
+0x6C, 0xAC, 0xAD, 0x6D, 0xAF, 0x6F, 0x6E, 0xAE, 0xAA, 0x6A, 0x6B, 0xAB, 0x69, 0xA9, 0xA8, 0x68, 
+0x78, 0xB8, 0xB9, 0x79, 0xBB, 0x7B, 0x7A, 0xBA, 0xBE, 0x7E, 0x7F, 0xBF, 0x7D, 0xBD, 0xBC, 0x7C, 
+0xB4, 0x74, 0x75, 0xB5, 0x77, 0xB7, 0xB6, 0x76, 0x72, 0xB2, 0xB3, 0x73, 0xB1, 0x71, 0x70, 0xB0, 
+0x50, 0x90, 0x91, 0x51, 0x93, 0x53, 0x52, 0x92, 0x96, 0x56, 0x57, 0x97, 0x55, 0x95, 0x94, 0x54, 
+0x9C, 0x5C, 0x5D, 0x9D, 0x5F, 0x9F, 0x9E, 0x5E, 0x5A, 0x9A, 0x9B, 0x5B, 0x99, 0x59, 0x58, 0x98, 
+0x88, 0x48, 0x49, 0x89, 0x4B, 0x8B, 0x8A, 0x4A, 0x4E, 0x8E, 0x8F, 0x4F, 0x8D, 0x4D, 0x4C, 0x8C,
+0x44, 0x84, 0x85, 0x45, 0x87, 0x47, 0x46, 0x86, 0x82, 0x42, 0x43, 0x83, 0x41, 0x81, 0x80, 0x40
+};
+
+/* Definitions for Algo2 Sim Task Manager    */
+const osThreadAttr_t algo2SimTask_attributes = {
+  .name = "ALGO2_SIM",
+  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = configMINIMAL_STACK_SIZE * 3     // 
+};
+
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Local Variables                               **
+**                                                                          **
+****************************************************************************** 
+*/ 
+
+static frameEm_st            emTxMsg, emRxMsg;  
+static frameRxEm_st          frameRxEm;  
+static emRegInfo_st          emRegInfo[EM_MAX_NUM][EM_READ_REG_NUM];
+static uint8_t               emeter_type[EM_MAX_NUM];
+
+emTaskState_st        emTaskState;
+emAlgo2State_st       emAlgo2State;
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Global Variables                              **
+**                                                                          **
+****************************************************************************** 
+*/ 
+
+
+/* Energy meter   queue  declaration */
+xQueueHandle        emQueue = NULL;
+xQueueHandle        emAnswQueue = NULL;
+/* asyncronous request   queue  declaration */
+xQueueHandle        asyncReqQueue = NULL;
+
+emSinapsiInfo_st*   pEmSinapsiInfo;
+uint8_t*            pSiInfoBk[SI_NUM_INFO];
+frameEm_st          emMsg;
+
+osThreadId_t        algo2SimTaskHandle;
+xQueueHandle        algo2SimQueue = NULL;
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            External Variables                            **
+**                                                                          **
+******************************************************************************
+*/
+
+extern frameEm_st emMsgRx_IT;
+#ifdef HW_MP28947
+extern METRO_Device_Config_t * p_Metro_Device_Config;
+#endif
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            External Function                             **
+**                                                                          **
+******************************************************************************
+*/
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Internal Function prototype                   **
+**                                                                          **
+******************************************************************************
+*/
+static uint32_t           Process_em_Request          (frameEm_st* pEmMsg);
+static int32_t            swap32                      (int32_t dataD);
+static int32_t            swap3                       (uint8_t * pData);
+static int32_t            swap4                       (uint8_t * pData);
+static void               emUartInitialization        (void);
+static void               restoreEmModel              (void);
+#ifdef CHANGE_ENDIANESS
+static int32_t            changeEndianess             (int32_t dataD);
+#endif
+#ifdef SINAPSI_BIG_ENDIAN
+static void               changeSinapsiToLittleEndian (uint8_t blockInfo);
+#endif
+static void               changeSinapsiModelEndianess (uint8_t* pInfoModel);
+static int32_t            getScameEnergyValue         (void);
+static void               algo2SimMngTask             (void * pvParameters);
+static uint32_t           algo2SimProcess             (algo2EvRx_st* pMsg);
+static void               startSendInfoAlgo2Sim       (void);
+static void               resetPwmVal                 (void);
+
+
+/*
+***********************************SCAME**************************************
+**                                                                          **
+**                            Function Definition                           **
+**                                                                          **
+******************************************************************************
+*/
+
+void emGestTask (void * pvParameters)
+{
+  uint32_t       timeTick;
+
+  /*-------- Creates an empty mailbox for uart  messages --------------------------*/
+  emQueue = xQueueCreate(NUM_BUFF_EM_RX, sizeof(frameEm_st));
+  configASSERT(emQueue != NULL);
+  emAnswQueue = xQueueCreate(NUM_BUFF_EM_RX, sizeof(frameEm_st));
+  configASSERT(emAnswQueue != NULL);
+  
+  /*----- Initialization UART FOR RS485      -------------------------------------------*/
+  emUartInitialization();
+	/* end initialization */
+
+  /* init data structures */
+  for (uint8_t i = 0; i < (uint8_t)EM_MAX_NUM; i++)
+  {
+    emMsg.emModelInfo[i].type = EM_UNKNOW;
+  }
+
+  emTaskState.state[INTERNAL_EM] = emTaskState.state[EXTERNAL_EM] = STATE_IDLE;
+  emTaskState.curIx[INTERNAL_EM] = emTaskState.curIx[EXTERNAL_EM] = 0; 
+  emTaskState.triggerEnrgMeas = 0;
+  emTaskState.emAddr[INTERNAL_EM] = EM_INT_ADDR;
+  emTaskState.emAddr[EXTERNAL_EM] = EM_EXT_ADDR;
+  emTaskState.nextTimeout[INTERNAL_EM] = emTaskState.nextTimeout[EXTERNAL_EM] = (uint16_t)0;
+  emTaskState.sessActEnergy.currentActEnrgValue = emTaskState.sessActEnergy.startActEnrgValue = emTaskState.sessActEnergy.sessionEnrgValue = (int32_t)0;
+  emTaskState.numRetryBeforeError[INTERNAL_EM] = emTaskState.numRetryBeforeError[EXTERNAL_EM] = (uint16_t)0;
+  emTaskState.numRetryLimit[INTERNAL_EM] = emTaskState.numRetryLimit[EXTERNAL_EM] = MAX_NUM_RETRY_DISCOVERY;
+
+  /* init for SINAPSI data structures */
+  emTaskState.sinapsiChain2Status = (uint16_t)CHAIN2_UNDEF;
+
+  pEmSinapsiInfo = (emSinapsiInfo_st*)&emTaskState.emUserReg[EXTERNAL_EM][EM_SYS_VOLTAGE];
+  pSiInfoBk[0] = pSiInfoBk[7] = (uint8_t*)pEmSinapsiInfo;
+  pSiInfoBk[1] = (uint8_t*)&pEmSinapsiInfo->setConfigMode;
+  pSiInfoBk[2] = (uint8_t*)&pEmSinapsiInfo->getConfigMode;
+  pSiInfoBk[3] = (uint8_t*)&pEmSinapsiInfo->cfgDU;
+  pSiInfoBk[4] = (uint8_t*)&pEmSinapsiInfo->duUpTime;
+  pSiInfoBk[5] = (uint8_t*)&pEmSinapsiInfo->potAttPreIstTs; 
+  pSiInfoBk[6] = (uint8_t*)&pEmSinapsiInfo->potAttPreMax;
+
+  timeTick = pdMS_TO_TICKS(TIMER_TICK_FIRST_POLL); // tipical polling time: 100ms, but first polling has been moved to 3.5s to avoid errors at startup
+  
+  restoreEmModel();
+
+  /* starts the task to manager Algo2 Simulator when present    */
+  algo2SimTaskHandle = osThreadNew(algo2SimMngTask, NULL, &algo2SimTask_attributes);  
+
+  for (;;)
+  {
+    /* Wait for some event from Rx/Tx uart RS485 (typically UART2 */
+    if (xQueueReceive(emQueue, (void *)&emMsg, timeTick) == pdPASS)
+    {
+      timeTick = Process_em_Request(&emMsg);
+    }
+    else
+    {
+      /* timeout:new polling over all inputs  */
+      emMsg.taskEvent = EVT_TIMEOUT;
+      timeTick = Process_em_Request(&emMsg);
+    }
+  }
+}
+
+/**
+*
+* @brief       Gestione del protocollo 
+*
+* @param [in]  PACKET_MS*: puntatore al messaggio ricevuto  
+*  
+* @retval      none 
+*  
+****************************************************************/
+static uint32_t Process_em_Request(frameEm_st* pEmMsg)
+{
+  uint16_t              regAddr, lenInfo, potRestart;
+  int16_t               tmp;
+  uint8_t*              pBuffer;
+  emError_e             error;
+  scuRoMapRegister_st*  pRoRegs;
+  scuRwMapRegister_st*  pRwRegs;
+  int32_t               temp32;
+  uint32_t              timeTk;
+  sinapsiSetReg_st*     sinapsi_ptr;
+  uint8_t               readSize, idx, numRetry, ix, mdbAddr;
+  energy_meter_e        value;
+  uint8_t               pass[4];
+#ifdef SIN_ALGO2SIM
+  data64_u              data64;
+#endif
+
+  timeTk = pdMS_TO_TICKS(TIMER_TICK_POLL_REGS); // tipical polling time: 100ms
+
+  for (ix = (uint8_t)INTERNAL_EM; ix  < (uint8_t)EM_MAX_NUM; ix++)
+  {
+    switch (emTaskState.state[ix])
+    {
+      case EM_STOP_FOR_V230KO:
+         if (pEmMsg->taskEvent == EVT_START_FOR_V230_OK)
+         {
+           /* the V230 now is OK */
+           timeTk = pdMS_TO_TICKS(TIMER_TICK_NEW_DISC);         // tipical timeout for discovery: 2000ms
+           if (ix == (uint8_t)INTERNAL_EM) 
+           {
+             tPrintf("EM Start for 230 OK\n\r");
+             restoreEmModel();    // return in EM_FAST_RESTORE state 
+           }
+         }
+        break;
+
+      case STATE_IDLE:
+      case EM_FAST_RESTORE:
+        /* check for received event  */
+        if ((pEmMsg->taskEvent == EVT_TIMEOUT) || (emTaskState.state[ix] == EM_FAST_RESTORE))  // message to be send to Energy Meter
+        {
+          if ((emTaskState.nextTimeout[ix] >= TIMER_TICK_NEW_DISC) || (emTaskState.state[ix] == EM_FAST_RESTORE))
+          {
+            emTaskState.nextTimeout[ix] = (uint16_t)0;
+            error = EM_NO_ERROR;
+            if ((emTaskState.state[ix] != EM_FAST_RESTORE))
+            {
+              if (discoveryEm((uint8_t)emTaskState.emAddr[ix]) == NULL) error = EM_NO_ANSWER;
+            }
+            else
+            {
+              osDelay(1000); 
+            }
+            if (error == EM_NO_ERROR)
+            {
+              memset((void*)&emTaskState.emUserReg[ix][0], (int)0, sizeof(emTaskState.emUserReg[0]));
+              /* Select which Energy meter must be managed */
+              switch (emMsg.emModelInfo[ix].type)
+              {
+                case EM_ALGO:                   /* Energy meter ALGO DUE detected */
+                  
+                  /* initialize data reg structure                                     */
+                  lenInfo = EM_READ_REG_NUM * sizeof(emRegInfo_st); 
+                  /*             destination                  source                       length   */
+                  memcpy((void*)&emRegInfo[ix][0], (void*)&emDataRegister[EM_ALGO][0], lenInfo);
+                  if (emMsg.emModelInfo[ix].emPhase == EM_MONO_PH)
+                  {
+                    /* remove unsed register in monophase version setting length to 0 */
+                    emRegInfo[ix][EM_SYS_PH1_VOLTAGE].size = emRegInfo[ix][EM_COS_PH1_PHI].size = (uint16_t)0;
+                    emRegInfo[ix][EM_CURRENT_L1].size = emRegInfo[ix][EM_CURRENT_L2].size = emRegInfo[ix][EM_CURRENT_L3].size = (uint16_t)0;
+                    emRegInfo[ix][EM_EXT_L1_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L2_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L3_ACTIVE_POWER].size = 0;
+                    emeter_type[ix] = EMETER_MONO_PH_ALGO2;   /* RIVEDERE */
+                    setStationEmType(MONO_ALGO2, (emEnum_e)ix, EMETER_MONO_PH_ALGO2, EMETER_MONO_PH_ALGO2);
+                    tPrintf("EM %d ALGO2 MonoFase\n\r", (ix + 1));
+                    /* LOG message */
+                    EVLOG_Message (EV_INFO, "EM %d ALGO2 Monofase", (ix + 1));                                        
+                  }
+                  else
+                  {
+                    /* remove unsed register in 3phase  version */
+                    emRegInfo[ix][EM_SYS_VOLTAGE].size = emRegInfo[ix][EM_CURRENT_L].size = emRegInfo[ix][EM_COS_PHI].size = (uint16_t)0;
+                    emeter_type[ix] = EMETER_THREE_PH_ALGO2;   /* RIVEDERE */
+                    setStationEmType(TRI_ALGO2, (emEnum_e)ix, EMETER_THREE_PH_ALGO2, EMETER_THREE_PH_ALGO2);              
+                    tPrintf("EM %d ALGO2 TriFase\n\r", (ix + 1));
+                    /* LOG message */
+                    EVLOG_Message (EV_INFO, "EM %d ALGO2 TriFase", (ix + 1));                                        
+                  }
+                  break;
+                
+                case EM_SCAME:                     /* Energy meter SCAME detected */
+                  /* initialize data reg structure                                     */
+                  lenInfo = EM_READ_REG_NUM * sizeof(emRegInfo_st); 
+                  /*             destination                  source                       length   */
+                  memcpy((void*)&emRegInfo[ix][0], (void*)&emDataRegister[EM_SCAME][0], lenInfo);
+                  if (emMsg.emModelInfo[ix].emPhase == EM_MONO_PH)
+                  {
+                    /* remove unsed register in monophase version */
+                    emRegInfo[ix][EM_SYS_PH1_VOLTAGE].size = emRegInfo[ix][EM_COS_PH1_PHI].size = (uint16_t)0;
+                    emRegInfo[ix][EM_CURRENT_L1].size = emRegInfo[ix][EM_CURRENT_L2].size = emRegInfo[ix][EM_CURRENT_L3].size = (uint16_t)0;
+                    emRegInfo[ix][EM_EXT_L1_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L2_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L3_ACTIVE_POWER].size = 0;
+                    emeter_type[ix] = EMETER_MONO_PH_SCAME;   /* RIVEDERE */
+                    setStationEmType(MONO_SCAME, (emEnum_e)ix, EMETER_MONO_PH_ALGO2, EMETER_MONO_PH_SCAME);
+                    tPrintf("EM %d SCAME MonoFase\n\r", (ix + 1));
+                    /* LOG message */
+                    EVLOG_Message (EV_INFO, "EM %d SCAME Monofase", (ix + 1));                                                            
+                  }
+                  else
+                  {
+                    /* remove unsed register in 3phase  version */
+                    emRegInfo[ix][EM_SYS_VOLTAGE].size = emRegInfo[ix][EM_CURRENT_L].size = emRegInfo[ix][EM_COS_PHI].size = (uint16_t)0;
+                    emeter_type[ix] = EMETER_THREE_PH_SCAME;   /* RIVEDERE */
+                    setStationEmType(TRI_SCAME, (emEnum_e)ix, EMETER_THREE_PH_ALGO2, EMETER_THREE_PH_SCAME);
+                    tPrintf("EM %d SCAME TriFase\n\r", (ix + 1));
+                    /* LOG message */
+                    EVLOG_Message (EV_INFO, "EM %d SCAME TriFase", (ix + 1));                                        
+                  }    
+                  if  (ix == INTERNAL_EM)
+                  {
+                    /* set current active energy in SCAME EM */ 
+                    setScameActEnergyEepromOffset((uint32_t)0, (uint8_t)1, (uint8_t)0, NULL);       
+                  }
+                break;
+                
+                case EM_GAVAZZI:                /* Energy meter GAVAZZI detected */
+                  /* initialize data reg structure                                     */
+                  lenInfo = EM_READ_REG_NUM * sizeof(emRegInfo_st); 
+                  /*             destination                  source                       length   */
+                  memcpy((void*)&emRegInfo[ix][0], (void*)&emDataRegister[EM_GAVAZZI][0], lenInfo);
+                  if (emMsg.emModelInfo[ix].emPhase == EM_MONO_PH)
+                  {
+                    /* remove unsed register in monophase version */
+                    emRegInfo[ix][EM_SYS_PH1_VOLTAGE].size = emRegInfo[ix][EM_COS_PH1_PHI].size = (uint16_t)0;
+                    emRegInfo[ix][EM_CURRENT_L1].size = emRegInfo[ix][EM_CURRENT_L2].size = emRegInfo[ix][EM_CURRENT_L3].size = (uint16_t)0;
+                    emRegInfo[ix][EM_EXT_L1_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L2_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L3_ACTIVE_POWER].size = 0;
+                    emeter_type[ix] = EMETER_MONO_PH_GAVAZZI;   /* RIVEDERE */
+                    setStationEmType(MONO_GAVAZZI, (emEnum_e)ix, EMETER_MONO_PH_GAVAZZI, EMETER_MONO_PH_GAVAZZI);
+                    tPrintf("EM %d GAVAZZI  MonoFase Mod: %s\n\r", (ix + 1), emMsg.emModelInfo[ix].modelName);
+                    /* LOG message */
+                    EVLOG_Message (EV_INFO, "EM %d GAVAZZI  MonoFase Mod: %s", (ix + 1), emMsg.emModelInfo[ix].modelName);                                        
+                  }
+                  else
+                  {
+                    /* remove unsed register in 3phase  version */
+                    emRegInfo[ix][EM_SYS_VOLTAGE].size = emRegInfo[ix][EM_CURRENT_L].size = emRegInfo[ix][EM_COS_PHI].size = (uint16_t)0;
+                    emeter_type[ix] = EMETER_THREE_PH_GAVAZZI;   /* RIVEDERE */
+                    setStationEmType(TRI_GAVAZZI, (emEnum_e)ix, EMETER_THREE_PH_GAVAZZI, EMETER_THREE_PH_GAVAZZI);
+                    tPrintf("EM %d GAVAZZI  TriFase Mod: %s\n\r", (ix + 1), emMsg.emModelInfo[ix].modelName);
+                    /* LOG message */
+                    EVLOG_Message (EV_INFO, "EM %d GAVAZZI  TriFase Mod: %s", (ix + 1), emMsg.emModelInfo[ix].modelName);
+                  }                  
+                  break;
+                
+                case EM_LOVATO:        /* Energy meter LOVATO detected */
+                  /* initialize data reg structure                                     */
+                  lenInfo = EM_READ_REG_NUM * sizeof(emRegInfo_st); 
+                  /*             destination                  source                       length   */
+                  memcpy((void*)&emRegInfo[ix][0], (void*)&emDataRegister[EM_LOVATO][0], lenInfo);
+                  if (emMsg.emModelInfo[ix].emPhase == EM_MONO_PH)
+                  {
+                    /* remove unsed register in monophase version */
+                    emRegInfo[ix][EM_SYS_PH1_VOLTAGE].size = emRegInfo[ix][EM_COS_PH1_PHI].size = (uint16_t)0;
+                    emRegInfo[ix][EM_CURRENT_L1].size = emRegInfo[ix][EM_CURRENT_L2].size = emRegInfo[ix][EM_CURRENT_L3].size = (uint16_t)0;
+                    emRegInfo[ix][EM_EXT_L1_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L2_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L3_ACTIVE_POWER].size = 0;
+                    emeter_type[ix] = EMETER_MONO_PH_LOVATO;   
+                    setStationEmType(MONO_LOVATO, (emEnum_e)ix, EMETER_MONO_PH_ALGO2, EMETER_MONO_PH_LOVATO);
+                    tPrintf("EM %d LOVATO  MonoFase Mod: %s\n\r", (ix + 1), emMsg.emModelInfo[ix].modelName);
+                    /* LOG message */
+                    EVLOG_Message (EV_INFO, "EM %d LOVATO  MonoFase Mod: %s", (ix + 1), emMsg.emModelInfo[ix].modelName);
+                  }
+                  else
+                  {
+                    /*             destination                  source                       length   */
+                    memcpy((void*)&emRegInfo[ix][0], (void*)&emDataRegisterLovato3Ph[0], lenInfo);
+                    /* remove unsed register in 3phase  version */
+                    emRegInfo[ix][EM_SYS_VOLTAGE].size = emRegInfo[ix][EM_CURRENT_L].size = emRegInfo[ix][EM_COS_PHI].size = (uint16_t)0;
+                    emeter_type[ix] = EMETER_THREE_PH_LOVATO;   
+                    setStationEmType(TRI_LOVATO, (emEnum_e)ix, EMETER_THREE_PH_ALGO2, EMETER_THREE_PH_LOVATO);
+                    tPrintf("EM %d LOVATO  TriFase Mod: %s\n\r", (ix + 1), emMsg.emModelInfo[ix].modelName);
+                    /* LOG message */
+                    EVLOG_Message (EV_INFO, "EM %d LOVATO  TriFase Mod: %s", (ix + 1), emMsg.emModelInfo[ix].modelName);
+                  }                                    
+                  break;
+                
+                case EM_IOM2G:                /* Energy meter SINAPSI detected */
+                  emeter_type[ix] = EMETER_SINAPSI;   
+                  /* initialize data reg structure                                     */
+                  lenInfo = EM_READ_REG_NUM * sizeof(emRegInfo_st); 
+                  /*             destination                  source                       length   */
+                  memcpy((void*)&emRegInfo[ix][0], (void*)&emDataRegister[EM_IOM2G][0], lenInfo);
+                  setStationEmType(MONO_SINAPSI, (emEnum_e)ix, EMETER_SINAPSI, EMETER_SINAPSI);
+                  tPrintf("EM %d SINAPSI!!!\n\r", (ix + 1));
+                  /* LOG message */
+                  EVLOG_Message (EV_INFO, "EM %d SINAPSI!!!", (ix + 1));
+                  break;
+#ifdef HW_MP28947 
+                case EM_PA775:     /* Found Energy meter plugged with board MP28947 */
+                  
+                  /* initialize data reg structure                                     */
+                  lenInfo = EM_READ_REG_NUM * sizeof(emRegInfo_st); 
+                  /*             destination                  source                       length   */
+                  memcpy((void*)&emRegInfo[ix][0], (void*)&emDataRegister[EM_SCAME][0], lenInfo);                                   
+                  /* Check if device is MONO */
+                  if (emMsg.emModelInfo[INTERNAL_EM].emPhase == EM_MONO_PH)
+                  {
+                     emMsg.emModelInfo[INTERNAL_EM].type = EM_PA775;     /* set model type */
+                     emMsg.emModelInfo[INTERNAL_EM].emPhase = EM_MONO_PH;  /* set number of phases: MONO */      
+                     /* remove unsed register in monophase version */
+                     emRegInfo[ix][EM_SYS_PH1_VOLTAGE].size = emRegInfo[ix][EM_COS_PH1_PHI].size = (uint16_t)0;
+                     emRegInfo[ix][EM_CURRENT_L1].size = emRegInfo[ix][EM_CURRENT_L2].size = emRegInfo[ix][EM_CURRENT_L3].size = (uint16_t)0;
+                     emRegInfo[ix][EM_EXT_L1_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L2_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L3_ACTIVE_POWER].size = 0;
+                     emeter_type[ix] = EMETER_MONO_PH_PA775;
+                     setStationEmType(MONO_PA775, (emEnum_e)ix, EMETER_MONO_PH_PA775, EMETER_MONO_PH_PA775);
+                  }
+                  else   /* device THREE phase */
+                  {
+                     emMsg.emModelInfo[INTERNAL_EM].type = EM_PA775;      /* set model type */
+                     emMsg.emModelInfo[INTERNAL_EM].emPhase = EM_THREE_PH;  /* set number of phases: MONO */            
+                     /* remove unsed register in 3phase  version */
+                     emRegInfo[ix][EM_SYS_VOLTAGE].size = emRegInfo[ix][EM_CURRENT_L].size = emRegInfo[ix][EM_COS_PHI].size = (uint16_t)0;
+                     emeter_type[ix] = EMETER_THREE_PH_PA775;   
+                     setStationEmType(TRI_PA775, (emEnum_e)ix, EMETER_THREE_PH_PA775, EMETER_THREE_PH_PA775);
+                  }
+                  
+                  tPrintf("Internal Energy Meter initialized as %d phase\n\r", emMsg.emModelInfo[INTERNAL_EM].emPhase);
+                  
+                  break;
+#endif                  
+                default:                  /* Energy meter found is not in the list IOM2G_INFO1_R_ID */
+                break;
+              }
+              if (INTERNAL_EM == ix)
+              {
+                /* fixed the bug when on reset the initial value of energy was 0 */
+                switch (emMsg.emModelInfo[ix].type)
+                {
+                  case EM_ALGO:
+                  case EM_GAVAZZI:
+                  case EM_LOVATO:
+                    regAddr = emRegInfo[INTERNAL_EM][EM_TOT_ACTIVE_ENERGY].regAdd;
+                    readSize = emRegInfo[INTERNAL_EM][EM_TOT_ACTIVE_ENERGY].size;
+                    pBuffer = (uint8_t*)&emTaskState.emUserReg[INTERNAL_EM][EM_TOT_ACTIVE_ENERGY];
+                    /* read current value for totale energy  */
+                    error = getEmRegister(regAddr, readSize, pBuffer, (uint8_t)emTaskState.emAddr[INTERNAL_EM], FALSE);
+                    if (error == EM_NO_ERROR)
+                    {
+                      temp32 = (getEmRegisterValue(EM_TOT_ACTIVE_ENERGY, emeter_type[INTERNAL_EM]) / (int32_t)100);
+                      pass[0] = (uint8_t)((temp32 & 0xFF000000) >> 24);
+                      pass[1] = (uint8_t)((temp32 & 0x00FF0000) >> 16);
+                      pass[2] = (uint8_t)((temp32 & 0x0000FF00) >> 8);
+                      pass[3] = (uint8_t)((temp32 & 0x000000FF));
+                      /* now save in array eeprom the total energy value  */
+                      eeprom_array_set(TOT_ENERGY0_EADD, (uint8_t *)&pass[0], 4);
+                    }
+                    break;
+
+                  default:
+                    break;
+                }
+              }
+              
+              /* Update modbus register */
+              setEvsePowerMode();
+
+              /* Check if INTERNAL or EXTERNAL */
+              switch (ix)
+              {
+                case INTERNAL_EM:
+                  /* external em info (of course!) and session active energy are disable */
+                  emRegInfo[ix][EM_EXT_ACTIVE_POWER].size = emRegInfo[ix][EM_SES_ACTIVE_ENERGY].size = (uint16_t)0;
+                  emRegInfo[ix][EM_EXT_L1_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L2_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L3_ACTIVE_POWER].size = 0;
+                  send_to_evs(EVS_INTERNAL_EM_GOOD);
+//                send_to_pwm(PWM_INTERNAL_EM_GOOD);
+                  osDelay(2000);
+                  tPrintf("Notify Int EM%d\n\r", (ix + 1));
+                  /* LOG message */
+                  EVLOG_Message (EV_INFO,"Notify Int EM%d", (ix + 1)); 
+                break;
+                
+                case EXTERNAL_EM:
+                  if (emMsg.emModelInfo[ix].type != EM_IOM2G)
+                  {
+                    /* remove unsed register: only ext SYS, L1, L2, L3 active power must be read  */
+                    emRegInfo[ix][EM_SYS_VOLTAGE].size = emRegInfo[ix][EM_SYS_PH1_VOLTAGE].size = (uint16_t)0;
+                    emRegInfo[ix][EM_CURRENT_L1].size = emRegInfo[ix][EM_CURRENT_L2].size = emRegInfo[ix][EM_CURRENT_L3].size = (uint16_t)0;
+                    emRegInfo[ix][EM_CURRENT_L].size = emRegInfo[ix][EM_COS_PHI].size = emRegInfo[ix][EM_COS_PH1_PHI].size = (uint16_t)0;
+                    emRegInfo[ix][EM_ACTIVE_POWER].size = emRegInfo[ix][EM_REACTIVE_POWER].size = emRegInfo[ix][EM_TOT_ACTIVE_ENERGY].size = (uint16_t)0;
+                    emRegInfo[ix][EM_TOT_REACT_ENERGY].size = emRegInfo[ix][EM_SES_ACTIVE_ENERGY].size = emRegInfo[ix][EM_EXT_SIGN_POWER].size = (uint16_t)0;
+                    if (emMsg.emModelInfo[ix].modelVal == EM_ALGO_EXT_SIM)  // 0x8008 when PC is used as PM simulator 
+                    {
+                      /* ALGO 2 EXT simulated from PC: writo to PC the info on pwm d.c., contactor status, 3ph balance/unbalance mode  */
+                      emRegInfo[ix][EM_EXT_SIGN_POWER].size = SI_INFO7_W_REG_SIZE;
+                      emRegInfo[ix][EM_COS_PH1_PHI].size = AD_COS_PHI_SIZE;    // that used for set PMAX in Power Management enviroment
+                    }
+                    if (emMsg.emModelInfo[ix].type == EM_LOVATO)
+                    {
+                      emRegInfo[ix][EM_EXT_SIGN_POWER].size = LV_ACT_PWR_SIGN_SIZE;
+                      if (emMsg.emModelInfo[ix].emPhase == EM_THREE_PH)
+                      {
+                        emRegInfo[ix][EM_EXT_ACTIVE_POWER].regAdd = LV_SYS_ACT_PWR_THREE_REG;
+                        emRegInfo[ix][EM_EXT_ACTIVE_POWER].value = LV_THREE_ACT_PWR_FACTOR;
+                      }
+                      else
+                      {
+                        /* to avoid read undefined register, remove the reading on L1, L2, L3 active power */
+                        emRegInfo[ix][EM_EXT_L1_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L2_ACTIVE_POWER].size = emRegInfo[ix][EM_EXT_L3_ACTIVE_POWER].size = (uint16_t)0;
+                      }
+                    }
+                  }
+
+                  //setPmMenuVisibility(PMNG_FULL);
+                  send_to_evs(EVS_EXTERNAL_EM_GOOD);
+//                  send_to_pwm(PWM_EXTERNAL_EM_GOOD);
+                  tPrintf("Notify Ext EM%d\n\r", (ix + 1));
+                  /* LOG message */
+                  EVLOG_Message (EV_INFO, "Notify Ext EM%d", (ix + 1));
+                  osDelay(2000);                  
+                break;
+                
+                default:        
+                break;
+                
+              }                          
+              
+              /* start index for polling */
+              emTaskState.curIx[ix] = (uint16_t)EM_SYS_VOLTAGE;
+              /* set new state  */
+              emTaskState.state[ix] = EM_POLLING;
+                
+              emTaskState.numRetryBeforeError[ix] = (uint16_t)0;
+              emTaskState.numRetryLimit[ix] = MAX_NUM_RETRY_DISCOVERY;
+            }
+            else
+            {
+              if (emTaskState.numRetryBeforeError[ix] >= MAX_NUM_RETRY_DISCOVERY)
+              {
+                if (ix == INTERNAL_EM)
+                {
+                  send_to_evs(EVS_INTERNAL_EM_FAIL);
+
+                  /*----- Re-Initialization UART FOR RS485      -------------------------------------------*/
+                  emUartInitialization();
+                  osDelay(200);
+                }
+                else
+                {
+                  {
+                    send_to_evs(EVS_EXTERNAL_EM_FAIL);
+                  }
+                }
+              }
+              else
+              {
+                emTaskState.numRetryBeforeError[ix]++;
+              }
+            }
+          }
+          else
+          {
+            /* inc tick wait */
+            emTaskState.nextTimeout[ix]++;
+          }
+        }
+        break;
+
+      case EM_POLLING:
+        /* check for received event  */
+        if (pEmMsg->taskEvent == EVT_TIMEOUT)   
+        {
+          
+          if (ix != (uint8_t)INTERNAL_EM)
+          {
+            /* before change EM wait 10ms */
+            osDelay(100);
+          }
+             
+#ifdef HW_MP28947
+          /* In case of internal energy meter MP28947, use the Metro HAL to read the measures */
+          if (ix == INTERNAL_EM)
+          {
+            METRO_Latch_Measures();     /* Latch measures */   
+            METRO_Get_Measures();       /* Read mesures */ 
+            METRO_UpdateData();         /* Update frontend values */     
+            
+            /* Adjust registers in modbus map  */
+            mdbAddr = getLogicalMdbAddrSem();
+            pRoRegs = getRoMdbRegs(mdbAddr);
+            pRwRegs = getRwMdbRegs(mdbAddr);
+            
+            /* System voltage */
+            if (emMsg.emModelInfo[INTERNAL_EM].emPhase == EM_MONO_PH)
+            {
+              pRoRegs->scuMapRegStatusMeas.mtVsys = getEmRegisterValue(EM_SYS_VOLTAGE, emeter_type[ix]);
+              pRoRegs->scuMapRegStatusMeas.mtPh1Cur = getEmRegisterValue(EM_CURRENT_L, emeter_type[ix]);
+            }
+            else
+            {
+              pRoRegs->scuMapRegStatusMeas.mtVsys = getEmRegisterValue(EM_SYS_PH1_VOLTAGE, emeter_type[ix]);
+              pRoRegs->scuMapRegStatusMeas.mtPh1Cur = getEmRegisterValue(EM_CURRENT_L1, emeter_type[ix]);
+              pRoRegs->scuMapRegStatusMeas.mtPh2Cur = getEmRegisterValue(EM_CURRENT_L2, emeter_type[ix]);
+              pRoRegs->scuMapRegStatusMeas.mtPh3Cur = getEmRegisterValue(EM_CURRENT_L3, emeter_type[ix]);
+            }
+            /* Current */
+            pRoRegs->scuMapRegStatusMeas.mtSysCur = getEmRegisterValue(EM_CURRENT_L, emeter_type[ix]);
+            /* Active power */
+            temp32 = getEmRegisterValue(EM_ACTIVE_POWER, emeter_type[ix]);                                          
+            pRoRegs->scuMapRegStatusMeas.mtSpPower = (uint32_t)temp32;
+            /* Active energy  */
+            pRoRegs->scuMapRegStatusMeas.mtTpEnrg = getEmRegisterValue(EM_TOT_ACTIVE_ENERGY, emeter_type[ix]);     
+
+            if (emTaskState.triggerEnrgMeas != (uint16_t)0)
+            {
+              if (emTaskState.sessActEnergy.startActEnrgValue == 0) 
+              {
+                emTaskState.sessActEnergy.startActEnrgValue = getEmRegisterValue(EM_TOT_ACTIVE_ENERGY, emeter_type[ix]);
+              }
+              emTaskState.sessActEnergy.currentActEnrgValue = getEmRegisterValue(EM_TOT_ACTIVE_ENERGY, emeter_type[ix]);
+              emTaskState.sessActEnergy.sessionEnrgValue = emTaskState.sessActEnergy.currentActEnrgValue - emTaskState.sessActEnergy.startActEnrgValue;
+            }            
+            
+            return (timeTk);
+          }           
+#endif          
+          
+          /* find the next register to read: is the first with non 0 lenght */
+          do
+          {
+            /* selecy only the subscribed registers */
+            idx = emTaskState.curIx[ix];
+            emTaskState.curIx[ix]++;
+            if ((emTaskState.curIx[ix] == EM_SES_ACTIVE_ENERGY) && emTaskState.triggerEnrgMeas != (uint16_t)0)
+            {
+              if (emTaskState.sessActEnergy.startActEnrgValue == 0) 
+              {
+                emTaskState.sessActEnergy.startActEnrgValue = getEmRegisterValue(EM_TOT_ACTIVE_ENERGY, emeter_type[ix]);
+              }
+              /* session active energy: now is calculated by FW 17/06/2021 */
+              emTaskState.sessActEnergy.currentActEnrgValue = getEmRegisterValue(EM_TOT_ACTIVE_ENERGY, emeter_type[ix]);
+              emTaskState.sessActEnergy.sessionEnrgValue = emTaskState.sessActEnergy.currentActEnrgValue - emTaskState.sessActEnergy.startActEnrgValue;
+              emTaskState.curIx[ix]++;  // goes to next register 
+            }
+            if (emTaskState.curIx[ix] >= EM_READ_REG_NUM)
+            {
+              emTaskState.curIx[ix] = (uint16_t)EM_SYS_VOLTAGE;
+              if (ix == INTERNAL_EM)
+              {
+                /* before to restart the cycle store the current value in modbus bus  */
+                mdbAddr = getLogicalMdbAddrSem();
+                pRoRegs = getRoMdbRegs(mdbAddr);
+                pRwRegs = getRwMdbRegs(mdbAddr);
+                //pRoRegs->scuMapRegStatusMeas.mtVsys = (uint32_t)emTaskState.emUserReg[INTERNAL_EM][EM_SYS_VOLTAGE];     // sys Vrms from EM to Modbus map
+                
+                /* Update modbus register VOLTAGE_SYS_RO */
+                value = (energy_meter_e)pRwRegs->scuSetRegister.mtType;
+                if(value == TA || value == MONO_GAVAZZI || value == MONO_ALGO2 || value == MONO_LOVATO || value == MONO_SCAME)
+                {
+                  pRoRegs->scuMapRegStatusMeas.mtVsys = getEmRegisterValue(EM_SYS_VOLTAGE, emeter_type[ix]);
+                }
+                else
+                {
+                  pRoRegs->scuMapRegStatusMeas.mtVsys = getEmRegisterValue(EM_SYS_PH1_VOLTAGE, emeter_type[ix]);
+                }
+                pRoRegs->scuMapRegStatusMeas.mtSysCur = (uint32_t)emTaskState.emUserReg[INTERNAL_EM][EM_CURRENT_L];     // sys Curr from EM to Modbus map
+                temp32 = getEmRegisterValue(EM_ACTIVE_POWER, emeter_type[ix]);                                          // sys Act Pwr from EM [mW] to Modbus map [W]
+                pRoRegs->scuMapRegStatusMeas.mtSpPower = (uint32_t)temp32;
+                /* get the current value of active energy and set it on modbus map  */
+                if (isEmScamePresent() == TRUE)
+                {
+                  pRoRegs->scuMapRegStatusMeas.mtTpEnrg = getEepromTotalActiveEnergy() + emTaskState.sessActEnergy.sessionEnrgValue;
+                }
+                else
+                {
+                  pRoRegs->scuMapRegStatusMeas.mtTpEnrg = getEmRegisterValue(EM_TOT_ACTIVE_ENERGY, emeter_type[ix]);     // sys Act Energy from EM [Wh] to Modbus map [0x620, Wh]
+                }
+                if (emTaskState.initMasterMeasRegs == (uint16_t)TRUE)
+                {
+                  /* it is possible that discoverd phase happen before EM has been discovered and read completly */
+                  /* so, at the end of parameters reading, here force to send all measures to master: but only one time and only when SEM and Slave */
+                  emTaskState.initMasterMeasRegs = (uint16_t)FALSE;
+                  /* send the info to notify manager */
+                  sendEventToSemMng(NOTIFY_TO_MASTER_TX, ADDR_VOLTAGE_AC_RO);
+                }
+#ifdef CHANGE_ENDIANESS
+                //pRoRegs->scuMapRegStatusMeas.mtSpPower = (uint32_t)swap32(temp32);
+                //pRoRegs->scuMapRegStatusMeas.mtSpPower = (uint32_t)changeEndianess(temp32);
+#endif
+              }
+              else
+              {
+                if ((emMsg.emModelInfo[ix].modelVal == EM_ALGO_EXT_SIM) || 
+                    ((emMsg.emModelInfo[ix].modelType == 0x0009) && (emMsg.emModelInfo[ix].type == EM_IOM2G)))
+                {
+                  if (emMsg.emModelInfo[ix].modelVal == EM_ALGO_EXT_SIM)
+                  {
+                    temp32 = (int32_t)emTaskState.emUserReg[ix][EM_COS_PH1_PHI];
+                  }
+                  else
+                  { 
+                    temp32 = (int32_t)((uint32_t)pEmSinapsiInfo->potDisponibile / 100); 
+                    temp32 |= ((int32_t)pEmSinapsiInfo->getConfigMode << 8);
+                  }
+                  /* from simulator: temp32_LLLL = pDisp/100 [W] temp32.10 = bit unbalance: 0=balanced 1=unbalanced  */
+                  /* temp32.8-9 = modo 00=full 01=Plus(solo fotovoltaico) 02=smart*/
+                  regAddr =  (uint16_t)((temp32 & 0x000000FF) * 100);
+                  lenInfo = getAvailablePower_Flag(&mdbAddr, &tmp, &potRestart);
+                  if (lenInfo != regAddr)
+                  {
+                    lenInfo = (uint16_t)regAddr + (uint16_t)50;
+                    lenInfo /= 100;
+                    eeprom_param_set(PMNG_PWRLSB_EADD, (uint8_t*)&lenInfo, 2);
+                  }
+                  /* When SEM, the Unbalance flag is fixed as enabled, so must be ignored */
+                  if (isSemMode () == FALSE)
+                  {
+                    if (((uint8_t)((temp32 >> 8) & 0x00000004)) != (mdbAddr & 0x04))
+                    {
+                      readSize = (uint8_t)((temp32 >> 8) & 0x00000004);
+                      if (readSize != 0) readSize = 1; 
+                      /* save Unbalance enable flag 1 = sbilanciamento permesso *****/
+                      eeprom_param_set(PMNG_UNBAL_EADD, (uint8_t*)&readSize, 1);
+                    }
+                  }
+                  if (((uint8_t)((temp32 >> 8) & 0x00000003)) != (mdbAddr & 0x03))
+                  {
+                    /* get current power management mode */
+                    eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&readSize, 1);
+                    readSize &=(~(uint8_t)PMNG_MODE_MASK);
+
+                    readSize |= (uint8_t)((temp32 >> 8) & 0x00000003);
+                    /* save received power management mode */
+                    eeprom_param_set(PMNG_MODE_EADD, (uint8_t *)&readSize, 1);
+                  }
+                }
+              }
+            }
+          } while (emRegInfo[ix][idx].size == 0);
+          /* we can have 3 fail */
+          numRetry = 0;
+          regAddr = emRegInfo[ix][idx].regAdd;
+          readSize = emRegInfo[ix][idx].size;
+          if (emMsg.emModelInfo[ix].type == EM_IOM2G)
+          {
+            pBuffer = pSiInfoBk[idx];
+            if (idx == SI_INFO6_R_IDX)
+            {
+              /* updating with the last value read */
+              sinapsi_ptr = getIom2Ginfo();
+              sinapsi_ptr->m1Papi = (int16_t)((int64_t)arrayTo64(pEmSinapsiInfo->potAttPreIst) / (int64_t)1000);  // from array[6] 60 64 bit amd from mW to W 
+              sinapsi_ptr->m1Paii = (int16_t)((int64_t)arrayTo64(pEmSinapsiInfo->potAttImmIst) / (int64_t)1000);  // from array[6] 60 64 bit amd from mW to W 
+              /* in caso di impianto fotovoltaico è possibile che Paii sia diverso da zero */
+              if (sinapsi_ptr->m1Paii != (int16_t)0)
+              {
+                sinapsi_ptr->m1Papi = (int16_t)(-1) * sinapsi_ptr->m1Paii;
+              }
+              sinapsi_ptr->m1Pd = pEmSinapsiInfo->potDisponibile; 
+              sinapsi_ptr->m1Pc = pEmSinapsiInfo->potContrattuale; 
+              if (getSinapsiM1PdDefault() != (uint16_t)0)
+              {
+                sinapsi_ptr->m1Pd = getSinapsiM1PdDefault();
+              }
+              if (sinapsi_ptr->m1Pd != (uint16_t)0)
+              {
+                /* SINAPSI board has been registered: check chain2 status  */
+                if ((pEmSinapsiInfo->m1PlcState == (uint16_t)CHAIN2_PLC_OK) || (getSinapsiChain2Status() == (uint16_t)1))
+                {
+                  if (emTaskState.sinapsiChain2Status != (uint16_t)CHAIN2_GOOD)
+                  {
+                    emTaskState.sinapsiChain2Status = (uint16_t)CHAIN2_GOOD;
+                    send_to_evs(EVS_SINAPSI_CHN2_GOOD);                  
+                  }
+                }
+                else
+                {
+                  /* error on chain 2 */
+                  if (emTaskState.sinapsiChain2Status != (uint16_t)CHAIN2_BAD)
+                  {
+                    emTaskState.sinapsiChain2Status = (uint16_t)CHAIN2_BAD;
+                    send_to_evs(EVS_SINAPSI_CHN2_FAIL);                  
+                  }
+                }
+              }
+            }
+          }
+          else
+          {
+            pBuffer = (uint8_t*)&emTaskState.emUserReg[ix][idx];
+          }
+          do
+          {
+            /* simuliamo solo ALGO2 su PC ma fatto con un task apposta algo2SimProcess() */
+            if (((emMsg.emModelInfo[ix].type == EM_IOM2G) && ((idx ==  SI_INFO1_W_IDX) || (idx ==  SI_INFO3_W_IDX) || (idx ==  SI_INFO7_W_IDX))) ||
+                ((idx == EM_EXT_SIGN_POWER) && (emMsg.emModelInfo[ix].modelVal == EM_ALGO_EXT_SIM)))
+                 
+            {
+#ifdef SIN_ALGO2SIM
+              switch (idx)
+              {
+                case SI_INFO1_W_IDX:
+                  temp32 = (uint32_t)pEmSinapsiInfo->setConfigMode;
+                  lenInfo = (uint16_t)1;
+                  emRegInfo[ix][idx].size = 0;  // clear activation flag 
+                  break;
+
+                case SI_INFO3_W_IDX:
+                  temp32 = (int32_t)emTaskState.sinapsiCfgUpgrade;
+                  pEmSinapsiInfo->cfgDU = (uint32_t)temp32;
+                  lenInfo = (uint16_t)2;
+                  emRegInfo[ix][idx].size = 0;  // clear activation flag 
+                  break;
+
+                case EM_EXT_SIGN_POWER:  // only for debug: the PC visual studio program simulates the internal and external Algo2 EM so PM can be tested easy
+                case SI_INFO7_W_IDX:
+                  temp32 = (uint32_t)getPwmOnCP(); // use this field to retrigger WD (number != 0 for trigger WD) and to send current PWM value 
+                  temp32 |= (uint32_t)0x8000; 
+                  if (emMsg.emModelInfo[ix].modelVal == EM_ALGO_EXT_SIM)
+                  {
+                    lenInfo = getAvailablePower_Flag(&mdbAddr, &tmp, &potRestart);
+                    lenInfo = (uint16_t)4;     // in the high word put the PM pid value
+                    temp32 &= ((uint32_t)0x0000FFFF);
+                    temp32 |= ((uint32_t)tmp << 16); 
+                    data64.double32_st.tmp32_a.dataDW = temp32;
+                    data64.double32_st.tmp16_a = potRestart;
+                    data64.double32_st.tmp16_b = (uint16_t)0; // free for future use 
+                  }
+                  else
+                  {
+                    lenInfo = (uint16_t)1;     // true IOM2G from SINAPSI
+                  }
+                  break;
+
+              }
+              /* SINAPSI WRITE operation for bluethoot activation */
+              error = setEmRegister(regAddr, (uint8_t*)&data64.dataQ[0], lenInfo, (uint8_t)emTaskState.emAddr[ix], FALSE); 
+#else
+              error = EM_NO_ERROR;
+#endif
+            }
+            else
+            {
+              /* for every tick block 1 register must be polled */
+              error = getEmRegister(regAddr, readSize, pBuffer, (uint8_t)emTaskState.emAddr[ix], FALSE);
+              /* correction with SCAME EM about active energy measurement  */
+              if ((emMsg.emModelInfo[ix].type == EM_SCAME) && (ix == (uint8_t)INTERNAL_EM) && (idx == (uint16_t)EM_TOT_ACTIVE_ENERGY) && (error == EM_NO_ERROR))
+              {
+                /* in internal EM SCAME the total active energy must be store by SCU */
+                temp32 = getScameEnergyValue();
+                /* set total active energy in SCAME EM */ 
+                setScameActEnergyEepromOffset(temp32, (uint8_t)0, (uint8_t)emTaskState.triggerEnrgMeas, (uint16_t*)&emTaskState.emFault);       
+              }
+              /* end debug */
+            }
+            if (error != EM_NO_ERROR)
+            {
+              if ((ix == EXTERNAL_EM) && (getSinapsiEepromEn() == ENABLED)) 
+              {
+                NSS2_TO_LOW_LEVEL
+              }
+              if (numRetry > 3)
+              {
+                tPrintf("Error on EM%d  read num %d: cause %d\n\r", (ix + 1), numRetry, (uint8_t)error);
+                /* LOG message */
+                EVLOG_Message (EV_ERROR, "Error on EM%d  read num %d: cause %d", (ix + 1), numRetry, (uint8_t)error);
+              }
+              osDelay(100);
+              if ((emMsg.emModelInfo[ix].type == EM_SCAME) && (ix == (uint8_t)INTERNAL_EM))
+              {
+                //resetScameActEnergyE0Key(); removed 08/08/2024 testing in Romania
+              }
+              /* reset the PWM to forse a new message to simulator */
+              resetPwmVal();
+            }
+            else
+            {
+#ifdef SINAPSI_BIG_ENDIAN
+              if (emMsg.emModelInfo[ix].type == EM_IOM2G)
+              {
+                /* SINAPSI usa big endian quindi devo riportare tutti i dsati in little endian */
+                changeSinapsiToLittleEndian(idx);
+              }
+#endif
+            }
+            numRetry++;
+          } while ((error != EM_NO_ERROR) && (numRetry < (uint8_t)emTaskState.numRetryLimit[ix]));
+
+          if (error != EM_NO_ERROR)
+          {
+            tPrintf("Restart EM %d discovery\n\r", (ix + 1));
+            emTaskState.numRetryLimit[ix] = MAX_NUM_RETRY_DISCOVERY; // 3 retry for fail 
+            /* restart discovery procedure */
+            emTaskState.state[ix] = STATE_IDLE;
+            if (ix == INTERNAL_EM)
+            {
+              emeter_type[INTERNAL_EM] = EMETER_TYPE_NULL;
+              /* reset info for energy meter   */
+              //setEmModelReg(MASK_FOR_EM_INT_MODEL, INTERNAL_EM);
+              send_to_evs(EVS_INTERNAL_EM_FAIL);
+              emTaskState.emFault = TRUE;
+//              send_to_pwm(PWM_INTERNAL_EM_FAIL);
+            }
+            else
+            {
+              /*  SINAPSI-RSE */
+              if (getSinapsiEepromEn() == ENABLED) //Also with SINAPSI error must be sent 20/11/2022 && (getSinapsiStatusActivation() == 0)) 
+              {
+                NSS2_TO_HIGH_LEVEL                                 //trigger hardware for Camilli  
+                (void)getCurrentLocalTime((uint32_t*)&temp32);
+                tPrintf("SINAPSI LINK KO at %s\n\r", (char*)temp32);
+                incStationSinapsiRS485Error();
+              }
+
+              /* send EM external fail only if Sinapsi isn't present */
+              send_to_evs(EVS_EXTERNAL_EM_FAIL);
+            }
+            /* reset info for energy meter   */
+            setEmModelReg(MASK_FOR_EM_EXT_MODEL, (emEnum_e)ix);
+            emMsg.emModelInfo[ix].type = EM_UNKNOW;
+            emMsg.emModelInfo[ix].modelVal = (uint16_t)0;
+            if (isSemMode() == FALSE)
+            {
+              /* Update station information in GSY. In SEM enviroment we suppose the EM is always present and we have only a temporary fail Nick 07/06/2024 */
+              setStationEmType(UNKNOW, (emEnum_e)ix, EMETER_TYPE_NULL, EMETER_TYPE_NULL);
+            }
+          }
+          else
+          {
+            emTaskState.numRetryLimit[ix] = MAX_NUM_RETRY; // 10 retry for fail 
+          }
+        }
+        if (pEmMsg->taskEvent == EVT_STOP_FOR_V230_KO)   
+        {
+          emTaskState.state[INTERNAL_EM] = emTaskState.state[EXTERNAL_EM] = EM_STOP_FOR_V230KO;
+          emTaskState.curIx[INTERNAL_EM] = emTaskState.curIx[EXTERNAL_EM] = 0; 
+          timeTk = portMAX_DELAY;
+        }
+        break;
+
+      default:
+        break;
+    }
+  }
+  /**** before next request send data to Algo2 simulator if present    */
+  if (emMsg.emModelInfo[EXTERNAL_EM].modelVal == EM_ALGO_EXT_SIM)
+  {
+    startSendInfoAlgo2Sim();
+  }
+
+  return (timeTk);
+}
+
+/**
+*
+* @brief        get energy meter type code in according to GSY coding    
+*
+* @param [in]   emEnum_e : INTERNAL_EM or EXTERNAL_EM
+*
+* @retval       uint8_t: energy meter detected code  
+*
+***********************************************************************************************************************/
+uint8_t get_emeter_type(emEnum_e emNum)
+{
+  if (emNum < EM_MAX_NUM)
+  {
+    if ((INTERNAL_EM == emNum) && ((emeter_type[(uint8_t)emNum] == EMETER_THREE_PH_LOVATO) ||  (emeter_type[(uint8_t)emNum] == EMETER_MONO_PH_LOVATO) ||
+        (emeter_type[(uint8_t)emNum] == EMETER_THREE_PH_SCAME) || (emeter_type[(uint8_t)emNum] == EMETER_MONO_PH_SCAME)))
+    {
+      if ((emeter_type[(uint8_t)emNum] == EMETER_THREE_PH_LOVATO) || (emeter_type[(uint8_t)emNum] == EMETER_THREE_PH_SCAME))
+      {
+        return(EMETER_THREE_PH_ALGO2);
+      }
+      else
+      {
+        return(EMETER_MONO_PH_ALGO2);
+      }
+    }
+    else
+    {
+      return (emeter_type[(uint8_t)emNum]);
+    }
+  }
+  else
+  {
+    return ((uint8_t)0xFF);
+  }
+}
+
+/**
+*
+* @brief        get energy meter type code currently detected by SCU     
+*
+* @param [in]   emEnum_e : INTERNAL_EM or EXTERNAL_EM
+*
+* @retval       uint8_t: energy meter detected code  
+*
+***********************************************************************************************************************/
+uint8_t get_emeter_detected_type(emEnum_e emNum)
+{
+  return (emeter_type[(uint8_t)emNum]);
+}
+
+#ifdef HW_MP28947
+/**
+*
+* @brief        get energy meter type code currently detected by SCU     
+*
+* @param [in]   emEnum_e : INTERNAL_EM or EXTERNAL_EM
+*
+* @retval       uint8_t: energy meter detected code  
+*
+***********************************************************************************************************************/
+
+void EM_Translate_RS485_to_SPI_Query (uint16_t regAddr)
+{
+    /* Take the lower part of the register value: is the same defined in STPM address */
+    regAddr &= 0x00FF;
+    /* Select which operation need to be done */
+    switch (regAddr)
+    {
+      case STPM_DSPCTRL1:
+        /* Send the SPI query used to discover energy meter type: MONO or THREE */
+        Metro_HAL_Stpm_Read(EXT1, (uint8_t *)&regAddr, 1, (uint32_t*)&p_Metro_Device_Config[EXT1].metro_stpm_reg.DSPCTRL1);
+        Metro_HAL_Stpm_Read(EXT2, (uint8_t *)&regAddr, 1, (uint32_t*)&p_Metro_Device_Config[EXT2].metro_stpm_reg.DSPCTRL1);
+        /* if the EXT1 device is available, the value of the register is different from 0 */ 
+        if (Tab_METRO_internal_Devices_Config[EXT1].metro_stpm_reg.DSPCTRL1 == DEFAULT_DSP_CR1_VAL)
+        {
+            emMsg.emModelInfo[INTERNAL_EM].type = EM_PA775;       /* set model type */
+            emMsg.emModelInfo[INTERNAL_EM].emPhase = EM_MONO_PH;  /* set number of phases: MONO */            
+        }              
+        else
+            Tab_METRO_internal_Devices_Config[EXT1].device = Device_NONE;   /* Device EXT1 not present --> there is a FAULT or board is missing */
+        /* if the EXT2 device is available, the value of the register is different from 0 */ 
+        if (Tab_METRO_internal_Devices_Config[EXT2].metro_stpm_reg.DSPCTRL1 == DEFAULT_DSP_CR1_VAL)
+        {
+            emMsg.emModelInfo[INTERNAL_EM].emPhase = EM_THREE_PH; /* set number of phases: THREE */             
+        }
+        else
+        {  
+            Tab_METRO_internal_Devices_Config[EXT2].device = Device_NONE;   /* Device EXT2 not present, is a MONOPHASE meter */
+        }
+        
+        /* Init metrology informations after the discovery phase */
+        METRO_Init_p2();  
+          
+        break;
+        
+      default:
+        break;
+    }
+  
+}
+
+#endif
+
+/**
+*
+* @brief        build an async message to energy meter   
+*
+* @param [in]   uint16_t : reg address to be read
+* @param [in]   uint8_t : num byte to be read (< 32)
+* @param [in]   uint8_t* : pointer to buffer where to put the answer
+* @param [in]   uint8_t : identifier for EM (1 for internal 2 for external)
+* @param [in]   uint8_t : when TRUE a check on address reg is done
+*
+* @retval       emError_e: 0 when operation executed  successfully 
+*
+***********************************************************************************************************************/
+emError_e getEmRegister (uint16_t regAddr, uint8_t size, uint8_t* pReadBuff, uint8_t emId, uint8_t flagRegCheck)
+{
+  uint8_t*      pEnd;
+  uint8_t*      pCtrl;
+  frameRxEm_st* pFrameRxEm;
+  crcMode_u     crc;
+  uint8_t       ix, found;
+  emEnum_e      emIx;
+
+  /* check if the EM has been detected and in this case check if the register      */
+  /* is in the list                                                                */
+  found = FALSE;
+  emIx = (emEnum_e)(emId - 1);
+  if ((flagRegCheck == TRUE) && (emMsg.emModelInfo[emIx].type != EM_UNKNOW))
+  {
+    for (ix = 0; ix < sizeof(emRegister[emMsg.emModelInfo[emIx].type]) / sizeof(emRegister[emMsg.emModelInfo[emIx].type][0]); ix++)
+    {
+      if (emRegister[emMsg.emModelInfo[emIx].type][ix].regAdd == regAddr)
+      {
+        found = TRUE;
+        break;
+      }
+    }
+  }
+  if ((found == FALSE) && (flagRegCheck == TRUE))
+  {
+    return (EM_REG_UNDEF); 
+  }
+  
+#ifdef HW_MP28947
+  /* Check if register address is for a query we need to perform in SPI mode */
+  if (regAddr & RS485_to_SPI_QUERY_MSK)
+  {
+    /* Translate into an SPI query to send directly to the STPM34 device */
+    EM_Translate_RS485_to_SPI_Query(regAddr);    
+    /* Check here if the result is right: if EXT1 STPM34 doesn't answer, it's damage or board is not present  */
+    if (Tab_METRO_internal_Devices_Config[EXT1].device == Device_NONE)
+      return EM_NO_ANSWER;
+    return(EM_NO_ERROR);    
+  } 
+  else
+#endif    
+  {
+    /* the command must be executed    */
+    emTxMsg.totalLen = (uint16_t)sizeof(headerRIR_t);
+    emTxMsg.messageTx.nodeReadInputReg.unitId = emId;
+    
+    if ((emMsg.emModelInfo[emIx].type == EM_ALGO) && 
+        (emMsg.emModelInfo[emIx].modelVal >= 0x0014) && (emMsg.emModelInfo[emIx].modelVal <= 0x001A))
+    {
+      /*This ALGO2 model work in a different way from all others */
+      emTxMsg.messageTx.nodeReadInputReg.function = FUNCTION_READ_HOLDING_REG; 
+    }
+    else
+    {
+      emTxMsg.messageTx.nodeReadInputReg.function = FUNCTION_READ_INPUT_REG; 
+    }
+    emTxMsg.messageTx.nodeReadInputReg.regAdd = swapW(regAddr);
+    emTxMsg.messageTx.nodeReadInputReg.numWords = swapW((uint16_t)size);
+    /* now found the CRC message */
+    pCtrl = (uint8_t*)&emTxMsg.messageTx;
+    crc.crcW = crcEvaluation (pCtrl, emTxMsg.totalLen);
+    /* position pEnd pointer on crc field */
+    pEnd =  (uint8_t*)((uint32_t)pCtrl + (uint32_t)emTxMsg.totalLen);
+    *pEnd = crc.crcLH_st.crcL;
+    pEnd++;
+    *pEnd = crc.crcLH_st.crcH;
+    emTxMsg.totalLen += sizeof(crc.crcW);
+    
+    /* start transmission on UART RS485 to Energy Meter using DMA */
+    UART_EM_DMA_Tx((uint8_t*)&emTxMsg.messageTx, (uint16_t)emTxMsg.totalLen); 
+    
+    /* only a single request can be accepted, so delete pending request */
+    xQueueReset(emAnswQueue);
+    
+    /* Wait for the answer within 500ms (for EM11 typical answering time is 40ms  */
+    if (xQueueReceive(emAnswQueue, (void *)&emRxMsg, TIMER_500MS) == pdPASS) 
+    {
+      /* chech if the answer is right */
+      pFrameRxEm = (frameRxEm_st*)&emRxMsg;
+      pCtrl = (uint8_t*)&pFrameRxEm->messageRx;
+      pEnd  = (uint8_t*)((uint32_t)pFrameRxEm->messageRx.nodeReadAnswInputReg.data + (uint32_t)pFrameRxEm->messageRx.nodeReadAnswInputReg.numBytes);
+      crc.crcW = crcEvaluation (pCtrl, pFrameRxEm->totalLen - sizeof(crc.crcW));
+      if ((pFrameRxEm->messageRx.nodeReadAnswInputReg.unitId == emId) && (pFrameRxEm->messageRx.nodeReadAnswInputReg.function == FUNCTION_READ_INPUT_REG) &&
+          (crc.crcW == *(uint16_t*)pEnd))
+      {
+        /* all OK: copy the data in destinartion buffer  */
+        /*             destination                      source */
+        memcpy((void*)pReadBuff, (void*)pFrameRxEm->messageRx.nodeReadAnswInputReg.data, pFrameRxEm->messageRx.nodeReadAnswInputReg.numBytes);
+        return(EM_NO_ERROR);
+      }
+      else
+      {
+        osDelay(200);
+        /* the command must be executed with different function code    */
+        emTxMsg.totalLen = (uint16_t)sizeof(headerRIR_t);
+        emTxMsg.messageTx.nodeReadInputReg.unitId = emId;
+
+        emTxMsg.messageTx.nodeReadInputReg.function = FUNCTION_READ_HOLDING_REG; // was FUNCTION_READ_INPUT_REG; but doesn't work with new Algo 2 Model 6-6-25 Nick
+        emTxMsg.messageTx.nodeReadInputReg.regAdd = swapW(regAddr);
+        emTxMsg.messageTx.nodeReadInputReg.numWords = swapW((uint16_t)size);
+        /* now found the CRC message */
+        pCtrl = (uint8_t*)&emTxMsg.messageTx;
+        crc.crcW = crcEvaluation (pCtrl, emTxMsg.totalLen);
+        /* position pEnd pointer on crc field */
+        pEnd =  (uint8_t*)((uint32_t)pCtrl + (uint32_t)emTxMsg.totalLen);
+        *pEnd = crc.crcLH_st.crcL;
+        pEnd++;
+        *pEnd = crc.crcLH_st.crcH;
+        emTxMsg.totalLen += sizeof(crc.crcW);
+
+        /* start transmission on UART RS485 to Energy Meter using DMA */
+        UART_EM_DMA_Tx((uint8_t*)&emTxMsg.messageTx, (uint16_t)emTxMsg.totalLen); 
+
+        /* only a single request can be accepted, so delete pending request */
+        xQueueReset(emAnswQueue);
+
+        /* Wait for the answer within 500ms (for EM11 typical answering time is 40ms  */
+        if (xQueueReceive(emAnswQueue, (void *)&emRxMsg, TIMER_500MS) == pdPASS) 
+        {
+          /* chech if the answer is right */
+          pFrameRxEm = (frameRxEm_st*)&emRxMsg;
+          pCtrl = (uint8_t*)&pFrameRxEm->messageRx;
+          pEnd  = (uint8_t*)((uint32_t)pFrameRxEm->messageRx.nodeReadAnswInputReg.data + (uint32_t)pFrameRxEm->messageRx.nodeReadAnswInputReg.numBytes);
+          crc.crcW = crcEvaluation (pCtrl, pFrameRxEm->totalLen - sizeof(crc.crcW));
+          if ((pFrameRxEm->messageRx.nodeReadAnswInputReg.unitId == emId) && (crc.crcW == *(uint16_t*)pEnd) &&
+              (pFrameRxEm->messageRx.nodeReadAnswInputReg.function == FUNCTION_READ_HOLDING_REG))
+          {
+            /* all OK: copy the data in destinartion buffer  */
+            /*             destination                      source */
+            memcpy((void*)pReadBuff, (void*)pFrameRxEm->messageRx.nodeReadAnswInputReg.data, pFrameRxEm->messageRx.nodeReadAnswInputReg.numBytes);
+            return(EM_NO_ERROR);
+          }
+          else
+          {
+            return(EM_WRONG_ANSWER);
+          }
+        } // end else on FUNCTION_READ_HOLDING_REG tentative
+        else
+        {
+          /* timeout: no answer     */
+          return (EM_NO_ANSWER); 
+        }
+      }
+    }
+    else
+    {
+      /* timeout: no answer     */
+      return (EM_NO_ANSWER); 
+    }
+  }
+}
+
+
+/**
+*
+* @brief        build an async message to energy meter   
+*
+* @param [in]   uint16_t :  reg address to write
+* @param [in]   uint8_t* :  data pointer to info to be written  
+* @param [in]   uint16_t :  data to be write 
+* @param [in]   uint16_t  :  data length   
+* @param [in]   uint8_t  :  energy meter identifier (internal or external)    
+* @param [in]   uint8_t  :  when TRUE a check on address reg is done
+*
+* @retval       emError_e: 0 when operation executed  successfully 
+*
+***********************************************************************************************************************/
+emError_e setEmRegister (uint16_t regAddr, uint8_t* pData, uint16_t lenData, uint8_t emId, uint8_t flagRegCheck)
+{
+  uint8_t*      pEnd;
+  uint8_t*      pCtrl;
+  uint16_t*     pWdata;
+  crcMode_u     crc;
+  uint8_t       ix, found;
+  emEnum_e      emIx;
+
+  /* check if the EM has been detected and in this case check if the register      */
+  /* is in the list                                                                */
+  found = FALSE;
+  emIx = (emEnum_e)(emId - 1);
+  if ((flagRegCheck == TRUE) && (emMsg.emModelInfo[emIx].type != EM_UNKNOW))
+  {
+    for (ix = 0; ix < sizeof(emRegister[emMsg.emModelInfo[emIx].type]) / sizeof(emRegister[emMsg.emModelInfo[emIx].type][0]); ix++)
+    {
+      if (emRegister[emMsg.emModelInfo[emIx].type][ix].regAdd == regAddr)
+      {
+        found = TRUE;
+        break;
+      }
+    }
+  }
+  if ((found == FALSE) && (flagRegCheck == TRUE))
+  {
+    return (EM_REG_UNDEF); 
+  }
+  /* the command must be executed    */
+  emTxMsg.totalLen = (uint16_t)sizeof(headerReqRWMR_st) + lenData * 2;
+  emTxMsg.messageTx.nodeRWmultipleReg.unitId = emId; 
+  emTxMsg.messageTx.nodeRWmultipleReg.function = FUNCTION_WRITE_MULTIPLE_REG;
+  emTxMsg.messageTx.nodeRWmultipleReg.regAdd = swapW(regAddr);
+  emTxMsg.messageTx.nodeRWmultipleReg.numWords = swapW(lenData);
+  emTxMsg.messageTx.nodeRWmultipleReg.numBytes = lenData * 2;
+  for (ix = 0, pWdata = (uint16_t*)pData; ix < lenData; ix++, pWdata++)
+  {
+    emTxMsg.messageTx.nodeRWmultipleReg.data[ix] = *pWdata;
+  }
+
+  /* now found the CRC message */
+  pCtrl = (uint8_t*)&emTxMsg.messageTx;
+  crc.crcW = crcEvaluation (pCtrl, emTxMsg.totalLen);
+  /* position pEnd pointer on crc field */
+  pEnd =  (uint8_t*)((uint32_t)pCtrl + (uint32_t)emTxMsg.totalLen);
+  *pEnd = crc.crcLH_st.crcL;
+  pEnd++;
+  *pEnd = crc.crcLH_st.crcH;
+  emTxMsg.totalLen += sizeof(crc.crcW);
+
+  /* start transmission on UART RS485 to Energy Meter using DMA */
+  UART_EM_DMA_Tx((uint8_t*)&emTxMsg.messageTx, (uint16_t)emTxMsg.totalLen); 
+
+  /* only a single request can be accepted, so delete pending request */
+  xQueueReset(emAnswQueue);
+
+  /* Wait for the answer within 500ms (for EM11 typical answering time is 40ms  */
+  if (xQueueReceive(emAnswQueue, (void *)&frameRxEm, TIMER_500MS) == pdPASS) 
+  //if (xQueueReceive(emAnswQueue, (void *)&frameRxEm, portMAX_DELAY) == pdPASS) 
+  {
+    if (frameRxEm.messageRx.nodeAnswWRsReg.function == FUNCTION_WRITE_MULTIPLE_REG)
+    {
+      return(EM_NO_ERROR);
+    }
+    else
+    {
+      return(EM_REG_UNDEF);
+    }
+  }
+  else
+  {
+    /* timeout: no answer     */
+    return (EM_NO_ANSWER); 
+  }
+}
+
+/**
+*
+* @brief        build an async message to energy meter for Report Slave ID  
+*
+* @param [in]   pReadBuff* : pointer to buffer where to put the answer
+* @param [in]   uint16_t : reg address to be read
+* @param [in]   uint8_t : num byte to be read (< 32)
+* @param [in]   uint8_t : identifier for EM (1 for internal 2 for external)
+* @param [in]   uint8_t : when TRUE a check on address reg is done
+*
+* @retval       emError_e: 0 when operation executed  successfully 
+*
+***********************************************************************************************************************/
+emError_e Modbus_Function_17 (uint8_t* pReadBuff, uint8_t emId)
+{
+  uint8_t*      pEnd;
+  uint8_t*      pCtrl;
+  frameRxEm_st* pFrameRxEm;
+  crcMode_u     crc;
+
+  /* the command must be executed    */
+  emTxMsg.totalLen = (uint16_t)sizeof(headerRSID_t);
+  emTxMsg.messageTx.nodeReportSlaveIdReg.unitId = emId; 
+  emTxMsg.messageTx.nodeReportSlaveIdReg.function = FUNCTION_REPORT_SLAVE_ID_REG;
+  /* now found the CRC message */
+  pCtrl = (uint8_t*)&emTxMsg.messageTx;
+  crc.crcW = crcEvaluation (pCtrl, emTxMsg.totalLen);
+  /* position pEnd pointer on crc field */
+  pEnd =  (uint8_t*)((uint32_t)pCtrl + (uint32_t)emTxMsg.totalLen);
+  *pEnd = crc.crcLH_st.crcL;
+  pEnd++;
+  *pEnd = crc.crcLH_st.crcH;
+  emTxMsg.totalLen += sizeof(crc.crcW);
+
+#ifndef SUBG_MODULE
+  /* start transmission on UART RS485 to Energy Meter using DMA */
+  UART_EM_DMA_Tx((uint8_t*)&emTxMsg.messageTx, (uint16_t)emTxMsg.totalLen); 
+
+  /* only a single request can be accepted, so delete pending request */
+  xQueueReset(emAnswQueue);
+#else
+  
+  if (SubGModule_Present == true)
+  {
+    /* Send data on Sub-G module */
+    SM_State = SM_STATE_SEND_DATA;
+    /* Wait while TX data through SPGRF-868 module are transmitted */   
+    while (P2P_Process((uint8_t *)&emTxMsg.messageTx, (uint8_t)emTxMsg.totalLen, (uint8_t *)&emMsgRx_IT.messageTx, (uint8_t)emRxMsg.totalLen) != P2P_Process_FINISHED)
+    {}   
+    /* Only a single request can be accepted, so delete pending request */
+    xQueueReset(emAnswQueue);
+    /* Wait while RX data through SPGRF-868 module was received */   
+    while (P2P_Process((uint8_t *)&emTxMsg.messageTx, (uint8_t)emTxMsg.totalLen, (uint8_t *)&emMsgRx_IT.messageTx, (uint8_t)emRxMsg.totalLen) == P2P_Process_ONGOING)
+    {}
+  }
+  else
+  {
+    /* start transmission on UART RS485 to Energy Meter using DMA */
+    UART_EM_DMA_Tx((uint8_t*)&emTxMsg.messageTx, (uint16_t)emTxMsg.totalLen); 
+    /* only a single request can be accepted, so delete pending request */
+    xQueueReset(emAnswQueue);   
+  }
+#endif  
+
+  /* Wait for the answer within 500ms (for EM11 typical answering time is 40ms  */
+  if (xQueueReceive(emAnswQueue, (void *)&emRxMsg, TIMER_500MS) == pdPASS) 
+  {
+    /* chech if the answer is right */
+    pFrameRxEm = (frameRxEm_st*)&emRxMsg;
+    pCtrl = (uint8_t*)&pFrameRxEm->messageRx;
+    pEnd  = (uint8_t*)((uint32_t)pFrameRxEm->messageRx.nodeReadAnswInputReg.data + (uint32_t)pFrameRxEm->messageRx.nodeReadAnswInputReg.numBytes);
+    crc.crcW = crcEvaluation (pCtrl, pFrameRxEm->totalLen - sizeof(crc.crcW));
+    if ((pFrameRxEm->messageRx.nodeReadAnswInputReg.unitId == emId) && (pFrameRxEm->messageRx.nodeReadAnswInputReg.function == FUNCTION_REPORT_SLAVE_ID_REG) &&
+        (crc.crcW == *(uint16_t*)pEnd))
+    {
+      /* all OK: copy the data in destinartion buffer.                  */
+      /* NOTE: the Report slave ID function is used only to detect Lovato devices. The response is composed just by 1 byte, copy only 1 byte.
+         The second byte must be forced to zero since the check performed after is for a word */
+      /*             destination                      source */
+      /* Trick to maintain the right endianness */
+      pReadBuff++;      
+      memcpy((void*)pReadBuff, (void*)pFrameRxEm->messageRx.nodeReadAnswInputReg.data, 1);
+      /* Force next byte to zero, the ID for LOVATO devices is only 1 byte */
+      pReadBuff--;      
+      *pReadBuff = 0;
+      return(EM_NO_ERROR);
+    }
+    return(EM_WRONG_ANSWER);
+  }
+  else
+  {
+    /* timeout: no answer     */
+    return (EM_NO_ANSWER); 
+  }
+}
+
+/*
+*
+* @brief        Energy meter discovery function (can be used as EM polling also)    
+*
+* @param [in]   uint8_t : address for discovery energy meter 
+*
+* @retval       emModelInfo_st*: NULL if energy meter not present or unknow  
+*
+***********************************************************************************************************************/
+emModelInfo_st* discoveryEm (uint8_t emId)
+{
+  uint8_t*      pModel;
+  uint16_t      model, modelId;
+  emError_e     emError;
+  emEnum_e      emIx;
+  uint8_t       len, ix, jx;
+
+  /* Always wait before start discovery phase To avoid request near the previous */
+  osDelay(200);
+  emIx = (emEnum_e)(emId - 1);
+  
+#ifdef HW_MP28947  
+  /* if the discover action is for the INTERNAL energy meter, in this case search just HW_MP28947 */
+  if (emId == EM_INT_ADDR)
+  {
+      /* Send query for EM_PA775 energy meter */
+      len = (uint8_t)emRegister[EM_PA775][EM_MODEL_INDEX].size;  
+      pModel = (uint8_t*)calloc((size_t)(len + (uint8_t)1), 1);    
+      emError = getEmRegister(emRegister[EM_PA775][EM_MODEL_INDEX].regAdd, 0, (uint8_t*)pModel, emId, (uint8_t)FALSE);     
+      free(pModel);
+      /* if no errors */
+      if (emError == EM_NO_ERROR)
+      {
+        /* Set energy meter model type */
+        emMsg.emModelInfo[emIx].type = EM_PA775;
+        /* return info */
+        return ((emModelInfo_st*)&emMsg.emModelInfo[emIx]);
+      }
+      /* if error during communication, get it */
+      return NULL;
+  }
+  else
+#endif   
+  {
+
+    if (emMsg.emModelInfo[emIx].type != EM_UNKNOW)
+    {
+      ix = (uint8_t)emMsg.emModelInfo[emIx].type;
+      /* we are polling the discovered enegy meter */
+      len = (uint8_t)emRegister[ix][EM_MODEL_INDEX].size;
+  
+      pModel = (uint8_t*)calloc((size_t)(len + (uint8_t)1), 1);
+      /* In case of LOVATO device, a report slave ID must be sent to have a response */
+      if (ix == EM_LOVATO)
+        emError = Modbus_Function_17((uint8_t*)pModel, emId);
+      else
+        //GPIOD->ODR ^= (uint32_t)0x00000002; /* only for debug */
+        emError = getEmRegister(emRegister[ix][EM_MODEL_INDEX].regAdd, len, (uint8_t*)pModel, emId, (uint8_t)FALSE);
+        //GPIOD->ODR ^= (uint32_t)0x00000002; /* only for debug */
+      model = swapW(*((uint16_t*)(pModel)));
+      free(pModel);
+      if ((emError == EM_NO_ERROR) && (emMsg.emModelInfo[emIx].modelVal == model))
+      {
+        /* no change, alway the same model */
+        return((emModelInfo_st*)&emMsg.emModelInfo[emIx]);
+      }
+    }
+    
+    /* check AlgoDue, Carlo Gavazzi, Scame, Lovato ....  */
+    for(ix = (uint8_t)EM_ALGO; ix < (uint8_t)LAST_EM; ix++)
+    {
+      len = (uint8_t)emRegister[ix][EM_MODEL_INDEX].size;
+      if (len == (uint8_t)0) continue;
+  
+      pModel = (uint8_t*)calloc((size_t)(2 * len + (uint8_t)1), 1);
+      /* In case of LOVATO device, a report slave ID must be sent to have a response */
+      if (ix == EM_LOVATO)
+      {
+        emError = Modbus_Function_17((uint8_t*)pModel, emId);
+      }
+      else
+      {
+        //GPIOD->ODR ^= (uint32_t)0x00000002; /* only for debug */
+        emError = getEmRegister(emRegister[ix][EM_MODEL_INDEX].regAdd, len, (uint8_t*)pModel, emId, (uint8_t)FALSE);
+        if ((ix == EM_IOM2G) && (emError == EM_NO_ERROR))
+        {
+          changeSinapsiModelEndianess(pModel);
+        }
+      }
+        //GPIOD->ODR ^= (uint32_t)0x00000002; /* only for debug */
+      model = swapW(*((uint16_t*)(pModel)));
+      modelId = (model & EM_BIT_MASK);              // remember: 0x8008 is ALGO2 3ph when use PC PM simulator 
+      if (emError == EM_NO_ERROR)
+      {
+        /* the EM answered: check the answer */
+        /* the EM ALGO or Carlo Gavazzi or ... is present and works right */
+        jx = 0;
+        while ((emModel[ix][jx].modelVal != LAST_ITEM) && (jx < MAX_NUM_ITEMS))
+        {
+          if ((emModel[ix][jx].modelVal == modelId)) 
+          {
+            emMsg.emModelInfo[emIx].type = emModel[ix][jx].type;
+            emMsg.emModelInfo[emIx].modelVal = model;
+            setEmModelReg (model, (emEnum_e)emIx);   /*save in backup RTC register 7 the current EM model (used when V230 come back) */
+            emMsg.emModelInfo[emIx].emPhase = emModel[ix][jx].emPhase;
+            /*              destination                                    source */
+            strcpy((char*)emMsg.emModelInfo[emIx].modelName, (char*)emModel[ix][jx].modelName);
+            if (ix == EM_IOM2G)
+            {
+              /*              destination                        source */
+              strncpy((char*)emMsg.emModelInfo[emIx].modelSN, (char*)pModel, 10);
+              emMsg.emModelInfo[emIx].modelType = *((uint16_t*)&pModel[10]);
+              (void)WriteOnEeprom(RSE_CONFIG_EEPROM_ADDRESS, (uint8_t*)pModel, (len * 2));
+            }
+            return((emModelInfo_st*)&emMsg.emModelInfo[emIx]);
+          }
+          jx++;
+        }
+      } // end in on emError
+      free(pModel);
+      /* wait a little before next retry */
+      osDelay(100);
+    } // end for 
+  }
+  /* no energy meter has been detected */
+  emMsg.emModelInfo[emIx].type = EM_UNKNOW;
+  return(NULL);
+}
+
+/***
+*
+* @brief        Fast Restore energy meter parameters    
+*
+* @param [in]   none 
+*
+* @retval       none: 
+*
+***********************************************************************************************************************/
+static void  restoreEmModel (void)
+{
+  uint16_t modelEm, type;
+  uint8_t  ix, jx, len;
+  
+  modelEm = (uint16_t)getEmModelReg (INTERNAL_EM);
+
+  for(ix = (uint8_t)EM_ALGO; ix < (uint8_t)LAST_EM; ix++)
+  {
+    jx = 0;
+    while ((emModel[ix][jx].modelVal != LAST_ITEM) && (jx < MAX_NUM_ITEMS))
+    {
+      if (emModel[ix][jx].modelVal == modelEm) 
+      {
+        emMsg.emModelInfo[INTERNAL_EM].type = emModel[ix][jx].type;
+        emMsg.emModelInfo[INTERNAL_EM].modelVal = modelEm;
+        emMsg.emModelInfo[INTERNAL_EM].emPhase = emModel[ix][jx].emPhase;
+        emTaskState.state[INTERNAL_EM] = EM_FAST_RESTORE;
+        /*              destination                                    source */
+        strcpy((char*)emMsg.emModelInfo[INTERNAL_EM].modelName, (char*)emModel[ix][jx].modelName);
+        break;
+      }
+      jx++;
+    }
+  }
+  
+  modelEm = (uint16_t)getEmModelReg (EXTERNAL_EM);
+  for(ix = (uint8_t)EM_ALGO; ix < (uint8_t)LAST_EM; ix++)
+  {
+    jx = 0;
+    while ((emModel[ix][jx].modelVal != LAST_ITEM) && (jx < MAX_NUM_ITEMS))
+    {
+      if (emModel[ix][jx].modelVal == modelEm) 
+      {
+        emMsg.emModelInfo[EXTERNAL_EM].type = emModel[ix][jx].type;
+        emMsg.emModelInfo[EXTERNAL_EM].modelVal = modelEm;
+        emMsg.emModelInfo[EXTERNAL_EM].emPhase = emModel[ix][jx].emPhase;
+        emTaskState.state[EXTERNAL_EM] = EM_FAST_RESTORE;
+        /*              destination                                    source */
+        strcpy((char*)emMsg.emModelInfo[EXTERNAL_EM].modelName, (char*)emModel[ix][jx].modelName);
+        if (emMsg.emModelInfo[EXTERNAL_EM].type == EM_IOM2G)
+        {
+          len = 2 * emRegister[EM_IOM2G][EM_SN_INDEX].size;
+          /*              restore SN and type  */
+          ReadFromEeprom(RSE_CONFIG_EEPROM_ADDRESS, (uint8_t*)emMsg.emModelInfo[EXTERNAL_EM].modelSN, len);
+          ReadFromEeprom(RSE_CONFIG_EEPROM_ADDRESS + len, (uint8_t*)&type, 2);
+          emMsg.emModelInfo[EXTERNAL_EM].modelType = type;
+          if ((emMsg.emModelInfo[EXTERNAL_EM].modelSN[0] != 'S') || (emMsg.emModelInfo[EXTERNAL_EM].modelSN[1] != 'C'))
+          {
+            /* The Sinapsi model EM start with "SC" as SCAME identifier: If not possible change on store location in EEPROM */
+            /* This is the bug, uploading fron 4.2.1 to 4.2.2, to have wrong char in model field in the web interface       */
+            emTaskState.state[EXTERNAL_EM] = STATE_IDLE;
+          }
+        }
+        break;
+      }
+      jx++;
+    }
+  }
+}
+
+
+/*
+*
+* @brief        swap a word  
+*
+* @param [in]   uint16_t: input word 
+*
+* @retval       uint_16_t: swapped word
+*
+***********************************************************************************************************************/
+uint16_t  swapW (uint16_t word)
+{
+  crcMode_u       tmp;
+  uint8_t         tmpL;
+
+  tmp.crcW = (uint16_t)word;
+  tmpL = tmp.crcLH_st.crcH;
+  tmp.crcLH_st.crcH = tmp.crcLH_st.crcL;
+  tmp.crcLH_st.crcL = tmpL;
+  return (tmp.crcW);
+}
+
+
+
+/**
+*
+* @brief        Get the crc value in accordind to:
+*               POLY => calculation polynomial of the CRC 16 = 1010 0000 0000 0001 1
+*               (Generating polynomial = 1 + x2 + x 15 + x 16)
+*  
+* @param [in]   uint8_t*: point to start buffer
+* @param [in]   len     : number of bytes involved in the crc
+*
+* @retval       uint8_t: the crc evaluate (mod 256)
+*
+***********************************************************************************************************************/
+uint16_t  crcEvaluation(uint8_t* puchMsg, uint16_t usDataLen)
+{
+  unsigned char uchCRCHi;   /* high byte of CRC initialized */
+  unsigned char uchCRCLo;   /* low byte of CRC initialized */
+  unsigned int  uIndex;          /* will index into CRC lookup table */
+
+  uchCRCHi = 0xFF;
+  uchCRCLo = 0xFF;
+  while (usDataLen--) /* pass through message buffer */
+  {
+    uIndex = uchCRCLo ^ *(puchMsg++); /* calculate the CRC */
+    uchCRCLo = (unsigned char)(uchCRCHi ^ (unsigned char)auchCRCHi[uIndex]);
+    uchCRCHi = (unsigned char)auchCRCLo[uIndex] ;
+  }
+    return ((unsigned short)(uchCRCHi << 8 | uchCRCLo));
+}
+
+/**
+*
+* @brief        Get the pointer to task queue
+*
+* @param [in]   none
+*
+* @retval       xQueueHandle: pointer to defined  queue
+*
+***********************************************************************************************************************/
+xQueueHandle getEmQueueHandle(void)
+{
+   return(emQueue);
+}
+
+/**
+*
+* @brief        Send a message to start the conversion on TA 
+*
+* @param [out]  none
+*
+* @retval       none
+*
+*******************************************************************************/
+void sendMainV230Info(uint32_t status)
+{
+  frameEm_st* pEmV230Msg; 
+
+  
+  pEmV230Msg = (frameEm_st*)calloc((size_t)(sizeof(frameEm_st)), 1);
+  
+  pEmV230Msg->totalLen = (uint16_t)0;
+  switch (status)
+  {
+    case MSG_230VAC_SUSPEND_RECHARGE:
+      pEmV230Msg->totalLen = (uint16_t)1;
+      pEmV230Msg->taskEvent = EVT_STOP_FOR_V230_KO;  /* Stop EM for 230Vac off               */
+      break;
+
+    case MSG_230VAC_ON_START_RECHARGE:
+      pEmV230Msg->totalLen = (uint16_t)1;
+      pEmV230Msg->taskEvent = EVT_START_FOR_V230_OK;  /* Start when 230Vac goes ON            */
+      break;
+
+    default:
+      break;
+  }
+  if (pEmV230Msg->totalLen == (uint16_t)1)
+  {
+    /**** genera un messaggio verso il task   */
+    configASSERT(xQueueSendToBack(emQueue, (void *)pEmV230Msg, portMAX_DELAY) == pdPASS);
+  }
+  free(pEmV230Msg);
+}
+
+/**
+*
+* @brief        Get the pointer to task queue
+*
+* @param [in]   none
+*
+* @retval       xQueueHandle: pointer to defined  queue
+*
+***********************************************************************************************************************/
+xQueueHandle getEmAnswerQueueHandle(void)
+{
+   return(emAnswQueue);
+}
+
+/**
+*
+* @brief        Get if a digital meter is present 
+*
+* @param [in]   emEnum_e: EM index
+*
+* @retval       uint8_t: TRUE if a digital meter is present
+*
+***********************************************************************************************************************/
+uint8_t isDigitalMeterPresent(emEnum_e emIx)
+{
+
+  if ((emMsg.emModelInfo[emIx].type == EM_ALGO) || (emMsg.emModelInfo[emIx].type == EM_GAVAZZI))
+  {
+     return(TRUE);
+  }
+  return(FALSE);
+}
+
+/**
+*
+* @brief        Get the value for a defined register 
+*
+* @param [in]   emReadReg_e: id register 
+*
+* @retval       int32_t: the reg value 
+*
+***********************************************************************************************************************/
+int32_t  getEmRegisterValue(emReadReg_e regId, uint8_t emeterType)
+{
+  int32_t       tmp32;
+  int32_t       Scale, signMask;
+  uint8_t       ix;
+
+  if (((emeterType == (uint8_t)EMETER_TAMP) || (emeterType == (uint8_t)EMETER_TAMP_3)) && (regId == EM_CURRENT_L))
+  {
+    tmp32 = (int32_t)getTAcurrent();
+    return (tmp32);
+  }
+
+  if (regId == EM_SES_ACTIVE_ENERGY)
+  {
+    /* current session energy is calculated by FW 17/06/2021 */
+    return(emTaskState.sessActEnergy.sessionEnrgValue);
+  }
+  tmp32 = (int32_t)0;
+  signMask = (int32_t)0xFFFFFFFF;
+
+  if (regId < EM_READ_REG_NUM)
+  {
+    if (regId < EM_EXT_ACTIVE_POWER) ix = (uint8_t)INTERNAL_EM; else ix = (uint8_t)EXTERNAL_EM;
+    /* All register are on 4 word but Algo use almost 3 word and Gavazzi 2                   */ 
+    /* For 3 word --> Algo                             0    1    2    3   4    5              */ 
+    /* 3 word --> Modbus put in memory in this order H_LH-H_LL-L_HH-LHL-L_LH-L_LL            */ 
+    /* 4 word --> in ST must have this order         L_LL-L_LH-L_HL-L_HH H_LL-H_LH-0000-0000 */ 
+
+    /* For 2 word --> Gavazzi                           0    1    2    3                       */ 
+    /* 3 word --> Modbus put in memory in this order H_LH-H_LL-L_HH-L_HL                        */ 
+    /* 4 word --> in ST must have this order         L_HL-L_HH-H_LL-H_LH 0000-0000-0000-0000 */ 
+
+    if (emRegInfo[ix][regId].size == (uint16_t)2)
+    {
+      tmp32 = swap32((int32_t)emTaskState.emUserReg[ix][regId]);
+      /* In case of Energy meter LOVATO, we should adjust the byte order:
+                                                  |  MSB  |   LSB  |
+         Assuming that's the situation here -->   LL - HL - LH - HH 
+         The value must be adjusted to have -->   HH - LH - HL - LL         */
+      if ((emeter_type[ix] == EMETER_MONO_PH_LOVATO) || (emeter_type[ix] == EMETER_THREE_PH_LOVATO))
+      {
+        /* swap register order */
+        tmp32 = ((tmp32 & 0xFFFF) << 16) | ((tmp32 & 0xFFFF0000) >> 16);
+      }
+    }
+    else 
+    {
+      if (emRegInfo[ix][regId].size == (uint16_t)3)
+      {
+        signMask = (int32_t)0x7FFFFFFF;
+        tmp32 = (int32_t)swap3((uint8_t*)&emTaskState.emUserReg[ix][regId]);
+      }
+      else
+      {
+        if (emRegInfo[ix][regId].size == (uint16_t)4)
+        {
+          tmp32 = (int32_t)swap4((uint8_t*)&emTaskState.emUserReg[ix][regId]);
+        }
+        else
+        {
+          if (emRegInfo[ix][regId].size == (uint16_t)1)
+          {
+            tmp32 = (int32_t)swapW((uint16_t)emTaskState.emUserReg[ix][regId]);
+          }
+        }
+      }
+    }
+  }
+  /* return back in V, mA, W, VAR, Wh VARh Positive value is for divisor, negative value is for multiplier */
+  
+  if ((uint64_t)emTaskState.emUserReg[ix][regId] & ALGO2_SIGN_BIT_MASK)
+  {
+    /* negative value for algo 2 We can take in account only 32bit: this means 4294,967 KW --> is enough */
+    /* -4068mA --> 0xE40F0080 and -918317mW -->0x2D030E000080 */
+    if ((emeter_type[ix] == EMETER_MONO_PH_ALGO2) ||  (emeter_type[ix] == EMETER_THREE_PH_ALGO2) ||
+        (emeter_type[ix] == EMETER_MONO_PH_SCAME) || (emeter_type[ix] == EMETER_THREE_PH_SCAME)   ||
+        (emeter_type[ix] == EMETER_MONO_PH_PA775) || (emeter_type[ix] == EMETER_THREE_PH_PA775))
+    {
+      tmp32 &= signMask;
+      tmp32 = (int32_t)tmp32  * (int32_t)(-1);
+    }
+  }
+  /* in LOVATO EM mono-phase the power sign bit is inside onother register 0 positive = from network to load */
+  if (emeter_type[ix] == EMETER_MONO_PH_LOVATO)
+  {
+    if ((emTaskState.emUserReg[ix][EM_EXT_SIGN_POWER] & (uint64_t)LV_ACT_PWR_SIGN_MASK) == (uint64_t)LV_ACT_PWR_SIGN_MASK)
+    {
+      /* bit 2 is the sign: xxxxxxxxyyyyyy1y when negative; xxxxxxxxyyyyyy0y when positive In memory, 64bit negative, is: 0x00000000 00002000 */
+      tmp32 = (int32_t)tmp32 * (int32_t)(-1);
+    }
+  }
+
+  /* NOTE for LOVATO devices: modbus map is different between Mono and Three Phase type, in particular for 
+     unit of measure, so at this point this must be managed.                                               */
+  Scale = (int32_t)emRegInfo[ix][regId].value;   
+  if (emRegInfo[ix][regId].value > (int16_t)0)
+  {
+    tmp32 /= Scale;
+  }
+  else
+  {
+    tmp32 *= (int32_t)(Scale * (int32_t)-1);
+  }
+
+  if (regId == EM_TOT_ACTIVE_ENERGY)
+  {
+    /* con EM SCAME il valore dell'energia totale è conteggiata a a parte  */
+    if ((emeter_type[ix] == EMETER_MONO_PH_SCAME) || (emeter_type[ix] == EMETER_THREE_PH_SCAME)) 
+    {
+      tmp32 = getScameActEnergyOffset();
+    }
+    else
+    {
+      if (((emeter_type[ix] == EMETER_MONO_PH_ALGO2) || (emeter_type[ix] == EMETER_THREE_PH_ALGO2)) &&
+          ((emMsg.emModelInfo[ix].modelVal >= 0x0014) && (emMsg.emModelInfo[ix].modelVal <= 0x001A)))
+      {
+        tmp32 *= Scale;
+      }
+
+    }
+  }
+  
+  if (regId == EM_ACTIVE_POWER)
+  {
+    /* internal active power must be positive always 02/05/2024 Nick */
+    if (tmp32 < (int32_t)0 )
+    {
+      tmp32 *= (int32_t)-1;
+    }
+  }
+  
+  return(tmp32);
+}
+
+
+/**
+*
+* @brief        Get the Energy value for internal SCAME energy meter 
+*
+* @param [in]   none 
+*
+* @retval       int32_t: the reg value 
+*
+***********************************************************************************************************************/
+static int32_t getScameEnergyValue(void)
+{
+  int32_t       tmp32;
+  int32_t       Scale;
+
+  tmp32 = (int32_t)swap4((uint8_t*)&emTaskState.emUserReg[INTERNAL_EM][EM_TOT_ACTIVE_ENERGY]);
+  Scale = (int32_t)emRegInfo[INTERNAL_EM][EM_TOT_ACTIVE_ENERGY].value;   
+  if (Scale > (int16_t)0)
+  {
+    tmp32 /= Scale;
+  }
+  else
+  {
+    tmp32 *= (int32_t)(Scale * (int16_t)-1);
+  }
+  return (tmp32);
+}
+
+/**
+*
+* @brief        change endianess in a word 32 bit   
+*
+* @param [in]   uint32_t: input data 
+*
+* @retval       int32_t: the swapped value 
+*
+***********************************************************************************************************************/
+#ifdef CHANGE_ENDIANESS
+static int32_t changeEndianess(int32_t dataD)
+{
+  dataAsDw_u    tmp32Data;
+  uint8_t tmp;
+
+  tmp32Data.dataDW = (uint32_t)dataD;
+  tmp = tmp32Data.dataD[3];
+  tmp32Data.dataD[3] = tmp32Data.dataD[0];
+  tmp32Data.dataD[0] = tmp;
+  tmp = tmp32Data.dataD[1];
+  tmp32Data.dataD[1] = tmp32Data.dataD[2];
+  tmp32Data.dataD[2] = tmp;
+
+  return((int32_t)tmp32Data.dataDW);
+}
+#endif
+
+/**
+*
+* @brief        Swap 32 data  
+*
+* @param [in]   uint32_t: input data 
+*
+* @retval       int32_t: the swapped value 
+*
+***********************************************************************************************************************/
+static int32_t swap32(int32_t dataD)
+{
+  dataAsDw_u    tmp32Data;
+  uint8_t tmp;
+
+  tmp32Data.dataDW = (uint32_t)dataD;
+  tmp = tmp32Data.dataD[3];
+  tmp32Data.dataD[3] = tmp32Data.dataD[2];
+  tmp32Data.dataD[2] = tmp;
+  tmp = tmp32Data.dataD[1];
+  tmp32Data.dataD[1] = tmp32Data.dataD[0];
+  tmp32Data.dataD[0] = tmp;
+
+  return((int32_t)tmp32Data.dataDW);
+}
+
+/**
+*
+* @brief        Swap 48 data  
+*
+* @param [in]   uint32_t: input data 
+*
+* @retval       int32_t: the swapped and normalizated value 
+*
+***********************************************************************************************************************/
+static int32_t swap3(uint8_t * pData)
+{
+  dataAsQw_u    tmp64Data;
+
+  tmp64Data.dataQW = (uint64_t)0;
+  /*                                     pData ---> 0    1    2    3   4    5              */ 
+  /* 3 word --> Modbus put in memory in this order H_LH-H_LL-L_HH-LHL-L_LH-L_LL            */ 
+  /* 4 word --> in ST must have this order         L_LL-L_LH-L_HL-L_HH H_LL-H_LH-H_HL-H_HH */ 
+  /* this means to revert and pad the bytes !!                         */
+  tmp64Data.dataQ[0] = pData[3];
+  tmp64Data.dataQ[1] = pData[2];
+  tmp64Data.dataQ[2] = pData[1];
+  tmp64Data.dataQ[3] = pData[0];
+
+  return((int32_t)tmp64Data.dataQW);
+}
+
+/**
+*
+* @brief        Swap 48 data  
+*
+* @param [in]   uint32_t: input data 
+*
+* @retval       int32_t: the swapped and normalizated value 
+*
+***********************************************************************************************************************/
+static int32_t swap4(uint8_t * pData)
+{
+  dataAsQw_u    tmp64Data;
+
+  tmp64Data.dataQW = (uint64_t)0;
+  /*                                     pData ---> 0    1    2    3   4    5              */ 
+  /* 3 word --> Modbus put in memory in this order H_LH-H_LL-L_HH-LHL-L_LH-L_LL            */ 
+  /* 4 word --> in ST must have this order         L_LL-L_LH-L_HL-L_HH H_LL-H_LH-H_HL-H_HH */ 
+  /* this means to revert and pad the bytes !!                         */
+  tmp64Data.dataQ[0] = pData[5];
+  tmp64Data.dataQ[1] = pData[4];
+  tmp64Data.dataQ[2] = pData[3];
+  tmp64Data.dataQ[3] = pData[2];
+
+  return((int32_t)tmp64Data.dataQW);
+}
+
+/**
+*
+* @brief        convert 6 bytes array data to uint64_t  
+*
+* @param [in]   uint8_t*: pointer to array data 
+*
+* @retval       uint64_t: the 3 word sinapsi value converted to uint64_t 
+*
+***********************************************************************************************************************/
+int64_t arrayTo64(uint8_t * pData)
+{
+  dataAsQw_u    tmp64Data;
+
+  tmp64Data.dataQW = (int64_t)0;
+  /*                                     pData ---> 0    1    2    3   4    5              */ 
+  /* 3 word --> Modbus put in memory in this order L_LL - L_LH - L_HL - L_HH - H_LL - H_LH - H_HL - H_HH            */ 
+  /* 4 word --> in ST must have this order         L_LL - L_LH - L_HL - L_HH   H_LL - H_LH - H_HL - H_HH            */ 
+  /* this means to copy directtly, byte a byte                                                                      */
+  tmp64Data.dataQ[0] = pData[0];
+  tmp64Data.dataQ[1] = pData[1];
+  tmp64Data.dataQ[2] = pData[2];
+  tmp64Data.dataQ[3] = pData[3];
+  tmp64Data.dataQ[4] = pData[4];
+  tmp64Data.dataQ[5] = pData[5];
+  if (pData[5] & 0x80)
+  {
+    /* the number is negative*/
+    tmp64Data.dataQ[6] = tmp64Data.dataQ[7] = 0xFF;
+  }
+
+  return((int64_t)tmp64Data.dataQW);
+}
+
+#ifdef SINAPSI_BIG_ENDIAN
+/**
+*
+* @brief        Change Sinapsi big Endian data to little endian    
+*
+* @param [in]   uint8_t: data block index   
+*
+* @param [out]  none
+*
+* @retval       none
+*
+*******************************************************************************/
+static void changeSinapsiToLittleEndian (uint8_t blockInfo)
+{
+  uint8_t   tmpB;
+  uint8_t*  pData;
+
+  if (blockInfo < SI_NUM_INFO)
+  {
+    pData = pSiInfoBk[blockInfo];
+    switch (blockInfo)
+    {
+      case SI_INFO1_R_REG:
+        /*  M1_PLC_STATE, M2_PLC_STATE, FW_VER   */
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB; pData = (uint8_t*)((uint32_t)pData + sizeof(uint16_t));
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB; pData = (uint8_t*)((uint32_t)pData + sizeof(uint16_t));
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB;
+        break;
+
+      case SI_INFO1_W_IDX:
+        /*  SET_CONFIG_MODE   */
+        break;
+
+      case SI_INFO2_R_IDX:
+        /*  GET_CONFIG_MODE, M1_PLC_RSSI, M2_PLC_RSSI    */
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB;
+        tmpB = pData[2]; pData[2] = pData[3];  pData[3] = tmpB;
+        tmpB = pData[4]; pData[4] = pData[5];  pData[5] = tmpB;
+        break;
+
+      case SI_INFO3_R_IDX:
+        /*  POT_ATT_IMM_IST_TS, POT_ATT_IMM_IST, POT_ATT_IMM_IST_TS_M2,....   */
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap uint32_t */
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[5];  pData[5] = tmpB; tmpB = pData[1]; pData[1] = pData[4]; pData[4] = tmpB; 
+                                                                tmpB = pData[2]; pData[2] = pData[3]; pData[3] = tmpB; /* swap array[6] */
+        pData = (uint8_t*)((uint32_t)pData + (uint32_t)6);
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap uint32_t */
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[5];  pData[5] = tmpB; tmpB = pData[1]; pData[1] = pData[4]; pData[4] = tmpB; 
+                                                                tmpB = pData[2]; pData[2] = pData[3]; pData[3] = tmpB; /* swap array[6] */
+        pData = (uint8_t*)((uint32_t)pData + (uint32_t)6);
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB; pData = (uint8_t*)((uint32_t)pData + sizeof(uint16_t)); /* swap uint16_t potContrattuale */
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB; pData = (uint8_t*)((uint32_t)pData + sizeof(uint16_t)); /* swap uint16_t potDisponibile  */
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB; pData = (uint8_t*)((uint32_t)pData + sizeof(uint16_t)); /* swap uint16_t costTrasf       */
+
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap uint32_t tempoDistaccoTs */
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB; pData = (uint8_t*)((uint32_t)pData + sizeof(uint16_t)); /* swap uint16_t tempoDistacco */
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB;  /* swap uint32_t fasciaCorrenteTs */
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB; pData = (uint8_t*)((uint32_t)pData + sizeof(uint16_t)); /* swap uint16_t fasciaCorrente */
+        tmpB = pData[0]; pData[0] = pData[1];  pData[1] = tmpB; pData = (uint8_t*)((uint32_t)pData + sizeof(uint16_t)); /* swap uint16_t biu            */
+        break;
+
+      case SI_INFO4_R_IDX:
+        /*  DU_UPTIME   */
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB;  /* swap uint32_t duUpTime */
+        break;
+
+      case SI_INFO5_R_IDX:
+        /*  POT_ATT_PRE_IST_TS, POT_ATT_PRE_IST,.... DU_MAC  */
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap uint32_t potAttPreIstTs*/
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[5];  pData[5] = tmpB; tmpB = pData[1]; pData[1] = pData[4]; pData[4] = tmpB; 
+                                                                tmpB = pData[2]; pData[2] = pData[3]; pData[3] = tmpB; /* swap array[6] potAttPreIst  */
+        pData = (uint8_t*)((uint32_t)pData + (uint32_t)6);
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap uint32_t cfCountTotM1*/
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap uint32_t cfCountLostTotM1*/
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap uint32_t cfCountTotM2*/
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap uint32_t cfCountLostTotM2*/
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[5];  pData[5] = tmpB; tmpB = pData[1]; pData[1] = pData[4]; pData[4] = tmpB; 
+                                                                tmpB = pData[2]; pData[2] = pData[3]; pData[3] = tmpB; /* swap array[6] duMAC           */
+        break;
+
+      case SI_INFO6_R_IDX:
+        /* POT_ATT_PRE_MAX, COR_ATT_PRE_MAX   */
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap int32_t potAttPreMax */
+        pData = (uint8_t*)((uint32_t)pData + sizeof(uint32_t));
+        tmpB = pData[0]; pData[0] = pData[3];  pData[3] = tmpB; tmpB = pData[1]; pData[1] = pData[2]; pData[2] = tmpB; /* swap int32_t corAttPreMax */
+        break; 
+
+      default:
+        break;
+    }
+
+  }
+}
+#endif
+
+/**
+*
+* @brief        Change Sinapsi big Endian data for model and Type    
+*
+* @param [in]   uint8_t*: data block index   
+*
+* @param [out]  none
+*
+* @retval       none
+*
+*******************************************************************************/
+static void changeSinapsiModelEndianess (uint8_t* pInfoModel)
+{
+  uint8_t   tmpB;
+
+  tmpB = pInfoModel[0]; pInfoModel[0] = pInfoModel[9]; pInfoModel[9] = tmpB;  /* swap serial number */
+  tmpB = pInfoModel[1]; pInfoModel[1] = pInfoModel[8]; pInfoModel[8] = tmpB;
+  tmpB = pInfoModel[2]; pInfoModel[2] = pInfoModel[7]; pInfoModel[7] = tmpB;
+  tmpB = pInfoModel[3]; pInfoModel[3] = pInfoModel[6]; pInfoModel[6] = tmpB;
+  tmpB = pInfoModel[4]; pInfoModel[4] = pInfoModel[5]; pInfoModel[5] = tmpB;
+}
+
+/**
+*
+* @brief        Set sinapsi flag to start activation Bluethoot procedure     
+*
+* @param [in]   none  
+*
+* @param [out]  none
+*
+* @retval       none
+*
+*******************************************************************************/
+void sinapsiBTflagAct (uint16_t value)
+{
+  pEmSinapsiInfo->setConfigMode = value;
+  emRegInfo[EXTERNAL_EM][SI_INFO1_W_IDX].size = 1;  // set  activation flag 
+}
+
+/**
+*
+* @brief        Set sinapsi configuration WORD     
+*
+* @param [in]   uint32_t: value for configuration word  
+*
+* @param [out]  none
+*
+* @retval       none
+*
+*******************************************************************************/
+void sinapsiCWFlagSet (uint32_t cfgVal)
+{
+
+  emRegInfo[EXTERNAL_EM][SI_INFO3_W_IDX].size = 1;  // set  activation flag 
+  emTaskState.sinapsiCfgUpgrade = cfgVal;           // set new value for configuration word
+}
+
+/**
+*
+* @brief        Set the initial value for an energy meter parameter   
+*
+* @param [out]  none
+*
+* @retval       uint8_t: 0 if OK != 0 for error
+*
+*******************************************************************************/
+uint8_t initEmParameter(emEvents_e emEvent)
+{
+  uint8_t   retVal;
+  int32_t   val, valEmeg;
+
+  
+
+  retVal = 0;
+  if (emEvent == EVT_START_ENRG_ACT_SESS_MEAS)
+  {
+    val = (int32_t)HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_EM_ENRG_ACT);
+    valEmeg = (int32_t)HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_CHARGE_STATUS);
+    
+    if (((val & MASK_FOR_EM_ENRG_ACT_KEY) == EM_ENRG_ACT_KEY) && ((valEmeg & 0x00FFFFFF) != 0))
+    {
+      /* a right value is stored in energy act emergency area: so startActEnrgValue must be set at the value before emrgency  */
+      val = (val & (~MASK_FOR_EM_ENRG_ACT_KEY));
+    }
+    else
+    {
+      if (isEmScamePresent() == TRUE)
+      {
+        setScameInitActEnergy();
+      }
+      val = getEmRegisterValue(EM_TOT_ACTIVE_ENERGY, EMETER_TYPE_NULL);
+      /* save this value in RTC backup register for emergency phase */
+      valEmeg = ((val & (~MASK_FOR_EM_ENRG_ACT_KEY)) | EM_ENRG_ACT_KEY) ;
+      HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_EM_ENRG_ACT, valEmeg);
+    }
+    /* set the initial active energy value */
+    emTaskState.sessActEnergy.startActEnrgValue = val;
+    emTaskState.sessActEnergy.sessionEnrgValue =  (int32_t)0;
+    emTaskState.triggerEnrgMeas = (uint16_t)1;
+
+  }
+  else
+  {
+    if (emEvent == EVT_STOP_ENRG_ACT_SESS_MEAS)
+    {
+      /* save the new value for total active energy */
+      if (emTaskState.sessActEnergy.sessionEnrgValue > (int32_t)0)
+      {
+        emTaskState.sessActEnergy.sessionEnrgValue += (getEepromTotalActiveEnergy() +(int32_t)50);
+        setEepromTotalActiveEnergy(emTaskState.sessActEnergy.sessionEnrgValue / (int32_t)100);
+      }
+      /* now clear the data to be ready for next transaction */
+      emTaskState.sessActEnergy.sessionEnrgValue =  (int32_t)0;
+      emTaskState.triggerEnrgMeas = (uint16_t)0;
+      /* clear the total active energy  in emergency area */
+      HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_EM_ENRG_ACT, (int32_t)0);
+    }
+    retVal = (uint8_t)1;  // parameter not found 
+  }
+  return(retVal);
+}
+
+/**
+*
+* @brief        get total active energy store in EEPROM  
+*
+* @param [in]   none
+*
+* @retval       int32_t: active energy value  
+*
+***********************************************************************************************************************/
+int32_t  getEepromTotalActiveEnergy (void)
+{
+  int32_t  totActEnrg;
+  uint8_t  pass[4];
+
+  eeprom_param_get(TOT_ENERGY0_EADD, pass, 4);
+  totActEnrg = ((int32_t)(pass[0]) << 24) + ((int32_t)(pass[1]) << 16) + ((int32_t)(pass[2]) << 8) + pass[3];
+  return((int32_t)100 * totActEnrg);
+}
+
+/**
+*
+* @brief        get total active energy store in EEPROM  
+*
+* @param [in]   none
+*
+* @retval       int32_t: active energy value  
+*
+***********************************************************************************************************************/
+void  setEepromTotalActiveEnergy (int32_t totActEnrg)
+{
+  uint8_t  pass[4];
+
+  /* per EM Scame total energy è aggiornato in */
+  pass[0] = (uint8_t)((totActEnrg & 0xFF000000) >> 24);
+  pass[1] = (uint8_t)((totActEnrg & 0x00FF0000) >> 16);
+  pass[2] = (uint8_t)((totActEnrg & 0x0000FF00) >> 8);
+  pass[3] = (uint8_t)((totActEnrg & 0x000000FF));
+  eeprom_param_set(TOT_ENERGY0_EADD, pass, 4);
+}
+
+/**
+*
+* @brief        Init uart for EM   
+*
+* @param [in]   none
+*
+* @retval       none  
+*
+***********************************************************************************************************************/
+static void  emUartInitialization (void)
+{
+  /*----- Initialization UART FOR RS485      -------------------------------------------*/
+
+  if (huart2.hdmarx != NULL)
+  {
+    HAL_DMA_Abort(huart2.hdmarx); 
+    HAL_DMA_DeInit(huart2.hdmarx);
+  }
+
+  MX_PROT_UART_DeInit(PROT_UART_EM);
+
+  MX_PROT_UART_Init(PROT_UART_EM);
+	/* end initialization */
+}
+
+
+/**
+*
+* @brief        Procedure to controll BT activation flag on SINAPSI   
+*
+* @param [in]   none
+*
+* @retval       none  
+*
+***********************************************************************************************************************/
+void manageBTactFlagSinapsi (char flagBt)
+{
+  if (flagBt == (char)TRUE)
+  {
+    if (pEmSinapsiInfo->getConfigMode == (uint16_t)0)
+    {
+      /* getConfigMode = 0 means  chain-2 link active so we write activation BT flag to clear the link  */
+      sinapsiBTflagAct((uint16_t)1);
+    }
+  }
+}
+
+/**
+*
+* @brief        Get the value for active power time stamp
+*
+* @param [in]   none 
+*
+* @retval       uint32_t: active power timer stamp
+*
+***********************************************************************************************************************/
+uint32_t  getSinapsiActivePowerTS(void)
+{
+  return(pEmSinapsiInfo->potAttImmIstTs);
+}
+
+/**
+*
+* @brief        Get the value SINAPSI PLC status 
+*
+* @param [in]   none 
+*
+* @retval       uint16_t: plc status 0=idle, 1=error 3=good 
+*
+***********************************************************************************************************************/
+uint16_t  getSinapsiStatusPlc(void)
+{
+  return(pEmSinapsiInfo->m1PlcState);
+}
+
+/**
+*
+* @brief        Reset the power and current value  
+*
+* @param [in]   none 
+*
+* @retval       uint16_t: plc status 0=idle, 1=error 3=good 
+*
+***********************************************************************************************************************/
+void  resetPowerCurrentValues(void)
+{
+  uint8_t               mdbAddr;
+  scuRoMapRegister_st*  pRoRegs;
+
+  /* Adjust registers in modbus map  */
+  mdbAddr = getLogicalMdbAddrSem();
+  pRoRegs = getRoMdbRegs(mdbAddr);
+  pRoRegs->scuMapRegStatusMeas.mtPh1Cur = (uint32_t)0;
+  pRoRegs->scuMapRegStatusMeas.mtPh2Cur = (uint32_t)0;
+  pRoRegs->scuMapRegStatusMeas.mtPh3Cur = (uint32_t)0;
+  pRoRegs->scuMapRegStatusMeas.mtSpPower = (uint32_t)0;
+  pRoRegs->scuMapRegStatusMeas.mtSpPowerL1 = (uint32_t)0; pRoRegs->scuMapRegStatusMeas.mtSpPowerL2 = (uint32_t)0; pRoRegs->scuMapRegStatusMeas.mtSpPowerL3 = (uint32_t)0;
+  /* Adjust registers in internal EM  */
+  emTaskState.emUserReg[INTERNAL_EM][EM_ACTIVE_POWER] = (uint64_t)0;
+  emTaskState.emUserReg[INTERNAL_EM][EM_CURRENT_L1] = (uint64_t)0;
+  emTaskState.emUserReg[INTERNAL_EM][EM_CURRENT_L2] = (uint64_t)0;
+  emTaskState.emUserReg[INTERNAL_EM][EM_CURRENT_L3] = (uint64_t)0;
+  /* reset current and power parameter for APP and Vania's Energy array*/
+  i_parameters_reset();
+  init_measures(&measureSck);
+}
+
+/**
+*
+* @brief        Task to send info to Algo2 Sim on PC     
+*
+* @param [in]   void*: parameters task  
+*
+* @retval       none 
+*
+***********************************************************************************************************************/
+static void algo2SimMngTask (void * pvParameters)
+{
+  algo2EvRx_st   frameAlgo2;  
+  uint32_t       timeTickTmp;
+
+
+
+  /*-------- Creates an empty mailbox for uart  messages --------------------------*/
+  algo2SimQueue = xQueueCreate(NUM_BUFF_SIM_ALGO, sizeof(algo2EvRx_st));
+  configASSERT(algo2SimQueue != NULL);
+  
+  /* init structure for management */
+  emAlgo2State.state = STATE_IDLE;
+  emAlgo2State.tick = 0;
+
+  timeTickTmp = portMAX_DELAY;
+
+  for (;;)
+  {
+    /* Wait for some event from timer or message   */
+    if (xQueueReceive(algo2SimQueue, (void *)&frameAlgo2, timeTickTmp) == pdPASS)
+    {
+      timeTickTmp = algo2SimProcess(&frameAlgo2);
+    }
+    else
+    {
+      frameAlgo2.eventRx = EVT_TIMEOUT;
+      timeTickTmp = algo2SimProcess(&frameAlgo2);
+    }
+  }
+}
+
+/**
+*
+* @brief        Manage the sending info to Algo2 simulator   
+*
+* @param [in]   algo2EvRx_st*: pointer to incoming message 
+*
+* @retval       uint32_t: new timeout 
+*
+***********************************************************************************************************************/
+static uint32_t algo2SimProcess(algo2EvRx_st* pMsg)
+{
+  uint32_t              timeTickTmp, temp32;
+  emError_e             error;
+  data64_u              data64;
+  uint16_t              lenInfo, regAddr, potRestart;
+  int16_t               tmp;
+  uint8_t               flags;
+
+
+  timeTickTmp = portMAX_DELAY;
+
+  switch (emAlgo2State.state)
+  {
+    case STATE_IDLE:
+      switch (pMsg->eventRx)
+      {
+        case EVT_ASK_REG:
+          if (emAlgo2State.tick >= 1)
+          {
+            emAlgo2State.tick = 0;
+            temp32 = (uint32_t)getPwmOnCP(); // use this field to retrigger WD (number != 0 for trigger WD) and to send current PWM value 
+            if (emAlgo2State.oldPwm != temp32)
+            {
+              emAlgo2State.oldPwm = temp32;
+              temp32 |= (uint32_t)0x8000; 
+              lenInfo = getAvailablePower_Flag(&flags, &tmp, &potRestart);
+              lenInfo = (uint16_t)4;     // in the high word put the PM pid value
+              temp32 &= ((uint32_t)0x0000FFFF);
+              temp32 |= ((uint32_t)tmp << 16); 
+              data64.double32_st.tmp32_a.dataDW = temp32;
+              data64.double32_st.tmp16_a = potRestart;
+              data64.double32_st.tmp16_b = (uint16_t)0; // free for future use 
+              regAddr = emRegInfo[EXTERNAL_EM][EM_EXT_SIGN_POWER].regAdd;
+              /* Algo2 simulator writing  */
+              error = setEmRegister(regAddr, (uint8_t*)&data64.dataQ[0], lenInfo, (uint8_t)emTaskState.emAddr[EXTERNAL_EM], FALSE);
+              if (error != EM_NO_ERROR)
+              {
+                emAlgo2State.numError++;
+              }
+              else
+              {
+                emAlgo2State.numError = 0;
+              }
+            }
+          }
+          else
+          {
+            emAlgo2State.tick++;
+          }
+          break;
+
+        default:
+          break;
+      }
+      break;
+
+    default:
+      break;
+  }
+
+  return(timeTickTmp);
+
+}
+
+
+/**
+*
+* @brief        Manage the sending info to Algo2 simulator   
+*
+* @param [in]   algo2EvRx_st*: pointer to incoming message 
+*
+* @retval       uint32_t: new timeout 
+*
+***********************************************************************************************************************/
+static void startSendInfoAlgo2Sim(void)
+{
+  algo2EvRx_st   tmpFrameAlgo2; 
+  
+  tmpFrameAlgo2.eventRx = EVT_ASK_REG;
+   
+  configASSERT(xQueueSendToBack(algo2SimQueue, (void *)&tmpFrameAlgo2, portMAX_DELAY) == pdPASS);
+}
+
+/**
+*
+* @brief        Reset PWM to force a new send to simulator    
+*
+* @param [in]   none 
+*
+* @retval       none 
+*
+***********************************************************************************************************************/
+static void resetPwmVal(void)
+{
+  emAlgo2State.oldPwm = 0;
+}
+
+/**
+*
+* @brief        check if an Scame EM is present   
+*
+* @param [in]   none
+*
+* @retval       uint8_t: TRUE if an EM Scame is present  
+*
+***********************************************************************************************************************/
+uint8_t isEmScamePresent (void)
+{
+  if ((emeter_type[INTERNAL_EM] == EMETER_MONO_PH_SCAME) || (emeter_type[INTERNAL_EM] == EMETER_THREE_PH_SCAME))
+  {
+    return(TRUE);
+  }
+  else
+  {
+    return(FALSE);
+  }
+}
+
+/**
+*
+* @brief        give the starts to send, one time, current active energy value    
+*
+* @param [in]   none
+*
+* @retval       none  
+*
+***********************************************************************************************************************/
+void semSlaveSendActEnrg (void)
+{
+  emTaskState.initMasterMeasRegs = (uint16_t)TRUE;
+}
+
+/**
+*
+* @brief        get total active energy from modbus register [Wh]    
+*
+* @param [in]   none
+*
+* @retval       int32_t: total active energy in Wh  
+*
+***********************************************************************************************************************/
+int32_t getTotalActiveEnergyFromModbusReg (void)
+{
+  scuRoMapRegister_st*  pRoRegs;
+  uint8_t               mdbAddr;
+
+  /* before to restart the cycle store the current value in modbus bus  */
+  mdbAddr = getLogicalMdbAddrSem();
+  pRoRegs = getRoMdbRegs(mdbAddr);
+
+  return ((int32_t)pRoRegs->scuMapRegStatusMeas.mtTpEnrg);
+}
+
+/*************** END OF FILE ******************************************************************************************/
+

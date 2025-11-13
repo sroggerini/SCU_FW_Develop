@@ -1,0 +1,196 @@
+<!DOCTYPE HTML PUBLIC "-//W3C/DTD HTML 4.0 Transitional//EN">
+<html>
+<link rel="icon" type="image/png" href="graphics/logoSCAME.png">
+<head>
+    <META HTTP-EQUIV = "Pragma" CONTENT="no-cache">
+    <title> SCAME Login Page </title>
+    <style>
+
+    /* Style the submit button */
+    input[type=submit] {
+      margin-left: 180pt;
+      background-color: #04AA6D;
+      color: white;
+    }
+
+    /* Style the container for inputs */
+    .container {
+      width: 40%;
+      background-color: #f1f1f1;
+      padding: 20px;
+    }
+
+    /* The message box is shown when the user clicks on the password field */
+    #message {
+      width: 50%;
+      display:none;
+      background: #f1f1f1;
+      color: #000;
+      position: relative;
+      padding: 20px;
+      margin-top: 10px;
+    }
+
+    #message p {
+      padding: 10px 35px;
+      font-size: 18px;
+    }
+
+    /* Add a green text color and a checkmark when the requirements are right */
+    .valid {
+      color: green;
+    }
+
+    .valid:before {
+      position: relative;
+      left: -35px;
+      content: "?";
+    }
+
+    /* Add a red text color and an "x" when the requirements are wrong */
+    .invalid {
+      color: red;
+    }
+
+    .invalid:before {
+      position: relative;
+      left: -35px;
+      content: "?";
+    }
+    </style>    
+    <script language="JavaScript">
+    function ModuloValido(){
+      valido = false;
+      var psw1 = document.getElementById("psw").value;
+      var psw2 = document.getElementById("psw2").value;
+      if (( psw1 == psw2))
+      {
+        valido = true;
+      }
+      if (valido)
+      {
+        modulo.submit();
+      }
+      else
+      {
+        alert("The passwords are different!")
+      }
+      return;
+      }
+    function mngPassword() {
+      var x = document.getElementById("psw");
+      if (x.type === "password") {
+        x.type = "text";
+      } else {
+        x.type = "password";
+      }
+      var y = document.getElementById("psw2");
+      if (y.type === "password") {
+        y.type = "text";
+      } else {
+        y.type = "password";
+      }
+    }
+
+    </script>
+</head>
+  <body bgcolor="#FF665E"> 
+    <h2 style="margin-left: 48pt">You must change password to access at system management</h2>
+
+<div class="container">
+  <form action="/chgPsw.cgi">
+    <label for="psw1">New Password</label>
+    <input type="password" id="psw" name="psw1" pattern="(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{10,}" title="Must contain at least one number and one uppercase and lowercase letter, and at least 10 or more characters" required>
+    <label for="psw2">Confirm</label>
+    <input type="password" id="psw2" name="psw2" pattern="(?=.*\d)(?=.*[a-z])(?=.*[A-Z]).{10,}" title="Must contain at least one number and one uppercase and lowercase letter, and at least 10 or more characters" required>
+    <br>
+    <br>
+    <input type="checkbox" onclick="mngPassword()" id="myPsw">Show password
+    <br>
+    <br>
+    <input  type="submit" name="login" value="Set Password" onclick="ModuloValido()">
+  </form>
+</div>
+
+<div id="message">
+  <h3>Password must contain the following:</h3>
+  <p id="letter" class="invalid">A <b>lowercase</b> letter</p>
+  <p id="capital" class="invalid">A <b>capital (uppercase)</b> letter</p>
+  <p id="number" class="invalid">A <b>number</b></p>
+  <p id="specChar" class="invalid">A <b>special char</b></p>
+  <p id="length" class="invalid">Minimum <b>10 characters</b></p>
+</div>
+				
+<script>
+var myInput = document.getElementById("psw");
+var letter = document.getElementById("letter");
+var capital = document.getElementById("capital");
+var number = document.getElementById("number");
+var specChar = document.getElementById("specChar");
+var length = document.getElementById("length");
+
+// When the user clicks on the password field, show the message box
+myInput.onfocus = function() {
+  document.getElementById("message").style.display = "block";
+}
+
+// When the user clicks outside of the password field, hide the message box
+myInput.onblur = function() {
+  document.getElementById("message").style.display = "none";
+}
+
+// When the user starts to type something inside the password field
+myInput.onkeyup = function() {
+  // Validate lowercase letters
+  var lowerCaseLetters = /[a-z]/g;
+  if(myInput.value.match(lowerCaseLetters)) {  
+    letter.classList.remove("invalid");
+    letter.classList.add("valid");
+  } else {
+    letter.classList.remove("valid");
+    letter.classList.add("invalid");
+  }
+  
+  // Validate capital letters
+  var upperCaseLetters = /[A-Z]/g;
+  if(myInput.value.match(upperCaseLetters)) {  
+    capital.classList.remove("invalid");
+    capital.classList.add("valid");
+  } else {
+    capital.classList.remove("valid");
+    capital.classList.add("invalid");
+  }
+
+  // Validate numbers
+  var numbers = /[0-9]/g;
+  if(myInput.value.match(numbers)) {  
+    number.classList.remove("invalid");
+    number.classList.add("valid");
+  } else {
+    number.classList.remove("valid");
+    number.classList.add("invalid");
+  }
+  
+    // Validate special char 
+  var specChars = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?]+/g;
+  if(myInput.value.match(specChars)) {  
+    specChar.classList.remove("invalid");
+    specChar.classList.add("valid");
+  } else {
+    specChar.classList.remove("valid");
+    specChar.classList.add("invalid");
+  }
+
+  // Validate length
+  if(myInput.value.length >= 10) {
+    length.classList.remove("invalid");
+    length.classList.add("valid");
+  } else {
+    length.classList.remove("valid");
+    length.classList.add("invalid");
+  }
+}
+</script>    
+
+  </body>
+</html>

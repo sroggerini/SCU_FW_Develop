@@ -1,0 +1,28 @@
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.exe
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.deps.json
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.runtimeconfig.json
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.dll
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.pdb
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.GeneratedMSBuildEditorConfig.editorconfig
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.AssemblyInfoInputs.cache
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.AssemblyInfo.cs
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.csproj.CoreCompileInputs.cache
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.dll
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\obj\Debug\net9.0\refint\CheckTagDbgGD-HW_MP28947.dll
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.pdb
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.genruntimeconfig.cache
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg - HW_MP28947\obj\Debug\net9.0\ref\CheckTagDbgGD-HW_MP28947.dll
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.exe
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.deps.json
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.runtimeconfig.json
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.dll
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\bin\Debug\net9.0\CheckTagDbgGD-HW_MP28947.pdb
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.GeneratedMSBuildEditorConfig.editorconfig
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.AssemblyInfoInputs.cache
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.AssemblyInfo.cs
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.csproj.CoreCompileInputs.cache
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.dll
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\obj\Debug\net9.0\refint\CheckTagDbgGD-HW_MP28947.dll
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.pdb
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\obj\Debug\net9.0\CheckTagDbgGD-HW_MP28947.genruntimeconfig.cache
+C:\Progetti\SVN_Repos\SCAME_GD_RED\SCAME_CONTROL_UNIT\trunk\Win\checkTagEccDbg-HW_MP28947\obj\Debug\net9.0\ref\CheckTagDbgGD-HW_MP28947.dll

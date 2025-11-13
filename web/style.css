@@ -1,0 +1,82 @@
+
+input[type=button] {
+    padding: 10px;
+    background: #abc449;
+    color: #fff;
+    border: 2px solid #abc449;
+}
+
+input[type=submit] {
+    padding: 10px;
+    background: #abc449;
+    color: #fff;
+    border: 2px solid #abc449;
+}
+
+
+div.hwconf {
+    border: 1px solid #000;
+    position: relative;
+    padding: 1%;
+    background: #eee;
+    width: 1400px;
+    height: 550px;
+    margin: auto;
+    z-index: 2;
+}
+
+div.hwconf ul {
+    padding: 0;
+    display: block;
+}
+
+div.hwconf li {
+    display: block;
+    padding: 0;
+}
+
+div.hwconf div h1 {
+    font: 700 12px Arial;
+    border-bottom: 1px solid #000;
+    text-align: center;
+}
+
+div.hwconf div {
+    font: 500 12px Arial;
+    border: 0;
+    display: inline-block;
+    margin-right: 2%;
+    vertical-align: top;
+    width: 100%;
+}
+
+div.hwconf div.panel {
+    width: 31%;
+}
+
+div.hwconf div.panel_container {
+    width: 100%;
+}
+
+div.hwconf input[type=text] {
+    padding: 0;
+    border-width: 1px;
+    margin: 1px;
+}
+
+div.hwconf input[type=button] {
+    padding: 5px;
+    float: right;
+}
+
+div.hwconf input[type=submit] {
+    padding: 5px;
+    float: right;
+}
+
+div.hwconf h2 {
+    font: 700 12px Arial;
+    display: inline-block;
+    margin: 0;
+}
+

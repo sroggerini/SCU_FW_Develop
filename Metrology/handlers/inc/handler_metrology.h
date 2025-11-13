@@ -1,0 +1,272 @@
+/**
+*   @file      mnsh_metrology.h
+*   @author    IPC - Industrial BU
+*   @date      15 september 2013
+*   @brief     Defines the public interface for the NVRAM
+*   @note      (C) COPYRIGHT 2013 STMicroelectronics
+*
+* @attention
+*
+* THE PRESENT SOFTWARE WHICH IS FOR GUIDANCE ONLY AIMS AT PROVIDING CUSTOMERS
+* WITH CODING INFORMATION REGARDING THEIR PRODUCTS IN ORDER FOR THEM TO SAVE TIME.
+* AS A RESULT, STMICROELECTRONICS SHALL NOT BE HELD LIABLE FOR ANY DIRECT,
+* INDIRECT OR CONSEQUENTIAL DAMAGES WITH RESPECT TO ANY CLAIMS ARISING FROM THE
+* CONTENT OF SUCH SOFTWARE AND/OR THE USE MADE BY CUSTOMERS OF THE CODING
+* INFORMATION CONTAINED HEREIN IN CONNECTION WITH THEIR PRODUCTS.
+*
+*/
+
+#ifndef HANDLER_METROLOGY_H
+#define HANDLER_METROLOGY_H
+
+/*******************************************************************************
+* INCLUDE FILES:
+*******************************************************************************/
+#include <stdint.h>
+
+/** @addtogroup GENERIC
+  * @{
+  */
+
+/*******************************************************************************
+* DEFINES:
+*******************************************************************************/
+    
+/* definitions for EC MODEL register */
+    
+#define EM_SCAME_NULL_TYPE              0x00  /* EM not initialized */
+#define EM_SCAME_1P_TYPE                0x20  /* Mono phase type ID */
+#define EM_SCAME_3P_TYPE                0x30  /* Three phase type ID */
+#define EM_SCAME_CALIBRATED_TYPE        0x01  /* Calibrated device */
+
+/* definitions for BAUD RATE register */
+
+#define EM_SCAME_DEFAULT_BAUDRATE       0x07  /* 19200 bps */        
+
+/* Definition for TA type */
+
+#define EM_CURRSENS_CONFIG_BIT_POS      3
+#define EM_CURRSENS_CONFIG_MASK         0xE7    /* Mask used to delete bit3-4 */
+  
+/* Sign mark for negative measures (the MSB bit, ref. Modbus Communication protocol for Algo2)*/
+
+#define ALGO2_NEGATIVE_S64_MASK         0x800000000000
+#define ALGO2_NEGATIVE_S32_MASK         0x80000000
+#define ALGO2_NEGATIVE_S16_MASK         0x8000
+  
+/* Mask used to exclude the sign in current value */
+#define CURRENT_VALUE_MASK_32           0x7FFFFFFF
+
+#define DEVICE_NOT_CALIBRATED           0xC0C0  /* This means device not calibrated */
+#define DEVICE_CALIBRATED               0xC1C1  /* This means device calibrated */
+
+#define M_PI                            3.14159265358979323846
+
+/* Default SN value --> "Empty SN" */
+#define DEFAULT_SN                      "mEtp yNS"
+#define DEFAULT_DSP_CR1_VAL             0x040000a0 /* LED 1 output: active - LED 1 output channel selection: primary channels */
+#define DEFAULT_DSP_CR2_VAL             0x140000a0 /* LED 2 output: active - LED 2 channel selection: secondary */
+#define DSP_CR3_CLKOUT_TO_16MHz_VAL     0x0000C4E0
+#define DSP_CR3_ZCR_EN_ON_V1_VAL        0x000104E0
+#define DSP_CR3_ZCR_EN_ON_V2_VAL        0x000184E0
+#define DSP_CR3_ZCR_EN_ON_C2_VAL        0x0001C4E0
+
+/* ADC value threshold for TA23TYPE input */
+#define TA_TYPE_ITA_SBT002_THRESHOLD_L          0
+#define TA_TYPE_ITA_SBT002_THRESHOLD_H        200
+#define TA_TYPE_ITA_SBT012_THRESHOLD_L        900
+#define TA_TYPE_ITA_SBT012_THRESHOLD_H       1300
+#define TA_TYPE_HON_HMCT406_THRESHOLD_L       250
+#define TA_TYPE_HON_HMCT406_THRESHOLD_H       400
+#define TA_TYPE_SCT_10_1_200TS_THRESHOLD_L    600
+#define TA_TYPE_SCT_10_1_200TS_THRESHOLD_H    850
+
+/*******************************************************************************
+* TYPES:
+*******************************************************************************/
+
+/* Realtime Measures structure */
+
+/* Register 16bit typedef (referred to the Modbus endianness) */
+typedef __packed union
+{
+  uint16_t  Reg16;
+  __packed struct 
+  {
+    uint8_t Reg8L;
+    uint8_t Reg8H;
+  }Reg16LH_st;
+}Reg16_u;
+
+/* Register 32bit typedef (referred to the Modbus endianness) */
+
+typedef struct
+{
+  __packed union
+  {
+    uint32_t  Reg32;
+    __packed struct 
+    {
+      uint16_t Reg16L;
+      uint16_t Reg16H;
+    }Reg32LH_st;
+  }Reg32_u;
+
+  uint16_t  Spare;   /* spare register used to avoid reading mismatch values: SCu reads 3 words instead of 2 in case of current */
+  
+} Reg32_t;
+
+/* Register 64bit typedef (referred to the Modbus endianness) */
+/* Signed */
+typedef __packed union
+{
+  int64_t  Reg64;
+  __packed struct 
+  {
+    int16_t Reg16LL;
+    int16_t Reg16LH;
+    int16_t Reg16HL;
+    int16_t Reg16HH;
+  }Reg64LH_st;
+}sReg64_u;
+/* Unsigned */
+typedef __packed union
+{
+  uint64_t  Reg64;
+  __packed struct 
+  {
+    uint16_t Reg16LL;
+    uint16_t Reg16LH;
+    uint16_t Reg16HL;
+    uint16_t Reg16HH;
+  }Reg64LH_st;
+}Reg64_u;
+
+typedef enum
+{
+  
+  POSITIVE_POWER = 0,
+  NEGATIVE_POWER,
+  
+} PowerSign;
+
+typedef __packed struct
+{
+  
+  Reg32_t   Voltage_L1N;      
+  Reg32_t   Voltage_L2N;      
+  Reg32_t   Voltage_L3N;      
+  Reg32_t   Voltage_L12;      
+  Reg32_t   Voltage_L23;      
+  Reg32_t   Voltage_L31;      
+  Reg32_t   SystemVoltage;      
+  Reg32_t   Current_L1;       
+  Reg32_t   Current_L2;       
+  Reg32_t   Current_L3;       
+  Reg32_t   SystemCurrent;            
+  Reg16_u   CosPhi_1PH;         
+  Reg16_u   CosPhi_3PH;       
+  sReg64_u  Active_Pwr_L1;       
+  sReg64_u  Active_Pwr_L2;       
+  sReg64_u  Active_Pwr_L3;       
+  sReg64_u  Active_Pwr_TOT;       
+  sReg64_u  Reactive_Pwr_TOT;     
+  sReg64_u  Active_Energy_TOT;    
+  sReg64_u  Reactive_Energy_TOT;  
+  sReg64_u  Sys_Active_Energy;
+  PowerSign L1_ActivePower_Sign;  
+  PowerSign L2_ActivePower_Sign;  
+  PowerSign L3_ActivePower_Sign;    
+  PowerSign L1_ReactivePower_Sign;
+  PowerSign L2_ReactivePower_Sign;
+  PowerSign L3_ReactivePower_Sign;
+  
+}em_Measures_t;
+
+/* Energy Counter information structure */
+
+typedef __packed struct
+{
+  
+  uint8_t    EC_Serial_Number[8];
+  uint16_t   EC_Model;          
+  uint16_t   Config;        
+  uint16_t   Command;
+  uint8_t    SlaveAddr;
+  
+}em_Config_t;
+
+typedef union
+{
+  struct
+  {
+    uint16_t CalibOK         :1;   /*!< bit:  0  Calibration OK */
+    uint16_t CalibFailed     :1;   /*!< bit:  1  Calibration Failed */
+    uint16_t Calibrated      :1;   /*!< bit:  2  Device already calibrated */
+  } Flags;  
+  
+  uint16_t Value;             
+  
+} em_Status_t;
+
+typedef enum
+{
+  
+  CALIB_SUCCESS = 0,
+  CALIB_FAILED,
+  CALIB_DISABLED,
+  
+} CalibStatus;
+
+typedef enum
+{
+
+  EM_TA_ITA_SBT002 = 0,
+  EM_TA_ITA_SBT012,  
+  EM_TA_HON_HMCT406, 
+  EM_TA_SCT_10_1_200TS, 
+  EM_TA_NULL = 0xFF
+
+}EM_CurrSens_type_e;
+
+/*******************************************************************************
+* FUNCTIONS:
+*******************************************************************************/
+void MET_Conf(void);
+void Metro_com_port_device(void);
+void MET_RestoreConfigFromNVM( void );
+void MET_SaveConfigToNVM( void );
+void MET_RestoreDefaultConfig(uint32_t nbPhase);
+void MET_Set_NVM_to_1P_Type (void);
+
+#endif /* HANDLER_METROLOGY_H */
+
+extern em_Measures_t em_Measures;
+extern em_Config_t em_Config;
+extern em_Status_t em_Status;
+extern EM_CurrSens_type_e EM_CurrSens_T1_type;
+extern EM_CurrSens_type_e EM_CurrSens_T23_type;
+
+/* Variables used to share the measures with the SCU board */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+/**
+  * @}
+  */
+
+/* End Of File */
+

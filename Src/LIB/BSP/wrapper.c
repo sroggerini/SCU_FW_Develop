@@ -1,0 +1,5651 @@
+/**
+* @file        wrapper.c
+*
+* @brief       Wrapper tra station manager e low level HW - Implementation -
+*
+* @author      Nick
+*
+* @riskClass   C
+*
+* @moduleID
+*
+* @vcsInfo
+*     $Id: wrapper.c 764 2025-06-09 08:51:23Z stefano $
+*
+*     $Revision: 764 $
+*
+*     $Author: stefano $
+*
+*     $Date: 2025-06-09 10:51:23 +0200 (lun, 09 giu 2025) $
+*
+*
+* @copyright
+*       Copyright (C) 2017 SCAME S.p.A. All rights reserved.
+*       This file is copyrighted and the property of Aesys S.p.A.. It contains confidential and proprietary
+*       information. Any copies of this file (in whole or in part) made by any method must also include a copy of this
+*       legend.
+*       Developed by:  SCAME S.p.A.
+***********************************************************************************************************************/
+
+/************************************************************
+ * Include
+ ************************************************************/
+#include <stddef.h>
+#include <string.h>
+#include <stdio.h>
+#include <math.h>
+#include "main.h"
+#include "displayPin.h"
+#include "wrapper.h"
+#include "InputsMng.h"
+#include "Em_Task.h"
+#include "sbcGsy.h"
+#include "scuMdb.h"
+#include "ioExp.h"
+#include "adcTask.h"
+#include "rtcApi.h"
+#include "telnet.h"
+#include "eeprom.h"
+#include "EnergyMng.h"
+#include "uartDbg.h"
+#include "scheduleMng.h"
+#include "RfidMng.h"
+#include "rtcApi.h"
+#include "EnergyMng.h"
+#include "ExtInpMng.h"
+#include "usart_esp32.h"
+#include "transaction_register.h"
+#ifdef GD32F4xx
+#include "stm32f4xx_hal_tim.h"
+#endif
+#include "sbcSem.h"
+#include "httpserver-socket.h"
+#include "secure_area.h"
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**           LOCAL MACROS, TYPEDEF, STRUCTURE, ENUM                         **
+**                                                                          **
+******************************************************************************
+*/
+#define         MIN_DELTA_ENRG_VALID  ((uint32_t)10)
+#define         MAX_DELTA_ENRG_VALID  ((uint32_t)100)
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Local Const                                   **
+**                                                                          **
+****************************************************************************** 
+*/ 
+
+/* ---------------  definizione I/O per gestione output  digitali            -------------- */
+static const uint16_t OUT_PIN[NUM_OUTPUT_SCU]= { OUTBL1_P_Pin,  // PD8 = Comando motore +
+                                                 OUTBL1_M_Pin,  // PD3 = Comando motore +
+                                                 CNTCT_Pin,     // PD10 = Contattore
+                                            #ifdef HW_MP28947                                                       
+                                                 CNTCT_PWM_Pin, // PE5 = Contattore con segnale PWM                                              
+                                            #endif                                                 
+                                                 PWM_CP_Pin,    // PC6 = PWM su CP
+                                                 SGCBOB_Pin     // PD7 = comando bobina di sgancio
+                                               };
+
+static       GPIO_TypeDef* OUT_PORT[NUM_OUTPUT_SCU] = {OUTBL1_P_GPIO_Port,
+                                                       OUTBL1_M_GPIO_Port,
+                                                       CNTCT_GPIO_Port,
+                                                  #ifdef HW_MP28947                                                       
+                                                       CNTCT_PWM_GPIO_Port,   // PE5 = Contattore con segnale PWM
+                                                  #endif                                                       
+                                                       PWM_CP_GPIO_Port,
+                                                       SGCBOB_GPIO_Port
+                                                    };
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Local Variables                               **
+**                                                                          **
+****************************************************************************** 
+*/ 
+
+static uint8_t        dline1[CHAR_NUM];
+static uint8_t        dline2[CHAR_NUM];
+/* define at fix SRAM location to activate MPU on this area*/
+#pragma location=INFO_ADDR
+infoStation_t         infoStation;  // from scu.map I have found the structure is at 0x20056e90 with size 0x158=344 bytes
+/* the minimum size for MPU over infostation size is 512 So define a spare array to cover all this size */
+#pragma location=(INFO_SIZE + INFO_ADDR)
+uint8_t infoStationSpareArray[MPU_AREA - INFO_SIZE]; 
+
+/* pointer to transaction data   */
+uint8_t               *pArea;
+//static sck_register_t *transactionReg;
+static uint16_t         pwmWrap;
+//static socket_t       *pSocket;
+wifiSbcMode_e           wifiSbcTogether;
+/* TIM handler declaration */
+static TIM_HandleTypeDef  htimCp;
+
+static uint8_t        didx;
+
+static uint32_t       oldPist, oldTransTime;
+
+#ifdef USE_BKSRAM
+/* starting from V4.1.6C we use the 4K backup SRAM to store total energy SCAME EM in yhe following structure */
+__no_init emSscameTotEnrg_st  emSscameTotEnrg     __attribute__((section(".bkpsram")));
+#else
+  /* 14/09/2023 per portare il consumo della batteria da 8uA a 1,2uA è necesario togliere l'alimentazione ai 4K di SRAM di backup */
+  /* vanno tolte le variabile memorizzate nella section bkpsram (vedi wrapper.c, emSscameTotEnrg */
+emSscameTotEnrg_st  emSscameTotEnrg;
+
+/* Backup of Unix timestamp received from App/WebUI , placed in BKP SRAM section */
+__no_init uint32_t BKP_SRAM_UnixTimestamp         __attribute__((section(".bkpsram")));
+
+#endif
+
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Global Variables                              **
+**                                                                          **
+****************************************************************************** 
+*/ 
+sck_measures_t      measureSck;
+
+statusFlag_e        fastBridgeStatus;
+uint32_t            counterSlaveDwnl;
+
+uint8_t             filteringPEN = 0;  /* solo per debug */
+uint16_t            prevState = 0;
+
+osThreadId_t        RfidTaskHandle;
+uint8_t             areaTransaction[FLASH_TRANSACTION_SIZE];
+char                scu_hw_version[4];
+__no_init	char    OutOfPowerDownAt15V;
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            External Variables                            **
+**                                                                          **
+******************************************************************************
+*/
+extern infoFw_u           fwInfo;
+extern infoV230_st        infoV230;
+extern TIM_HandleTypeDef  htimV230;
+extern uint8_t            scuAddr;
+
+uint8_t*       pDataModify;
+
+uint16_t       schedPower[4] = {0,0,0,0};
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            External Function                             **
+**                                                                          **
+******************************************************************************
+*/
+extern void Eeprom_Master_User_card_Force_Reset(void);
+extern struct DataAndTime_t GetDateTime_from_Unix (uint32_t UnixTimestamp);
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Internal Function prototype                   **
+**                                                                          **
+******************************************************************************
+*/
+static void     wrapper_Handler     (void);
+static uint32_t getFlagV230Reg      (void);
+static uint8_t  absDiff             (uint32_t newVal, uint32_t oldVal, uint32_t delta);
+static void     resetSpareMpuArea   (void);
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Function Definition                           **
+**                                                                          **
+******************************************************************************
+*/
+
+/**
+*
+* @brief        Set flag on NVIC reset      
+*
+* @param [in]   none
+*
+* @retval       none 
+*
+***********************************************************************************************************************/
+void setFlagForNvic(void)
+{
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_NVIC_RESET_REG, BACKUP_NVIC_RESET_VAL);
+}
+
+/**
+  * @brief  Create a string from fatTime value 
+  * @param[in] uint32_t:   fat time value 
+  * @param[in] char*:   string pointer where store the string time  
+  * @retval none
+  */
+void  strRTCDateTime( char * str, uint32_t fatTime )
+{
+  uint32_t temp;
+  
+  temp = (uint32_t)(fatTime >> 25) & (uint32_t)(0x0000007F);
+  uint16_t year   = (uint16_t)((uint32_t)1980 + temp);
+  uint16_t month  = (fatTime >> 21) & (0x0000000F);
+  uint16_t day    = (fatTime >> 16) & (0x0000001F);
+  uint16_t hour   = (fatTime >> 11) & (0x0000001F);
+  uint16_t minute = (fatTime >> 5)  & (0x0000003F);
+  uint16_t second = ((fatTime >> 0) & (0x0000001F)) * 2;
+
+  sprintf(str, "%04d-%02d-%02d %02d:%02d:%02d", year, month, day, hour, minute, second);
+}
+
+
+/**
+*
+* @brief       Put a string on LCD
+*
+* @param [in]  uint8_t*: pointer to string  
+* @param [in]  uint8_t:  tipo di allineamento  WCENTER/WLEFT/WRIGHT/WOFF 
+*  
+* @retval      none 
+*  
+****************************************************************/
+void DispUpdate(uint8_t *line1, uint8_t align1, uint8_t *line2, uint8_t align2)
+{
+  uint8_t id0;
+  uint8_t len;
+
+  for (didx = 0; didx < CHAR_NUM; didx++)   // inizializzazione
+  {
+    dline1[didx] = ' ';
+    dline2[didx] = ' ';
+  }
+
+  if (line1 != NULL)
+  {
+    for (len = 0; len < CHAR_NUM; len++)    // conta il numero di caratteri della linea 1
+    {
+      if (!line1[len])
+        break;
+    }
+
+    if (align1 == WLEFT)          // allineamento
+    {
+      id0 = 0;
+    }
+    else if (align1 == WCENTER)
+    {
+      id0 = ((CHAR_NUM - len) >> 1);
+    }
+    else  // if (align1 == WRIGHT)
+    {
+      id0 = CHAR_NUM - len;
+    }
+
+    didx = 0;
+
+    while (*((uint8_t*)((uint32_t)line1 + (uint32_t)didx)))         // copia la linea 1
+    {
+      if (didx < CHAR_NUM)
+      {
+        dline1[id0] = *((uint8_t*)((uint32_t)line1 + (uint32_t)didx));
+        id0 ++;
+        didx ++;
+      }
+      else
+      {
+        break;
+      }
+    }
+    if (len != (uint8_t)0)
+    {
+      /* now put the string on display first line */
+      putsxy_c(DISP_FIRST_COLUMN, DISP_FIRST_LINE, (char *)dline1);
+    }
+  }
+      
+  if (line2 != NULL)
+  {
+    for (len = 0; len < CHAR_NUM; len++)    // conta il numero di caratteri della linea 2
+    {
+      if (!line2[len])
+        break;
+    }
+
+    if (align2 == WLEFT)
+    {
+      id0 = 0;
+    }
+    else if (align2 == WCENTER)
+    {
+      id0 = ((CHAR_NUM - len) >> 1);
+    }
+    else  // if (align2 == WRIGHT)
+    {
+      id0 = CHAR_NUM - len;
+    }
+
+    didx = 0;
+
+    while (*((uint8_t*)((uint32_t)line2 + (uint32_t)didx)))         // copia la linea 2
+    {
+      if (didx < CHAR_NUM)
+      {
+        dline2[id0] = *((uint8_t*)((uint32_t)line2 + (uint32_t)didx));
+        id0 ++;
+        didx ++;
+      }
+      else
+      {
+        break;
+      }
+    }
+    if (len != (uint8_t)0)
+    {
+      /* now put the string  on display second line */
+      putsxy_c(DISP_FIRST_COLUMN, DISP_SECOND_LINE, (char *)dline2);
+    }
+  }
+}
+
+/**
+*
+* @brief       get an input pin status 
+*
+* @param [in]  dIn_TypeDef:  id of required pin  
+*  
+* @retval      GPIO_PinState: pin status 0=GPIO_PIN_RESET 1=GPIO_PIN_SET 
+*  
+****************************************************************/
+GPIO_PinState getInputState(dIn_TypeDef pinId)
+{
+  GPIO_PinState result;
+
+  result = getInput(pinId);
+  return(result);
+}
+
+/**
+*
+* @brief       set an output pin status 
+*
+* @param [in]  dOut_TypeDef:  id of required pin 
+* @param [in]  GPIO_PinState:  GPIO_PIN_SET / GPIO_PIN_RESET 
+*  
+* @retval      none 
+*  
+****************************************************************/
+void setOutputState(dOut_TypeDef pinId, GPIO_PinState PinState)
+{
+
+  switch (pinId)
+  {
+    case PWM_CP:
+      break;
+
+    default:
+      if (CNTCT == pinId)
+      {
+#ifdef TA_ACT_ON_CNTT
+        if (PinState == GPIO_PIN_SET)
+        {
+          sendMsgStartTa();
+        }
+        else
+        {
+          sendMsgStopTa();
+        }
+#endif
+        if (PinState == GPIO_PIN_SET)
+        {
+          pwmWrap |= (uint16_t)0x0400;
+        }
+        else
+        {
+          pwmWrap &= (uint16_t)0xFBFF;
+        }       
+        cnttStatusChange();
+      }
+      HAL_GPIO_WritePin(OUT_PORT[pinId], OUT_PIN[pinId], PinState);
+      break;
+  }
+}
+
+/**
+*
+* @brief        set Timer PWM for CP pin   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void init_CP_PWM (void)
+{
+  GPIO_InitTypeDef    GPIO_InitStruct;
+  uint32_t            uwPrescalerValue = 0;
+  /* Timer Output Compare Configuration Structure declaration */
+  TIM_OC_InitTypeDef  sConfig;
+  
+  /* TIM3 clock enable */
+  TIM_CP_PWM_CLK_ENABLE();
+
+  /* Enable the GPIO used for CP PWM clock */
+  CP_PWM_GPIO_CLK_ENABLE();
+
+    /* GPIOx Configuration: TIM3 CH1 (PC6)  */
+  GPIO_InitStruct.Pin       = CP_PWM_PIN;
+  GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
+  GPIO_InitStruct.Pull      = GPIO_PULLUP;
+  GPIO_InitStruct.Speed     = GPIO_SPEED_FAST;
+  GPIO_InitStruct.Alternate = CP_PWM_AF;
+
+  HAL_GPIO_Init(CP_PWM__GPIO_PORT, &GPIO_InitStruct); 
+
+  /*##-1- Configure the TIM peripheral #######################################*/ 
+  /* -----------------------------------------------------------------------
+    In this example TIM3 input clock (TIM3CLK) is set to 2 * APB1 clock (PCLK1), 
+    since APB1 prescaler is different from 1.   
+      TIM3CLK = 2 * PCLK1  
+      PCLK1 = HCLK / 4 
+      => TIM3CLK = HCLK / 2 = SystemCoreClock / 2
+    To get TIM3 counter clock at 1KHz, the Prescaler is computed as following:
+    Prescaler = (TIM3CLK / TIM3 counter clock) - 1
+    Prescaler = ((SystemCoreClock / 2 ) /1 KHz) - 1
+  
+  
+       
+    Note: 
+     SystemCoreClock variable holds HCLK frequency and is defined in system_stm32f4xx.c file.
+     Each time the core clock (HCLK) changes, user had to update SystemCoreClock 
+     variable value. Otherwise, any configuration based on this variable will be incorrect.
+     This variable is updated in three ways:
+      1) by calling CMSIS function SystemCoreClockUpdate()
+      2) by calling HAL API function HAL_RCC_GetSysClockFreq()
+      3) each time HAL_RCC_ClockConfig() is called to configure the system clock frequency  
+  ----------------------------------------------------------------------- */  
+  
+  /* Compute the prescaler value to have TIM5 counter clock equal to 1MHz */
+  uwPrescalerValue = ((SystemCoreClock / 2) / 1000000) - 1;
+  
+  /* Set TIM_CP_PWM instance (TIM3) */
+  htimCp.Instance = TIM_CP_PWM;
+   
+  /* Initialize TIM3 peripheral as follows:
+       + Period = 100000 - 1
+       + Prescaler = ((SystemCoreClock/2)/100000) - 1
+       + ClockDivision = 0
+       + Counter direction = Up
+  */
+  htimCp.Init.Prescaler     = uwPrescalerValue;
+  htimCp.Init.Period        = CP_PWM_PERIOD_VALUE;      // now 1000/1000 KHz = 1msec (1KHz)
+  htimCp.Init.ClockDivision = 0;                        // quindi prendiamo un campione ogni 10msec
+  htimCp.Init.CounterMode = TIM_COUNTERMODE_UP;
+  if(HAL_TIM_PWM_Init(&htimCp) != HAL_OK)
+  {
+    /* Initialization Error */
+    wrapper_Handler();
+  }
+  /* Common configuration for all channels */
+  sConfig.OCMode     = TIM_OCMODE_PWM1;;
+  sConfig.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfig.OCFastMode = TIM_OCFAST_DISABLE;
+
+  /* Set the pulse value for channel 1 */
+  sConfig.Pulse = CP_PWM_MIN_DC;  
+  if(HAL_TIM_PWM_ConfigChannel(&htimCp, &sConfig, CP_PWM_TIM_CHx) != HAL_OK)
+  {
+    /* Configuration Error */
+    wrapper_Handler();
+  }
+
+  /* Stop PWM changing the GPIO setting */
+  stopPwmOnLevel(GPIO_PIN_RESET);
+}
+
+/**
+*
+* @brief        start Timer PWM for CP pin   
+*
+* @param [in ]  uint16_t: duty cycle ([0...1000]/1000)
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void startPwmOnCP (uint16_t dc)
+{
+  /* Timer Output Compare Configuration Structure declaration */
+  TIM_OC_InitTypeDef  sConfig;
+  GPIO_InitTypeDef    GPIO_InitStruct;
+
+  if (dc <= 1000)
+  {
+    pwmWrap = (pwmWrap & (0x0400)) | ((1000 - dc) & 0x03FF);
+    
+    /* GPIOx Configuration: TIM3 CH1 (PC6)  */
+    GPIO_InitStruct.Pin       = CP_PWM_PIN;
+    GPIO_InitStruct.Mode      = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull      = GPIO_PULLUP;
+    GPIO_InitStruct.Speed     = GPIO_SPEED_FAST;
+    GPIO_InitStruct.Alternate = CP_PWM_AF;
+
+    HAL_GPIO_Init(CP_PWM__GPIO_PORT, &GPIO_InitStruct); 
+
+    /* Common configuration for all channels */
+    sConfig.OCMode     = TIM_OCMODE_PWM1; 
+    sConfig.OCPolarity = TIM_OCPOLARITY_HIGH;
+    sConfig.OCFastMode = TIM_OCFAST_DISABLE;
+
+    /* Set the pulse value for channel 1 */
+    sConfig.Pulse = (uint32_t)(dc);  
+
+#ifdef GD32F4xx
+    if (TIM_CHANNEL_STATE_GET(&htimCp, CP_PWM_TIM_CHx) != HAL_TIM_CHANNEL_STATE_READY)
+    {
+      stopPwmOnCP();   // Added to prevent wrapper error if there are two consecutive calls
+    }
+#endif    
+     
+    if(HAL_TIM_PWM_ConfigChannel(&htimCp, &sConfig, CP_PWM_TIM_CHx) != HAL_OK)
+    {
+      /* Configuration Error */
+      wrapper_Handler();
+    }
+    
+    /* TIM3  enable for PWM on PC6 on channel 1 */
+    if(HAL_TIM_PWM_Start(&htimCp, CP_PWM_TIM_CHx) != HAL_OK)
+    {  
+      /* PWM error  */
+      wrapper_Handler();
+    }
+  }
+}
+
+/**
+*
+* @brief        stop Timer PWM for CP pin   
+*
+* @param [in ]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void stopPwmOnCP (void)
+{
+  /* TIM3  disable for PWM on PC6 on channel 1 */
+  if(HAL_TIM_PWM_Stop(&htimCp, CP_PWM_TIM_CHx) != HAL_OK)
+  {  
+    /* PWM error  */
+    wrapper_Handler();
+  }
+}
+
+
+/**
+*
+* @brief        PWM LOW for CP pin   
+*
+* @param [in ]  GPIO_PinState: level for PWM pin
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void stopPwmOnLevel (GPIO_PinState PinState)
+{
+  GPIO_InitTypeDef    GPIO_InitStruct;
+
+  pwmWrap &= (uint16_t)0xFC00;
+
+  if (PinState == GPIO_PIN_RESET)
+  {
+    HAL_GPIO_WritePin(CP_PWM__GPIO_PORT, CP_PWM_PIN, GPIO_PIN_SET);
+  }
+  else
+  {
+    HAL_GPIO_WritePin(CP_PWM__GPIO_PORT, CP_PWM_PIN, GPIO_PIN_RESET);
+  }
+  /* GPIOx Configuration: TIM3 CH1 (PC6) in output mode  */
+  GPIO_InitStruct.Pin       = CP_PWM_PIN;
+  GPIO_InitStruct.Mode      = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull      = GPIO_PULLUP;
+  GPIO_InitStruct.Speed     = GPIO_SPEED_FAST;
+
+  HAL_GPIO_Init(CP_PWM__GPIO_PORT, &GPIO_InitStruct); 
+}
+
+
+/**
+*
+* @brief        get current PWM value on CP pin   
+*
+* @param [in ]  none 
+*  
+* @retval       uint16_t: duty cycle ([0...1000]/1000)
+*  
+***********************************************************************************************************************/
+uint16_t getPwmOnCP (void)
+{
+  return(pwmWrap);
+}
+
+
+/**
+  * @brief  Wake Up Timer callback
+  * @param  hrtc : hrtc handle
+  * @retval None
+  */
+void HAL_RTCEx_WakeUpTimerEventCallback(RTC_HandleTypeDef *hrtc)
+{
+  /* check the status pin is in emrgency condition => "1" */
+  setFlagV230(BACKUP_TIMEOUT_RTC);   /* out of emergency condition for RTC timeout -->V230 assente ma è un falso */
+}
+
+
+/**
+  * @brief Start the timer to check when the Vac goes off 
+  * @param none
+  * @retval uint8_t: V230  present 
+  */
+uint8_t checkVbusFlag(void)
+{
+  uint8_t        v230Trigged;
+  statusFlag_e   flagVbus; 
+
+  /* set station V230 control from   CONTROL_BYTE1_EADD bit  VBUS_CRL1  */
+  eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
+  flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
+  
+  if ((flagVbus == ENABLED) && ((infoV230.statusV230 == V230_ABSENT) || (infoV230.statusV230 == V230_KO_WINDOW)))
+  {
+    v230Trigged = 0;  // assenza tensione con flag abilitata
+  }
+  if ((flagVbus == ENABLED) && (infoV230.statusV230 == V230_PRESENT))
+  {
+    v230Trigged = 1;  // presenza tensione con flag abilitata
+  }
+  if (flagVbus == DISABLED) 
+  {
+    v230Trigged = 2; //flag disabilitata
+  }
+
+  return(v230Trigged);
+}
+
+/**
+  * @brief EXTI line detection callbacks
+  * @param GPIO_Pin: Specifies the pins connected EXTI line
+  * @retval None
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  uint8_t         rcdm_enable;
+  ioMngMsg_st     ioExpMsg;
+  portBASE_TYPE   xHigherPriorityTaskWoken;
+
+  if (GPIO_Pin == V230_WD_PIN)
+  {
+    /* to do: the 230Vac is now present  */
+    infoV230.edgeCounter++;
+    if (htimV230.Instance->CR1 & (TIM_CR1_CEN) != 0)
+    {
+      __HAL_TIM_SET_COUNTER(&htimV230, (uint32_t)0); // reload Time Out
+    }
+  }
+  else
+  {
+    if ((GPIO_Pin == INT_INx_Pin) && (filteringPEN == ENABLED))
+    {
+      /* PEN alarm pin edge detected from U39 */
+
+      xHigherPriorityTaskWoken = pdFALSE;
+
+      /* disattivazione audio amplifier  */
+      ioExpMsg.taskEv = IO_EVENT_PEN_PIN_EDGE;
+      ioExpMsg.outRegId = NUM_OUT_IOEXP;
+      ioExpMsg.val = 0;
+      configASSERT(xQueueSendToBackFromISR(getIoMngQueueHandle(), (void *)&ioExpMsg, &xHigherPriorityTaskWoken) == pdPASS);
+    }
+    else
+    {
+      if (getCollaudoRunning() == FALSE) 
+      {
+        eeprom_param_get(CONTROL_BYTE0_EADD, &rcdm_enable, 1);
+        
+        if ((GPIO_Pin == RCDM_Pin) && ((rcdm_enable & RCDM_CRL0) != 0))
+        {
+           if (getCollaudoRunning() == FALSE) 
+           {
+              /* RCDM alarm: tje following actio must be executed immediatly */
+
+              stopPwmOnLevel(GPIO_PIN_SET);           // PWM stopped at high level 
+
+              setOutputState(CNTCT, GPIO_PIN_RESET);  // diseccito bobina contattore
+           }
+        }
+#ifdef HW_MP28947        
+        setOutputState(CNTCT_PWM, GPIO_PIN_RESET);  // diseccito bobina contattore
+  #endif        
+      }
+      else
+      {
+       setModbusErrorTesting(RCDM_IN_UP_PIN_UP, GPIO_PIN_SET);
+      }
+    }
+  }
+}
+
+/**
+*
+* @brief        get the energy meter model       
+*
+* @param [in]   emEnum_e: EM position
+*
+* @retval       uint32_t: code for energy model status  
+*
+***********************************************************************************************************************/
+uint32_t getEmModelReg(emEnum_e position)
+{
+  uint32_t  val;
+
+  
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_EM_MODEL);
+  if (position == INTERNAL_EM)
+  {
+    val &= MASK_FOR_EM_INT_MODEL;
+  }
+  else
+  {
+    if (position == EXTERNAL_EM)
+    {
+      val &= MASK_FOR_EM_EXT_MODEL;
+      val = ((val >> 16) & MASK_FOR_EM_INT_MODEL);
+    }
+  }
+  return (val);
+}
+
+/**
+* @brief  set the new state energy meter model
+*  
+* @param [in ]  uint32_t: EM model
+* @param [in ]  emEnum_e: EM position (INTernal or EXTernal) 
+*  
+* @retval None
+*/
+void setEmModelReg(uint32_t statusIn, emEnum_e position)
+{
+  uint32_t status;
+
+  status = getEmModelReg(EM_MAX_NUM);
+  if (position == INTERNAL_EM)
+  {
+    status &= (~MASK_FOR_EM_INT_MODEL);
+    status |= ((uint32_t)statusIn & MASK_FOR_EM_INT_MODEL);
+  }
+  else
+  {
+    status &= (~MASK_FOR_EM_EXT_MODEL);
+    status |= (((uint32_t)statusIn << 16) & MASK_FOR_EM_EXT_MODEL);
+  }
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_EM_MODEL, status);
+}
+
+/**
+* @brief  set the new state for V230 presence
+*  
+* @param [in ]  uint8_t: V230 status flag ON/OFF
+* @retval None
+*/
+void setFlagV230(uint32_t statusIn)
+{
+  uint32_t status;
+
+  status = getFlagV230Reg() & (~MASK_FOR_V230_BACKUP);
+  status |= (statusIn & MASK_FOR_V230_BACKUP);
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG, status);
+}
+
+/**
+*
+* @brief        get the status of 230 Vac flag      
+*
+* @param [in]   none
+*
+* @retval       uint32_t: code for 230 Vac status  
+*
+***********************************************************************************************************************/
+static uint32_t getFlagV230Reg(void)
+{
+  uint32_t  val;
+
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG);
+  return (val);
+}
+
+/**
+* @brief  set the new state for V230 presence
+*  
+* @param [in ]  uint8_t: V230 status flag ON/OFF
+* @retval None
+*/
+void setFlagV230Msg(uint32_t statusIn)
+{
+  uint32_t status;
+
+  if (infoV230.lastMsgV230Sent != statusIn)
+  {
+    if (statusIn != (uint32_t)0) infoV230.lastMsgV230Sent = statusIn;
+    status = getFlagV230Reg() & (~MASK_FOR_V230_MSG);
+    status |= (statusIn & MASK_FOR_V230_MSG);
+    HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG, status);
+  }
+}
+
+
+/* @brief  reset flag V230 
+*  
+* @param [in ]  none
+* @retval None
+*/
+void resetFlagV230Msg(void)
+{
+  uint32_t status;
+
+  status = getFlagV230Reg() & (~MASK_FOR_V230_MSG);
+
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG, status);
+}
+
+
+/**
+*
+* @brief        get the status of 230 Vac flag      
+*
+* @param [in]   none
+*
+* @retval       uint32_t: code for 230 Vac status  
+*
+***********************************************************************************************************************/
+uint32_t getFlagV230(void)
+{
+  uint32_t  val;
+
+  val = (HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*) getHandleRtc(), BACKUP_230VAC_REG) & MASK_FOR_V230_BACKUP);
+  return (val);
+}
+
+/**
+*
+* @brief        get the status of 230 Vac flag      
+*
+* @param [in]   none
+*
+* @retval       uint32_t: code for 230 Vac status  
+*
+***********************************************************************************************************************/
+uint32_t getFlagV230Msg(void)
+{
+  uint32_t  val;
+
+  val = (HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_230VAC_REG) & MASK_FOR_V230_MSG);
+  return (val);
+}
+
+
+/**
+*
+* @brief        set VAC230 as interrupt EXTI9_5 interrupt      
+*
+* @param [in]   none
+*
+* @retval       none  
+*
+***********************************************************************************************************************/
+void setVac230PinAsIntrpt (void)
+{
+  GPIO_InitTypeDef   GPIO_InitStructure;
+
+  infoV230.edgeCounter = 0;
+
+  /* Enable GPIOC clock */
+  V230_WD_GPIO_CLK_ENABLE();
+
+  /* Configure PC.8 pin as input pull-up */
+  GPIO_InitStructure.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStructure.Pull = GPIO_PULLUP;
+  GPIO_InitStructure.Pin = V230_WD_PIN;
+  HAL_GPIO_Init(V230_WD_GPIO_PORT, &GPIO_InitStructure);
+  
+  /* Enable and set EXTI line Interrupt to the lowest priority */
+#ifdef GD32F4xx
+  HAL_NVIC_SetPriority(EXTI9_5_IRQn, 7, 0);
+  HAL_NVIC_EnableIRQ(EXTI9_5_IRQn);
+#else
+  HAL_NVIC_SetPriority(EXTI8_IRQn, 7, 0);
+  HAL_NVIC_EnableIRQ(EXTI8_IRQn);  
+#endif  
+}
+
+/**
+* @brief  uP wakeup from Vin under treshold (13V) It is necessary unblock the socket and to stop the charging (if running) 
+*  
+* @param [in ]  ADC_HandleTypeDef*: adc handler 
+*  
+* @retval None
+*/
+void HAL_ADC_LevelOutOfWindowCallback(ADC_HandleTypeDef *hadc)
+{
+  if (hadc->Instance == ADCxVIN)
+  {    
+    /* if we arrive here, the the 230V is down yet, so the system close the current charging phase and when V230 will be present a normal restart occured  */
+    /* Write the right information */
+#ifdef HW_MP28947 
+    
+     EEpromMngMsg_st    msgEEpromSend;
+     BaseType_t         xHigherPriorityTaskWoken;
+     
+     extern xQueueHandle EEpromMngQueue;
+     
+    /* Trigger just one time */
+    if (getFlagV230() != BACKUP_230VAC_OFF_V24_LOW)       
+    {
+        setFlagV230(BACKUP_230VAC_OFF_V24_LOW);
+        /* Send to eeprom manager the event to save a copy of bkp registers */
+        xHigherPriorityTaskWoken = pdTRUE;
+        configASSERT(xQueueSendFromISR(EEpromMngQueue, (void *)&msgEEpromSend, &xHigherPriorityTaskWoken) == pdPASS);
+        
+        /** need to store this time: when the system will restart this time must be sent, with OCPP to central station  */
+    }
+    
+#else
+    
+    setFlagV230(BACKUP_230VAC_OFF_V24_LOW);
+    
+#endif
+    
+    /** To do here if Vania hasn't already done it somewhere!!!! nik  */
+  }
+}
+
+
+/**
+* @brief  manager for transmit UART complete using DMA (remember: the DMA, on Tx complete, enable end Tx interrupt bit on UART) 
+*         This maean we arrive here not for DMA interrpt but for UART interrupt i.e. UART_EM_IRQHandler() from stm32f7xx_it.c 
+*  
+* @param [in ]  UART_HandleTypeDef*: uart handler 
+*  
+* @retval None
+*/
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+{
+  USART_ESP32_TxCpltCallback( huart );
+  if(huart->Instance == UART_SBC)
+  {
+    freeSemTxBuffer();
+  }
+  else
+  {
+    if(huart->Instance == UART_SCU)
+    {
+      /* free buffer previous acquired by malloc */
+      freeTxBuffer();
+    }
+    else
+    {
+      if(huart->Instance == UART_DBG)
+      {
+#ifndef GD32F4xx          
+        /* free the semaphore  */
+        wifiDbgSemaphoreRelease();
+#endif          
+      }
+    }
+  }
+}
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+  USART_ESP32_RxEventCallback( huart, Size );
+}
+
+/**
+  * @brief  Conversion complete callback in non blocking mode for Channel2 
+  * @param  hdac: pointer to a DAC_HandleTypeDef structure that contains
+  *         the configuration information for the specified DAC.
+  * @retval None
+  */
+#ifdef GD32F4xx
+void HAL_DACEx_ConvCpltCallbackCh2(DAC_HandleTypeDef* hdac)
+{
+  ioMngMsg_st   ioExpMsg;
+  portBASE_TYPE xHigherPriorityTaskWoken;
+
+  xHigherPriorityTaskWoken = pdFALSE;
+
+  /* disattivazione audio amplifier  */
+  ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+  ioExpMsg.outRegId = V_MUTE;
+  ioExpMsg.val = 0;
+  configASSERT(xQueueSendToBackFromISR(getIoMngQueueHandle(), (void *)&ioExpMsg, &xHigherPriorityTaskWoken) == pdPASS);
+}
+#endif
+
+/**
+*
+* @brief        set motor driver command for STSPIN840 as the previous device   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setOutBL1_M (void)
+{
+  uint32_t regRtc;
+
+  regRtc = getFlagV230();
+  if (regRtc != BACKUP_WAIT_END_POWER)
+  {
+    /* as reported in data sheet pag 13 Table 7 this condition means PHA=PWMA=1 */
+    PWMA_GPIO_Port->BSRR=((uint32_t)PWMA_Pin | (uint32_t)PHA_Pin);
+  }
+}
+
+
+/**
+*
+* @brief  		  get block status    
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+uint8_t getLogicalBlockPin (void)
+{
+  uint32_t regRtc;
+
+  regRtc = getFlagV230();
+  if (regRtc != BACKUP_WAIT_END_POWER)
+  {
+    return(FALSE);  
+  }
+  return(TRUE); 
+}
+
+
+/**
+*
+* @brief  		  set motor driver command for STSPIN840 as the previous device   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setOutBL1_P (void)
+{
+  uint32_t regRtc;
+
+  regRtc = getFlagV230();
+  if (regRtc != BACKUP_WAIT_END_POWER)
+  {
+    /* as reported in data sheet pag 13 Table 7 this condition means PHA=OUTBL1_P=PD.8=0 and PWMA=OUTBL1_M=PD3=1 */
+    PWMA_GPIO_Port->BSRR=((uint32_t)PWMA_Pin | (uint32_t)PHA_Pin<<16);
+  }
+}
+
+
+/**
+*
+* @brief        set motor driver command for STSPIN840 as the previous device   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void brakePhase (void)
+{
+  /* as reported in data sheet pag 13 Table 7 this condition means PHA=0 and PWMA=0 (or  PHA=1 and PWMA=1) */
+  PWMA_GPIO_Port->BSRR=((uint32_t)PWMA_Pin<<16 | (uint32_t)PHA_Pin<<16);
+}
+
+/**
+*
+* @brief        Function to control SBC power   
+*
+* @param [in ]  uint8_t: ON / OFF
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void sbcPowerStatus (statusFlag_e status)
+{
+  // all led off 
+  setLed((ledIdx_e)0, LED_EVENT_OFF_ALL, (uint16_t)0, (uint8_t)0);
+
+  sbcPowerControl(status);
+}
+
+/**
+*
+* @brief        Function to control SBC power   
+*
+* @param [in ]  uint8_t: ON / OFF
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void sbcPowerControl (statusFlag_e status)
+{
+  GPIO_InitTypeDef  GPIO_InitStruct;
+
+  if (status == DISABLED)
+  {
+    HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, GPIO_PIN_RESET);
+  }
+  else
+  {
+    HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, GPIO_PIN_SET);
+  }
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = SBC_PWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FAST;
+
+  HAL_GPIO_Init(SBC_PWR_GPIO_Port, &GPIO_InitStruct);
+}
+
+/**
+*
+* @brief        Function to put all external HW in low power mode (first phase)   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setFirstLevelPwdnState (void)
+{
+  GPIO_InitTypeDef  GPIO_InitStruct;
+
+  __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOE_CLK_ENABLE();
+
+  /* Configure the GPIO_LED pin in push-pull output mode */ 
+  GPIO_InitStruct.Pin = PWMLCD4X20_PIN;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(PWMLCD4X20_GPIO_PORT, &GPIO_InitStruct);
+
+  /* retroilluminazione display LCD o TFT OFF*/
+  //HAL_GPIO_WritePin(PWMLCD4X20_GPIO_PORT, PWMLCD4X20_PIN, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(PWMLCD4X20_GPIO_PORT, PWMLCD4X20_PIN, GPIO_PIN_SET);  /* per LCD possiamo rimanere accesi */
+
+  /** all led R-G-B off **/
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(PWMLED_A_GPIO_PORT, PWMLED_A_PIN | PWMLED_B_PIN | PWMLED_C_PIN, GPIO_PIN_RESET);
+
+  /* GPIOx Configuration: Output to 0   */
+  GPIO_InitStruct.Pin       = PWMLED_A_PIN | PWMLED_B_PIN | PWMLED_C_PIN;
+  GPIO_InitStruct.Mode      = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull      = GPIO_PULLUP;
+  GPIO_InitStruct.Speed     = GPIO_SPEED_LOW;
+  GPIO_InitStruct.Alternate = (uint32_t)0;
+
+  HAL_GPIO_Init(PWMLED_A_GPIO_PORT, &GPIO_InitStruct); 
+
+  /** ETH, BT, Audio, 12V   */
+  HAL_GPIO_WritePin(PWRDWN1L_GPIO_Port, PWRDWN1L_Pin, GPIO_PIN_RESET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = PWRDWN1L_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(PWRDWN1L_GPIO_Port, &GPIO_InitStruct);
+
+#ifndef HW_MP28947  
+  /** RFID Off   *  */
+  HAL_GPIO_WritePin(RFID_PWR_GPIO_Port, RFID_PWR_Pin, GPIO_PIN_SET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = RFID_PWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(RFID_PWR_GPIO_Port, &GPIO_InitStruct);
+#endif
+  
+#ifdef COME_ERA
+  /** LCD 2x20 ON also in power down    *  */
+  HAL_GPIO_WritePin(LCD_PWR_GPIO_Port, LCD_PWR_Pin, GPIO_PIN_SET);
+  /* Configure the LCD_PWR_Pin pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = LCD_PWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(LCD_PWR_GPIO_Port, &GPIO_InitStruct);
+#endif
+
+}
+
+/**
+*
+* @brief        Function to put all external HW in low power mode (second phase)   
+*
+* @param [in ]  none
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setSecondLevelPwdnState (void)
+{
+  GPIO_InitTypeDef  GPIO_InitStruct;
+
+  GPIO_InitStruct.Alternate = (uint32_t)0;
+
+#ifndef HW_MP28947
+  /** RFID Off   *  */
+  HAL_GPIO_WritePin(RFID_PWR_GPIO_Port, RFID_PWR_Pin, GPIO_PIN_SET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = RFID_PWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(RFID_PWR_GPIO_Port, &GPIO_InitStruct);
+  
+  /** SBC and router OFF  OSC OFF **/
+  HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, GPIO_PIN_RESET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = SBC_PWR_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(SBC_PWR_GPIO_Port, &GPIO_InitStruct);
+
+  /** ETH, BT, Audio    *  */
+  HAL_GPIO_WritePin(PWRDWN1L_GPIO_Port, PWRDWN1L_Pin, GPIO_PIN_RESET);
+  /* Configure the GPIO_SBC_PWR pin in output push-pull mode */ 
+  GPIO_InitStruct.Pin = PWRDWN1L_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+
+  HAL_GPIO_Init(PWRDWN1L_GPIO_Port, &GPIO_InitStruct);
+  
+#endif
+  
+  /* Configure the RS485 BUS in Rx mode  */ 
+  HAL_GPIO_WritePin(UART_SCU_TX_GPIO_PORT, UART_SCU_DE_PIN, GPIO_PIN_RESET);
+
+  GPIO_InitStruct.Pin = UART_SCU_DE_PIN;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_LOW;
+  HAL_GPIO_Init(UART_SCU_TX_GPIO_PORT, &GPIO_InitStruct);
+
+}
+
+#ifdef COLLAUDO_PEN
+/**
+*
+* @brief        Function to set the relays in the gig testing suite    
+*
+* @param [in ]  uint16:   current settings 
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setRelaysGigPen (uint16_t rSetting)
+{
+  uint8_t     tmp;
+  ioMngMsg_st ioExpMsg;
+  ledEvents_e tmpLedEvents;
+
+  uint16_t    locSetting = swapW(rSetting);
+
+  if (locSetting == (uint16_t)0)
+  {
+    /* attivazione/disattivazione relè 1 207Vrms */
+    ioExpMsg.val = 0;
+    ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+    ioExpMsg.outRegId = REM_ACT_OFF;
+    while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+    {
+      ; // no message sent within 100msec; retry
+    }
+    osDelay(100);
+    /* attivazione/disattivazione relè 2 230Vrms */
+    ioExpMsg.val = 0;
+    ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+    ioExpMsg.outRegId = REM_ACT_ON;
+    while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+    {
+      ; // no message sent within 100msec; retry
+    }
+    /* attivazione/disattivazione relè 3 253Vrms */
+    tmp = (uint8_t)10;
+    tmpLedEvents = LED_EVENT_OFF;
+    setLed(LED_A_BLU, tmpLedEvents, (uint16_t)0, tmp);
+    setLed(LED_B_GREEN, tmpLedEvents, (uint16_t)0, tmp);
+    setLed(LED_C_RED, tmpLedEvents, (uint16_t)0, tmp);
+    HAL_GPIO_WritePin(SGCBOB_GPIO_Port, SGCBOB_Pin, GPIO_PIN_RESET);
+  }
+  else
+  {
+    /* attivazione/disattivazione Relè 1 */
+    tmp = ((locSetting & (uint16_t)0x0001) == (uint16_t)0x0001) ? (uint8_t)1 : (uint8_t)0;
+    /* attivazione/disattivazione relè 1 207Vrms */
+    ioExpMsg.val = tmp;
+    ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+    ioExpMsg.outRegId = REM_ACT_OFF;
+    while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+    {
+      ; // no message sent within 100msec; retry
+    }
+    osDelay(100);
+    /* attivazione/disattivazione Relè 2 */
+    tmp = ((locSetting & (uint16_t)0x0002) == (uint16_t)0x0002) ? (uint8_t)1 : (uint8_t)0;
+    /* attivazione/disattivazione relè 1 207Vrms */
+    ioExpMsg.val = tmp;
+    ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+    ioExpMsg.outRegId = REM_ACT_ON;
+    while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS)
+    {
+      ; // no message sent within 100msec; retry
+    }
+    osDelay(100);
+    /* attivazione/disattivazione relè 3 253Vrms */
+    tmp = ((locSetting & (uint16_t)0x0004) == (uint16_t)0x0004) ? (uint8_t)90 : (uint8_t)10;
+    tmpLedEvents = ((locSetting & (uint16_t)0x0004) == (uint16_t)0x0004) ? LED_EVENT_ON : LED_EVENT_OFF;
+    setLed(LED_A_BLU, tmpLedEvents, (uint16_t)0, tmp);
+
+    /* attivazione/disattivazione relè 4 (24V alla scheda PEN) */
+    tmp = ((locSetting & (uint16_t)0x0008) == (uint16_t)0x0008) ? (uint8_t)90 : (uint8_t)10;
+    tmpLedEvents = ((locSetting & (uint16_t)0x0008) == (uint16_t)0x0008) ? LED_EVENT_ON : LED_EVENT_OFF;
+    setLed(LED_B_GREEN, tmpLedEvents, (uint16_t)0, tmp);
+
+    /* attivazione/disattivazione relè 5 (calibrazione scheda PEN) */
+    tmp = ((locSetting & (uint16_t)0x0010) == (uint16_t)0x0010) ? (uint8_t)90 : (uint8_t)10;
+    tmpLedEvents = ((locSetting & (uint16_t)0x0010) == (uint16_t)0x0010) ? LED_EVENT_ON : LED_EVENT_OFF;
+    setLed(LED_C_RED, tmpLedEvents, (uint16_t)0, tmp);
+
+    /* attivazione/disattivazione relè 6 (SWDIO scheda PEN) */
+    if ((locSetting & (uint16_t)0x0020) == (uint16_t)0x0020)
+    {
+      HAL_GPIO_WritePin(SGCBOB_GPIO_Port, SGCBOB_Pin, GPIO_PIN_SET);
+    }
+    else
+    {
+      HAL_GPIO_WritePin(SGCBOB_GPIO_Port, SGCBOB_Pin, GPIO_PIN_RESET);
+    }
+  
+    /* attivazione/disattivazione relè K1, ossia quello che apre/chiude la terra, sulla scheda PEN */
+    if ((locSetting & (uint16_t)0x0040) == (uint16_t)0x0040)
+    {
+      HAL_GPIO_WritePin(CNTCT_GPIO_Port, CNTCT_Pin, GPIO_PIN_SET);
+    }
+    else
+    {
+      HAL_GPIO_WritePin(CNTCT_GPIO_Port, CNTCT_Pin, GPIO_PIN_RESET);
+    }
+  
+  }
+}
+#endif
+
+/**
+* @brief  This function is executed in case of error occurrence.
+* @param  None
+* @retval None
+*/
+static void wrapper_Handler(void)
+{
+  while(1)
+  {
+  }
+}
+
+/**
+*
+* @brief        Function to store a new incoming transactions    
+*
+* @param [in ]  uint8_t*:   pointer to uid transaction originator (00000 if FREE, FFFFF if from DSO) 
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void startNewTransaction(uint32_t uid)
+{
+  uint8_t mdbAddr;
+  appMapRwRegister_st* pAppRwRegs;
+  char uidString[ UID_SIZE ];
+  
+  mdbAddr = getLogicalMdbAddr();
+  pAppRwRegs = getAppMdbRwRegs(mdbAddr);
+  
+  memset( uidString, 0, UID_SIZE );
+  switch( uid )
+  {
+  case UID_TRANSACTION_PERS_BY_CARD:
+    getUidAuthorizationByCard( uidString );
+    break;
+  case UID_TRANSACTION_PERS_BY_APP:
+    memcpy( uidString, pAppRwRegs->uidAuthApp, UID_SIZE );
+    break;
+  case UID_TRANSACTION_DSO:
+    memset( uidString, 'F', UID_SIZE );
+    break;
+  case UID_TRANSACTION_FREE:
+    /* Do nothing */
+    break;
+  }
+  TransactionRegister_startTransaction( uidString, strlen( uidString ) );
+  
+  /* Save in modbus map Session ID */
+  setSessionId( TransactionRegister_getCount() );
+  
+  init_measures(&measureSck);
+  
+  /* Azzero valore registro modbus */
+  memset(pAppRwRegs->uidAuthApp, 0x00, 10);
+}
+
+
+/**
+*
+* @brief        Function to stop and store the current transaction     
+*
+* @param [in ]  uint32_t:   active energy for current transaction  
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void stopNewTransaction( uint32_t activeEnergy )
+{
+  scuRoMapRegister_st*  pRoRegs;
+  uint8_t               mdbAddr;
+  uint8_t               lcdEepromFlags;
+  appMapRwRegister_st* pAppRwRegs;
+  int32_t res;
+  
+  mdbAddr = getLogicalMdbAddr();
+  pAppRwRegs = getAppMdbRwRegs(mdbAddr);
+  pRoRegs = getRoMdbRegs(mdbAddr);
+  
+  res = TransactionRegister_stopTransaction( activeEnergy * 100 );
+  if( res == 0 )
+  {
+    uint32_t count = TransactionRegister_getCount();
+    tPrintf( "Transaction %d stored\n\r", count - 1 );
+  }
+  else
+  { 
+    tPrintf( "Transaction not stored!\n\r" );
+  }
+    
+  memset(pAppRwRegs->uidAuthApp, 0x00, 10);
+  memset(pRoRegs->scuMapRegStatusMeas.uidAuth, 0x00, 48);
+  
+  /* if a schedulation is enabled send REMOTE SUSPENDING event, otherwise give the REMOTE RELEASE */
+  /* Do it only when the wifi is enabled  */
+  eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&lcdEepromFlags, 1);
+  if ((lcdEepromFlags & WIFI_MASK) == WIFI_ON)
+  {
+    if(Scheduler_isDisabled())
+    {
+      send_to_evs(EVS_APP_RELEASE);
+    }
+  }  
+}
+
+/**
+*
+* @brief        Function to set new duration and energy on current transaction      
+*
+* @param [in ]  sck_measures_t*: puntatore alla struttura delle misure da visualizzare su app 
+*                               duration for current transaction  (0xFFFFFFFF for unchanged)
+*                               active energy for current transaction  (0xFFFFFFFF for unchanged)
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setTransactionParam(sck_measures_t *pMeasureSck, evs_state_en evStatus, uint8_t update, suspending_en suspending_type)
+{
+  uint32_t tmp32new, tmp32old;
+  uint8_t modbusState;
+  uint8_t modbusEvent = EVSE_EVENT_UNDEFINED;
+  uint8_t modeStat, upgMeas,  modbusStatePrev, modbusEventPrev, upgTransTime;
+    
+  scuRoMapRegister_st*  pRoRegs;
+  uint8_t               mdbAddr;
+  appMapRwRegister_st*  pAppRwRegs;
+  
+  mdbAddr = getLogicalMdbAddrSem();
+  pRoRegs = getRoMdbRegs(mdbAddr);
+  pAppRwRegs = getAppMdbRwRegs(mdbAddr); 
+
+  upgMeas = upgTransTime = FALSE;
+  
+  /* set the duration for current transaction and save it in modbus map */
+  pRoRegs->scuMapRegStatusMeas.evSessionT = (uint32_t)pMeasureSck->duration; 
+  
+  /* set the active energy for current transaction and save it in the modbus map */
+  tmp32new = (uint32_t)(uint32_t)pMeasureSck->Etot * 100;
+  tmp32old = (uint32_t)pRoRegs->scuMapRegStatusMeas.mtTppEnrg;
+  if (absDiff(tmp32new, tmp32old, DELTA_ENRG_WH) == TRUE)
+  {
+    upgMeas = TRUE;
+    pRoRegs->scuMapRegStatusMeas.mtTppEnrg = tmp32new;
+  }
+
+  /* set the current transaction mono phase or L1 and save it in the modbus map  */
+  tmp32new = (uint32_t)pMeasureSck->currentL1 * 100;
+  tmp32old = (uint32_t)pRoRegs->scuMapRegStatusMeas.mtPh1Cur;
+  if (absDiff(tmp32new, tmp32old, DELTA_CURR_MA) == TRUE)
+  {
+    upgMeas = TRUE;
+    pRoRegs->scuMapRegStatusMeas.mtPh1Cur = tmp32new;
+  }
+  
+  /* set the current transaction three phase L2 and save it in the modbus map */
+  tmp32new = (uint32_t)pMeasureSck->currentL2 * 100;
+  tmp32old = (uint32_t)pRoRegs->scuMapRegStatusMeas.mtPh2Cur;
+  if (absDiff(tmp32new, tmp32old, DELTA_CURR_MA) == TRUE)
+  {
+    upgMeas = TRUE;
+    pRoRegs->scuMapRegStatusMeas.mtPh2Cur = tmp32new;
+  }
+  
+  /* set the current transaction three phase L3 and save it in the modbus map */
+  tmp32new = (uint32_t)pMeasureSck->currentL3 * 100;
+  tmp32old = (uint32_t)pRoRegs->scuMapRegStatusMeas.mtPh3Cur;
+  if (absDiff(tmp32new, tmp32old, DELTA_CURR_MA) == TRUE)
+  {
+    upgMeas = TRUE;
+    pRoRegs->scuMapRegStatusMeas.mtPh3Cur = (uint32_t)pMeasureSck->currentL3 * 100; 
+  }
+  
+  /* set the active instantaneous internal power for current transaction and save it in the modbus map */
+  uint32_t voltage = pRoRegs->scuMapRegStatusMeas.mtVsys;
+  pRoRegs->scuMapRegStatusMeas.mtSpPowerL1 = (uint32_t)(pMeasureSck->currentL1 * voltage / 10);
+  pRoRegs->scuMapRegStatusMeas.mtSpPowerL2 = (uint32_t)(pMeasureSck->currentL2 * voltage / 10);
+  pRoRegs->scuMapRegStatusMeas.mtSpPowerL3 = (uint32_t)(pMeasureSck->currentL3 * voltage / 10);
+    
+  /* set the active instantaneous internal power for current transaction and save it in the modbus map */
+  if (absDiff(pRoRegs->scuMapRegStatusMeas.mtSpPower, oldPist, DELTA_PWR_W) == TRUE) 
+  {
+    upgMeas = TRUE;
+    oldPist = pRoRegs->scuMapRegStatusMeas.mtSpPower;
+  }
+
+  /* set the in charging time / transaction time for current transaction and save it in the modbus map */
+  if (absDiff(pRoRegs->scuMapRegStatusMeas.evSessionT, oldTransTime, DELTA_TRANS_TIME) == TRUE) 
+  {
+    upgTransTime = TRUE;
+    oldTransTime = pRoRegs->scuMapRegStatusMeas.evSessionT;
+  }
+
+
+  /* set the active instantaneous external power for current transaction and save it in the modbus map */
+  tmp32new = (uint32_t)pMeasureSck->Pest;
+  tmp32old = (uint32_t)pAppRwRegs->pmTotPwr;
+  if (absDiff(tmp32new, tmp32old, DELTA_PWR_W) == TRUE)
+  {
+    upgMeas = TRUE;
+  }
+  pAppRwRegs->pmTotPwr = (uint32_t)pMeasureSck->Pest; 
+  
+  /* set the active instantaneous phase 1 power for current transaction and save it in the modbus map */
+  tmp32new = (uint32_t)pMeasureSck->Pest1;
+  tmp32old = (uint32_t)pAppRwRegs->pmL1Pwr;
+  if (absDiff(tmp32new, tmp32old, DELTA_PWR_W) == TRUE)
+  {
+    upgMeas = TRUE;
+  }
+  pAppRwRegs->pmL1Pwr = (uint32_t)pMeasureSck->Pest1; 
+  
+  /* set the active instantaneous phase 2 power for current transaction and save it in the modbus map */
+  tmp32new = (uint32_t)pMeasureSck->Pest2;
+  tmp32old = (uint32_t)pAppRwRegs->pmL2Pwr;
+  if (absDiff(tmp32new, tmp32old, DELTA_PWR_W) == TRUE)
+  {
+    upgMeas = TRUE;
+  }
+  pAppRwRegs->pmL2Pwr = (uint32_t)pMeasureSck->Pest2; 
+  
+  /* set the active instantaneous phase 3 power for current transaction and save it in the modbus map */
+  pAppRwRegs->pmL3Pwr = (uint32_t)pMeasureSck->Pest3; 
+
+  /* set station charge status in modbus map */
+  modbusStatePrev = getRegisterFromModbusMap(ADDR_EVSE_CHARGE_STATUS_RO); // save currente connector status 
+  modbusEventPrev = getRegisterFromModbusMap(ADDR_EVSE_EVENT_FLAGS_RO);   // save currente event connector 
+
+  if (evStatus != EVSTATE_NULL)
+  {
+    
+    /* Switch case per stati modbus, registro EVSE_CHARGE_STATUS */
+    switch (evStatus)
+    {
+      
+     case EVSTATE_IDLE:
+     case EVSTATE_INIT:
+     case EVSTATE_DELAY:
+      modbusState = INITIAL_EVSE_STATE;
+      resetCommandRemote();
+      break;
+      
+     case EVSTATE_SOCKET_AVAILABLE:
+      modbusState = IDLE_STATE;
+      pRoRegs->scuMapRegStatusMeas.mtTppEnrg = 0;
+      resetCommandRemote();
+      break;
+      
+     case EVSTATE_CLOSE_LID:
+     case EVSTATE_BLOCK_UP_DELAY:
+     case EVSTATE_BLOCK_DOWN_DELAY:
+     case EVSTATE_PLUG_CHECK: 
+     case EVSTATE_CPSET: 
+      modbusState = modbusStatePrev;
+      break;
+
+     case EVSTATE_SOCKET_CHECK:
+      modbusState = PREPARING_STATE;
+      modbusEvent |= CONNECTOR_PLUGGED_IN;
+      prevState = EVSTATE_SOCKET_CHECK;
+      break;    
+      
+     case EVSTATE_CONTACT_CLOSE_DELAY:
+     case EVSTATE_M3S_M3T_DETECT:
+     case EVSTATE_RECTIFIER_CHECK:
+      modbusState = EV_CONNECTED_STATE;
+      modbusEvent = SOCKET_BLOCKED | CONNECTOR_PLUGGED_IN;
+      break;    
+      
+     case EVSTATE_PLUG_WAIT:
+      if(prevState == EVSTATE_AUTH_WAIT)
+      {
+        modbusState = PREPARING_STATE;
+      }
+      prevState = EVSTATE_PLUG_WAIT;
+      break;
+      
+     case EVSTATE_AUTH_WAIT:
+      resetCommandRemote();
+      pRoRegs->scuMapRegStatusMeas.mtTppEnrg = 0;
+      prevState = EVSTATE_AUTH_WAIT;
+      modbusState = IDLE_STATE;
+      break;
+      
+      
+     case EVSTATE_S2_WAITING:
+      /* Se lo stato precedente era socket check vuol dire che non è un caso di sospensione
+      ma siamo ancora nella fase di start della carica */
+      if(prevState == EVSTATE_SOCKET_CHECK)
+      {
+        modbusState = EV_CONNECTED_STATE;
+        modbusEvent = SOCKET_BLOCKED | CONNECTOR_PLUGGED_IN;
+      }
+      
+      /* Se lo stato precedente era IN CARICA invece siamo in una sospendione del veicolo */
+      else if(prevState == EVSTATE_CHARGING)
+      {
+        modbusState = SUSPENDED_EV_STATE;
+        modbusEvent = SOCKET_BLOCKED | CONNECTOR_PLUGGED_IN;
+      }
+      
+      break;
+      
+      
+     case EVSTATE_WAKEUP:
+      /* Caso in cui si resta in attesa veicolo troppo a lungo */
+      if(prevState == EVSTATE_SOCKET_CHECK)
+      {
+        modbusState = EV_CONNECTED_STATE;
+        modbusEvent = SOCKET_BLOCKED | CONNECTOR_PLUGGED_IN;
+      }
+      
+      /* Caso wakeup da sospensione */
+      else if(prevState == EVSTATE_CHARGING)
+      {
+        modbusState = SUSPENDED_EVSE_STATE;
+        modbusEvent = SOCKET_BLOCKED | CONNECTOR_PLUGGED_IN;
+      }
+      break;
+      
+     case EVSTATE_INTERRUPTING: 
+     case EVSTATE_CHARGING:
+      modbusState = CHARGING_STATE;
+      modbusEvent = SOCKET_BLOCKED | CONNECTOR_PLUGGED_IN;
+      prevState = EVSTATE_CHARGING;
+      break;  
+      
+     case EVSTATE_SUSPENDING:     
+      /* Analizzo la tipologia di sospensione EVSE */
+      if(suspending_type & PMNG_SUSPENDING)
+      {
+        // Sospensione EVSE dovuta a NO POWER del power management.
+        modbusState = SUSPENDED_NOPOWER_STATE;
+      }
+      else
+      {
+        // Sospensione EVSE generica dovuta a App o schedulazioni.
+        modbusState = SUSPENDED_EVSE_STATE;
+      }
+      
+      modbusEvent = SOCKET_BLOCKED | CONNECTOR_PLUGGED_IN;
+      break;  
+      
+     case EVSTATE_PLUG_OUT:
+      modeStat = getStationModeWorking();
+      
+      /* Se la carica è partita in PERSONAL BY APP --> faccio ripartire task lettore RFID */
+      if(modeStat == PERSONAL)
+      {
+        vTaskResume(RfidTaskHandle);
+      }
+      
+      modbusState = END_CHARGE_STATE; 
+      modbusEvent |= CONNECTOR_PLUGGED_IN;
+      break;
+      
+     case EVSTATE_ERROR_WAIT:
+     case EVSTATE_RES_ERROR:   
+      modeStat = getStationModeWorking();
+      
+      /* Se la carica è partita in PERSONAL BY APP --> faccio ripartire task lettore RFID */
+      if(modeStat == PERSONAL)
+      {
+        vTaskResume(RfidTaskHandle);
+      }
+      modbusState = FAULTED_STATE;
+      break;
+      
+     case EVSTATE_LID_ERROR:
+     case EVSTATE_F_STATE_ERROR:
+     case EVSTATE_X1_STATE_ERROR:
+      modbusState = FAULTED_STATE;
+      break;
+      
+     case EVSTATE_DISABLED:
+      modbusState = UNVAILABLE_STATE;
+      break;
+      
+     case EVSTATE_V230_SUSPEND:
+     case EVSTATE_POWER_OFF:
+      modbusState = SHUTDOWN_STATE;
+      break;
+      
+     default:
+      modbusState = IDLE_STATE;
+      modbusEvent |= EVSE_EVENT_UNDEFINED;
+      break;
+    }
+    
+    switch( evStatus )
+    {
+    case EVSTATE_SOCKET_CHECK:
+      AppEmob_notify( APPEMOB_NOTIFY_TRANSACTION_START, NULL );
+      break;
+    case EVSTATE_CHARGING:
+      AppEmob_notify( APPEMOB_NOTIFY_SESSION_START, NULL );
+      break;
+    case EVSTATE_SUSPENDING:
+      AppEmob_notify( APPEMOB_NOTIFY_SESSION_PAUSE, NULL );
+      break;
+    case EVSTATE_PLUG_OUT:
+      AppEmob_notify( APPEMOB_NOTIFY_TRANSACTION_STOP, NULL );
+      break;
+    case EVSTATE_AUTH_WAIT:
+      AppEmob_notify( APPEMOB_NOTIFY_TRANSACTION_ABORT, NULL );
+      break;
+    default:
+      break;
+    }
+        
+    setStationStatusInModbusMapApp((uint16_t)modbusState);
+    setStationEventInModbusMap((uint16_t)modbusEvent);
+    /* set microprocessor temperature */
+    pRoRegs->scuMapRegStatusMeas.tempSys = (int32_t)(getUpTemp() / (int32_t)10);
+  }
+
+  if (isSemMode() == TRUE)
+  {
+    if (evStatus != EVSTATE_NULL)
+    {
+#ifdef COME_ERA
+      if (modbusState != modbusStatePrev)
+      {
+        /* send the info to notify manager */
+        sendEventToSemMng(NOTIFY_TO_MASTER_TX, ADDR_EVSE_CHARGE_STATUS_RO);
+        if (evStatus == EVSTATE_S2_WAITING) 
+        {
+          resetPowerCurrentValues();
+          if (upgMeas == FALSE)
+          {
+            /* send the info to notify manager */
+            sendEventToSemMng(NOTIFY_TO_MASTER_TX, ADDR_VOLTAGE_AC_RO);
+          }
+        }
+      }
+#endif
+      if (modbusEvent != modbusEventPrev)
+      {
+        /* send the info to notify manager */
+        sendEventToSemMng(NOTIFY_TO_MASTER_TX, ADDR_EVSE_EVENT_FLAGS_RO);
+      }
+    }
+    if ((upgMeas == TRUE) || (upgTransTime== TRUE))
+    {
+      /* we must send also transaction time. This value is transmitted only with measure. We have decided to do a single transmission because */
+      /* in modbus V24 TRANSACTION_TIME and TIME_INCHARGE are very distance as address: 0x63c and 0x668. Two single transmission is a little more complicated   */
+
+      /* send the info to notify manager */
+      sendEventToSemMng(NOTIFY_TO_MASTER_TX, ADDR_VOLTAGE_AC_RO);
+    }
+#ifdef COME_ERA
+    else
+    {
+      if (upgCrgTime == TRUE)
+      {
+        /* send the info to notify manager */
+        sendEventToSemMng(NOTIFY_TO_MASTER_TX, ADDR_TIME_IN_CHARGE_RO);
+      }
+    }
+#endif
+  }
+  
+}
+
+
+/**
+*
+* @brief        Function to set status parameter after sssigned address       
+*
+* @param [in ]  sck_measures_t*: puntatore alla struttura delle misure da visualizzare su app 
+*                               duration for current transaction  (0xFFFFFFFF for unchanged)
+*                               active energy for current transaction  (0xFFFFFFFF for unchanged)
+*  
+* @param [out]  none
+*  
+* @retval       none
+*  
+***********************************************************************************************************************/
+void setParamFromAssignedAddr(void)
+{
+  evs_modbus_state_en evStatus;
+    
+  scuRoMapRegister_st*  pRoRegs;
+  uint8_t               mdbAddr;
+
+  mdbAddr = getLogicalMdbAddrSem();
+  pRoRegs = getRoMdbRegs(mdbAddr);
+
+  /* set station charge status in modbus map */
+  evStatus = getLastEvsStableStatus();
+  pRoRegs->scuMapRegStatusMeas.ntfChgStat = (uint16_t)evStatus;
+
+  /* set microprocessor temperature */
+  pRoRegs->scuMapRegStatusMeas.tempSys = (int32_t)(getUpTemp() / (int32_t)10);
+
+  initModbusRegisters();
+}
+
+/**
+*
+* @brief       Send a message to sem manager 
+*
+* @param [in]  sbcSemEvent_e: tipo di evento 
+* @param [in]  uint16_t:      address   
+*  
+* @retval      none 
+*  
+****************************************************************/
+void sendEventToSemMng(sbcSemEvent_e eventMsg , uint16_t address) 
+{
+    frameSbcSem_st        tmpFrameSbcSem;  
+    //uint8_t               mdbAddr;
+    xQueueHandle          queueHandle;
+    //uint16_t              idConn;
+    
+    /* the sbcSemMsgProcess() works on the real RS485 modbus address value    */
+    //fromRs485ToSem((uint16_t)getPhysicalMdbAddr(), &idConn);
+    //mdbAddr = (uint8_t)idConn;
+    tmpFrameSbcSem.sbcSemEvent = eventMsg;
+    tmpFrameSbcSem.data.index = (uint16_t)getPhysicalMdbAddr(); // phisical address 1...247
+    tmpFrameSbcSem.data.rAddr = address;
+    tmpFrameSbcSem.timeEntry = getPacketStatusNum();
+    tmpFrameSbcSem.status = getRegisterFromModbusMap(ADDR_EVSE_CHARGE_STATUS_RO); // confirm current status
+    queueHandle = getSbcSemQueueHandle();
+    if (queueHandle != NULL)
+      configASSERT(xQueueSendToBack(queueHandle, (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+}
+
+/**
+*
+* @brief       Send a message to sem manager 
+*
+* @param [in]  sbcSemEvent_e: tipo di evento 
+* @param [in]  uint16_t:      address   
+*  
+* @retval      none 
+*  
+****************************************************************/
+void sendEventStatusToSemMng(sbcSemEvent_e eventMsg , uint16_t address, uint16_t status) 
+{
+    frameSbcSem_st        tmpFrameSbcSem;  
+    uint8_t               mdbAddr;
+    xQueueHandle          queueHandle;
+    uint16_t              idConn;
+    
+    /* find the right index on structure i.e. id connector    */
+    idConn = fromRs485ToSem((uint16_t)getPhysicalMdbAddr());
+    
+    // NULL id ? exit
+    if (idConn == NULL_ID)
+      return;
+    
+    mdbAddr = (uint8_t)idConn;
+    tmpFrameSbcSem.sbcSemEvent = eventMsg;
+    tmpFrameSbcSem.data.index = mdbAddr + 1; // phisical address 1...16
+    tmpFrameSbcSem.data.rAddr = address;
+    tmpFrameSbcSem.status = status;
+    tmpFrameSbcSem.timeEntry = getPacketStatusNum();
+    queueHandle = getSbcSemQueueHandle();
+    if (queueHandle != NULL)
+      configASSERT(xQueueSendToBack(queueHandle, (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+}
+
+
+/**
+*
+* @brief       Force a Send a message to sem manager 
+*
+* @param [in]  sbcSemEvent_e: tipo di evento 
+* @param [in]  uint16_t:      address   
+* @param [in]  uint16_t:      physical SCU address on RS485   
+*  
+* @retval      none 
+*  
+****************************************************************/
+void forceSendEventToSemMng(sbcSemEvent_e eventMsg , uint16_t address, uint16_t phyAddr) 
+{
+    frameSbcSem_st        tmpFrameSbcSem;  
+    xQueueHandle          queueHandle;
+    
+    tmpFrameSbcSem.sbcSemEvent = eventMsg;
+    tmpFrameSbcSem.data.index = phyAddr; // phisical address 1...16
+    tmpFrameSbcSem.data.rAddr = address;
+    tmpFrameSbcSem.timeEntry = getPacketStatusNum();
+    queueHandle = getSbcSemQueueHandle();
+    if (queueHandle != NULL)
+      configASSERT(xQueueSendToBack(queueHandle, (void *)&tmpFrameSbcSem, portMAX_DELAY) == pdPASS);  // sbcSemMsgProcess()
+}
+
+/**
+*
+* @brief       Send a message to sem manager to notify a change 
+*              state 
+*
+* @param [in]  evs_modbus_state_en: tipo di evento 
+* @param [in]  uint16_t:      address   
+*  
+* @retval      none 
+*  
+****************************************************************/
+void sendChangeStatusToSemMng(evs_modbus_state_en evStatus, uint8_t evsModbusState_force) 
+{
+    uint8_t               mdbAddr;
+    scuRoMapRegister_st*  pRoRegs;
+
+    mdbAddr = getLogicalMdbAddrSem();
+    pRoRegs = getRoMdbRegs(mdbAddr);
+    if (((evs_rtc_backup_get(BACKUP_CHARGE_STATUS) & AUTH_START_SAVE) == AUTH_START_SAVE) && (evsModbusState_force == 0)
+        && ((evStatus == MDBSTATE_PREPARING) || (evStatus == MDBSTATE_REBOOTING) || (evStatus == MDBSTATE_EV_CONNECTED) || (evStatus == MDBSTATE_AVAILABLE)))
+    {
+      pRoRegs->scuMapRegStatusMeas.ntfChgStat = (uint16_t)MDBSTATE_SUSPENDING_EV;
+    }
+    else
+    {
+      /* Questo while blocca il task sbcSemMsgProcess perchè non arriva il messaggio di scadenza del timer TIMER_FIND_CONFIG nello stato SBC_SEM_INIT_DISCOVERY */
+      /* Questo perchè il task chiamante EvsManager usa i timers di xEvsMngTimers[] Il timer TIMER_FIND_CONFIG scade dopo uno dei timer Tx di xEvsMngTimers     */
+      /* ma non  può essere lanciato perche in coda ha davanti Tx che a sua volta non può essere lanciato perchè il task non è IDLE ma delayed su questo        */
+      /* while. Abbiamo creato una situazione di stallo dalla quale non si esce mai Nick 29/06/2024                                                             */
+#ifdef BLOCCA_TASK_SBCSEM_IN_MASTER
+      while (isModbusManagerActive() == FALSE)
+      {
+        osDelay(100);
+      }
+#endif
+      sendEventStatusToSemMng(NOTIFY_TO_MASTER_TX, ADDR_EVSE_CHARGE_STATUS_RO, (uint16_t)evStatus);
+    }
+}
+
+/* Init measures and save them in the Modbus Map */
+void init_measures(sck_measures_t *measures)
+{
+  scuRoMapRegister_st*  pRoRegs;
+  uint8_t               mdbAddr;
+  appMapRwRegister_st*  pAppRwRegs;
+  
+  mdbAddr = getLogicalMdbAddrSem();
+  pRoRegs = getRoMdbRegs(mdbAddr);
+  pAppRwRegs = getAppMdbRwRegs(mdbAddr);
+  
+  measures->Etot = 0;
+  measures->duration = 0;
+  pRoRegs->scuMapRegStatusMeas.evSessionT = 0; 
+  measures->Pist = 0;
+  pRoRegs->scuMapRegStatusMeas.mtSpPower = 0; 
+  measures->Pest = 0;
+  pAppRwRegs-> pmTotPwr = 0;
+  measures->currentL1 = 0;
+  pRoRegs->scuMapRegStatusMeas.mtPh1Cur = 0;
+  measures->currentL2 = 0;
+  pRoRegs->scuMapRegStatusMeas.mtPh2Cur = 0;
+  measures->currentL3 = 0;
+  pRoRegs->scuMapRegStatusMeas.mtPh3Cur = 0;  
+  measures->Pest1 = 0;
+  pAppRwRegs-> pmL1Pwr = 0;
+  measures->Pest2 = 0; 
+  pAppRwRegs-> pmL2Pwr = 0;
+  measures->Pest3 = 0;
+  pAppRwRegs-> pmL3Pwr = 0;  
+}
+
+/* Init measures and save them in the Modbus Map */
+void init_i_measures(sck_measures_t *measures)
+{
+  scuRoMapRegister_st*  pRoRegs;
+  uint8_t               mdbAddr;
+  appMapRwRegister_st*  pAppRwRegs;
+  
+  mdbAddr = getLogicalMdbAddrSem();
+  pRoRegs = getRoMdbRegs(mdbAddr);
+  pAppRwRegs = getAppMdbRwRegs(mdbAddr);
+  
+  measures->Pist = 0;
+  pRoRegs->scuMapRegStatusMeas.mtSpPower = 0; 
+  measures->Pest = 0;
+  pAppRwRegs-> pmTotPwr = 0;
+  measures->currentL1 = 0;
+  pRoRegs->scuMapRegStatusMeas.mtPh1Cur = 0;
+  measures->currentL2 = 0;
+  pRoRegs->scuMapRegStatusMeas.mtPh2Cur = 0;
+  measures->currentL3 = 0;
+  pRoRegs->scuMapRegStatusMeas.mtPh3Cur = 0;  
+  measures->Pest1 = 0;
+  pAppRwRegs-> pmL1Pwr = 0;
+  measures->Pest2 = 0; 
+  pAppRwRegs-> pmL2Pwr = 0;
+  measures->Pest3 = 0;
+  pAppRwRegs-> pmL3Pwr = 0;  
+}
+
+/**     
+*
+* @brief       SRAM_Param_DEFAULT_Set 
+*              Set DEFAULT value for a parameter in infoStation
+*              
+* @param [in]  SRAM_ptr: pointer to the param in SRAM
+* @param [in]  Value: value to fill in the param
+*  
+* @retval      none 
+*  
+****************************************************************/
+
+void SRAM_Param_DEFAULT_Set(char *SRAM_ptr, uint8_t DEF_Value, uint8_t nChar)
+{
+  
+    uint8_t cnt;
+    
+    switch (DEF_Value)
+    {
+      case '^':      /* DEFAULT for matrixConv in socket Presence */
+        for (cnt = 0; cnt < nChar; cnt++, SRAM_ptr++)
+          *SRAM_ptr = cnt + 1;
+        break;
+        
+      case 'F':
+        /* Default value */
+        memset(SRAM_ptr, DEF_Value, nChar);        
+        break;
+        
+      default:        /* DEFAULT value for the other parameters */
+        /* Default value */
+        memset(SRAM_ptr, DEF_Value, nChar);
+        /* Parameter is different from scuAddr? if YES put the termination char */
+        if (SRAM_ptr != (char *)&scuAddr)        
+          /* Termination char for ProductCode - fakeProductCode - routerPass - routerSsid */
+          memset(SRAM_ptr + nChar - 1, 0, 1);              
+        /* DEFAULT value for product Serial Number must be "100000000" */
+        if (PRODUCT_SN_LENGTH == nChar)
+        {
+          SRAM_ptr[0] = '1';     /* Complete the default value for this param */  
+        }
+        break;
+    }
+}
+
+/**     
+*
+* @brief       SRAM_Check_DEFAULT_Value 
+*              Check if a block of SRAM is filled with 0xFF
+*              If so, replace with value 'char'    
+*              
+*
+* @param [in]  SRAM_ptr: pointer to the block in SRAM
+* @param [in]  char: value to put in the block
+* @param [in]  nChar: number of char to fill in the block
+*  
+* @retval      uint8_t: TRUE if default value has been restored
+*  
+****************************************************************/
+
+uint8_t SRAM_Check_DEFAULT_Value (char *pSRAM, uint8_t Value, uint8_t nChar)
+{
+  
+  uint8_t  cnt, cnt1, Force_DEFAULT = FALSE;
+  
+  /* Check if the block is filled with 0xFF */
+  for (cnt = 0, cnt1 = 0; cnt < nChar; cnt++, pSRAM++)
+    if (*pSRAM == 0xFF)
+      cnt1++;
+  /* Filled completely with 0xFF ? */
+  if (cnt1 == nChar)
+    Force_DEFAULT = TRUE;
+  /* Different DEFAULT needed ?*/
+  if (Force_DEFAULT)
+    /* Force DEFAULT value into the param */
+    SRAM_Param_DEFAULT_Set(pSRAM - nChar, Value, nChar);    
+    
+  return(Force_DEFAULT);
+}
+
+/*
+*
+* @brief        SRAM_Check_DEFAULT_of_Code 
+*               This function has been created because for these parameters
+*               the firmware doesn't assign a default value.
+*
+* @param [in]   None 
+*
+* @retval       None
+*
+***********************************************************************************************************************/
+
+void SRAM_Check_DEFAULT_of_Code (void)
+{ 
+  infoStation_t*  pInfoStation;
+  uint8_t         forceUpdate;
+
+  pInfoStation = (infoStation_t*)malloc(sizeof(infoStation_t));
+  /*       destination           source               Len  */
+  memcpy((void*)pInfoStation, (void*)&infoStation, sizeof(infoStation_t));
+  /* Check if a different default value is on scuAddr, productSn, productCode, fakeProductCode */
+  SRAM_Check_DEFAULT_Value ((char *)&scuAddr, SCU_NUM - 1, 1);  
+  forceUpdate =  SRAM_Check_DEFAULT_Value (&pInfoStation->productSn[0], '0', PRODUCT_SN_LENGTH);
+  forceUpdate |= SRAM_Check_DEFAULT_Value (&pInfoStation->productCode[0], 0, PRODUCT_CODE_LENGTH);
+  forceUpdate |= SRAM_Check_DEFAULT_Value (&pInfoStation->fakeProductCode[0], 0, FAKE_CODE_LENGTH); 
+  forceUpdate |= SRAM_Check_DEFAULT_Value (&pInfoStation->routerPass[0], 0, MAX_ROUTER_PASS_LENGTH); 
+  forceUpdate |= SRAM_Check_DEFAULT_Value (&pInfoStation->routerSsid[0], 0, MAX_ROUTER_SSID_LENGTH); 
+
+  if (forceUpdate == TRUE)
+  {
+    /*              destination                source                   len   */
+    memCpyInfoSt((uint8_t*)&infoStation, (uint8_t*)pInfoStation, sizeof(infoStation_t));
+    /* save the infostation structure in EEPROM */
+    WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  }
+
+  free(pInfoStation);
+}
+
+/*
+*
+* @brief        get pointer to FW string  
+*
+* @param [in]   unsigned char: 
+*
+* @retval       uint_8_t: value
+*
+***********************************************************************************************************************/
+uint8_t*  getFwVer (void)
+{
+  return(fwInfo.infoNewFw.fwVersion);
+}
+
+
+/**
+  * @brief  get stations general parameters   
+  *         
+  * @param  infoStation_t*: pointer where store data
+  * 
+  * @retval none
+  */
+
+void setGeneralStationParameters(uint8_t Type)
+{
+    unsigned char SerNum[4];
+    infoStation_t* pInfoStation;
+    uint32_t val;
+    uint8_t tmp, keySN;
+
+    pInfoStation = (infoStation_t*)malloc(sizeof(infoStation_t));
+
+    // recupero i parametri generale della stazione / WB
+    ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)pInfoStation, sizeof(infoStation_t));
+    ReadFromEeprom(SN_KEY_EE_ADDRES, (uint8_t*)&keySN, 1);     // recupero key  SN 
+
+    if ((pInfoStation->key != KEY_FOR_INFOSTATION_V0) && (pInfoStation->key != KEY_FOR_INFOSTATION_V1)
+        && (pInfoStation->key != KEY_FOR_INFOSTATION_V2) && (pInfoStation->key != KEY_FOR_INFOSTATION_V3)
+        && (pInfoStation->key != KEY_FOR_INFOSTATION_V5))
+    {
+        resetSpareMpuArea();
+
+        /* Force DEFAULT value into the param */
+        SRAM_Param_DEFAULT_Set(&pInfoStation->serial[0], 'F', BOARD_SN_LENGTH);
+        /* Force DEFAULT value into the param */
+        SRAM_Param_DEFAULT_Set(&pInfoStation->userPin[0], ' ', USER_PIN_LENGTH);
+        /* Force DEFAULT value into the param */
+        SRAM_Param_DEFAULT_Set(&pInfoStation->routerSsid[0], 0, MAX_ROUTER_SSID_LENGTH);
+        /* Force DEFAULT value into the param */
+        SRAM_Param_DEFAULT_Set(&pInfoStation->routerPass[0], 0, MAX_ROUTER_PASS_LENGTH);
+        /* Force DEFAULT value into the param */
+        SRAM_Param_DEFAULT_Set(&pInfoStation->productSn[0], '0', PRODUCT_SN_LENGTH);
+        /* Force DEFAULT value into the param */
+        SRAM_Param_DEFAULT_Set(&pInfoStation->productCode[0], 0, PRODUCT_CODE_LENGTH);
+        /* Force DEFAULT value into the param */
+        SRAM_Param_DEFAULT_Set(&pInfoStation->fakeProductCode[0], 0, FAKE_CODE_LENGTH);
+
+        /*         destination       source */
+        strcpy((char*)pInfoStation->name, (char*)"ChargePoint  \0");
+        /* reset info on energy meter */
+        pInfoStation->emTypeExt = pInfoStation->emTypeInt = UNKNOW;
+        /* reset authorization */
+        strcpy((char*)pInfoStation->auth.user, (char*)"");
+        strcpy((char*)pInfoStation->auth.pass, (char*)"");
+        pInfoStation->auth.auth_state = NO_AUTH;
+        /* reset schedulation */
+        for (int i = 0; i < MAX_SCHEDULATION_NUMBER; i++)
+        {
+            pInfoStation->scheds[i].days = 0;
+            pInfoStation->scheds[i].id = 0;
+            pInfoStation->scheds[i].start_hour = 0;
+            pInfoStation->scheds[i].start_min = 0;
+            pInfoStation->scheds[i].end_hour = 0;
+            pInfoStation->scheds[i].end_min = 0;
+            pInfoStation->scheds[i].power = 0;
+            pInfoStation->scheds[i].enable = 0;
+        }
+        pInfoStation->socketActivatedFlag = 0;
+
+        val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO);
+        if ((val & RESET_WIFI_ANT_MASK) == RESET_WIFI_ANT_VALID)
+        {
+            pInfoStation->antennaPresence = WIFI_ANTENNA_TEST_DONE;
+
+            val &= (~RESET_WIFI_ANT_MASK);
+            /* reset in RTC the flag for "test wifi antenna presence"  */
+            HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO, val);
+        }
+
+        /* Adjust IRC16M settings */
+        if ((val & IRC16M_OSC_MASK) == IRC16M_OSC_VALID_FLAG)
+        {
+            /* clear IRC16M flag --> --> use HXTAL */
+            val &= ~IRC16M_OSC_ENABLE_FLAG;
+            /* write setting in BKP registers */
+            HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO, val);
+        }
+
+        /* save new parameter in reserved EEPROM area */
+        if (keySN == (uint8_t)0xA6)
+        {
+            if (ReadFromEeprom(PRD_SN_EE_ADDRES, (uint8_t*)pInfoStation->productSn, PRODUCT_SN_LENGTH) == osOK)    // recupero product SN 
+            {
+                if (pInfoStation->productSn[0] != (uint8_t)0xFF)
+                {
+                    pInfoStation->productSn[(PRODUCT_SN_LENGTH - 1)] = '\0';
+                    tmp = WriteOnEeprom(PRD_SN_EE_ADDRES, (uint8_t*)pInfoStation->productSn, PRODUCT_SN_LENGTH);
+                    if (tmp == osOK)
+                    {
+                        tPrintf("Reset Parametri InfoStation!!\n\r");
+                        EVLOG_Message(EV_INFO, "Reset Parametri InfoStation!!");
+                    }
+                }
+            }
+        }
+
+        /* set key and value for restore wifi module to factory parameters */
+        pInfoStation->keyForRestoreModule = 0xA9;
+        pInfoStation->restoreModule = (uint8_t)TRUE;
+
+        pInfoStation->channelId = 1;
+
+        /* Null key */
+        pInfoStation->toRange1.keyValue = 0;
+
+        /* default dummy value in the field    */
+        pInfoStation->startTimeWebCollaudo = 0xFFFFFFFF;
+
+        pInfoStation->key = KEY_FOR_INFOSTATION_V5;
+        /*              destination                source                   len   */
+        memCpyInfoSt((uint8_t*)&infoStation, (uint8_t*)pInfoStation, sizeof(infoStation_t));
+    }
+
+    switch (pInfoStation->key)
+    {
+        case KEY_FOR_INFOSTATION_V0:
+        case KEY_FOR_INFOSTATION_V1:
+            /* new FW, with new infostation structure, read for the first time a previous structure version */
+            /* it is necessary to copy the product SN (100xxxxxx) from the old position in the new position  */
+            memset((void*)pInfoStation->productSn, 0, sizeof(infoStation.productSn));
+            /*              destination                             source                  len   */
+            memcpy((void*)pInfoStation->productSn, (void*)pInfoStation->italyProductSn, sizeof(infoStation.italyProductSn));
+
+        case KEY_FOR_INFOSTATION_V2:
+            /* also put 0 in new field   */
+            pInfoStation->toRange1.keyValue = pInfoStation->toRange1.timeRangeVal = 0;
+            break;
+
+        case KEY_FOR_INFOSTATION_V3:
+            /* default dummy value in the field    */
+            pInfoStation->startTimeWebCollaudo = DUMMY_INFO_VAL;
+            break;
+
+        default:
+            break;
+    }
+
+    if (pInfoStation->key != KEY_FOR_INFOSTATION_VX)
+        pInfoStation->key = KEY_FOR_INFOSTATION_VX;
+
+    /*         destination       source */
+    strcpy((char*)pInfoStation->firmware, (char*)getFwVer());
+    strcat((char*)pInfoStation->firmware, (char*)" ");
+    strcat((char*)pInfoStation->firmware, (char*)getScuHWverFromEeprom());
+    /*                                             destination                             source           5 = len("Vw.ya" or "Vw.y\0")   */
+    memcpy((void*)(((fwInfoVersion_u*)pInfoStation->firmware)->fwBootVer.bootVer), (void*)BOOT_ADDR_VER, (size_t)BOOT_VER_SIZE + 1);
+    
+    /*              destination                source                   len   */
+    memCpyInfoSt((uint8_t*)&infoStation, (uint8_t*)pInfoStation, sizeof(infoStation_t));  
+
+    /* free allocated area */
+    free(pInfoStation);
+
+    /* check product serial number in reserved area */
+    if (keySN != (uint8_t)0xA6)
+    {
+        keySN = (uint8_t)0xA6;
+        /* save on EEPROM SCU SN */
+        tmp = WriteOnEeprom(SCU_SN_EE_ADDRES, (uint8_t*)SerNum, 4);
+        /* save on EEPROM PRD SN */
+        tmp |= WriteOnEeprom(PRD_SN_EE_ADDRES, (uint8_t*)pInfoStation->productSn, PRODUCT_SN_LENGTH);
+        /* save on key  SN */
+        tmp |= WriteOnEeprom(SN_KEY_EE_ADDRES, (uint8_t*)&keySN, 1);
+        if (tmp == osOK)
+        {
+            tPrintf("Recovery SNs done!!\n\r");
+            EVLOG_Message(EV_INFO, "Recovery SN done!!");
+        }
+    }
+
+    
+    /* Check if a different default value (oxFF) is on productSn, productCode, fakeProductCode 
+       Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
+    SRAM_Check_DEFAULT_of_Code();
+
+    /* 1) Initializes some modbus registers with socket/station parameters */
+    initModbusRegisters();
+}
+
+/**
+*
+* @brief        funzione che inizializza alcuni registri modbus a seconda dei parametri della stazione       
+*
+* @param [in]   
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void initModbusRegisters(void)
+{
+    
+  uint8_t checks1[2] = {0,0};
+  uint8_t checks2[2] = {0,0};
+  uint8_t actuators = 0;
+  uint16_t checks1Mod = 0;
+  uint16_t checks2Mod = 0;
+  uint8_t menuVisibility = 0;
+  uint8_t pmMode = 0;
+  uint8_t langDef = 0;
+  uint8_t langAvail[4];
+  uint8_t timeZone = 0;
+  uint32_t languages = 0;
+  uint8_t  connNum, tmp;
+  uint16_t current;
+  
+  /* if in Master Iso mode, the informations in modbus map aren't important */  
+  eeprom_param_get(OPERATIVE_MODE_EADD, (uint8_t *)&tmp, 1);
+  /* So, if the SCU is in master stand alone mode, exit */
+  if (tmp == SCU_SEM_STAND_ALONE)
+    return;
+  
+  /* Dalla versione modbus V24 le due cifre del display non necessariamente esprimono il modbus address: questo ? solo il default  */          
+  setDevAlias();
+  
+  /* Capire se questa funzione andrà bene e completare i flag */
+  setHwFlags();
+  
+  /* Set current power Outage  */
+  powerOutageUodate();
+
+  /* Set current number of leds  */
+  setNumberOfLeds();
+
+  /* Set current modbus version  */
+  setModbusVersion(CURR_MODBUS_VERSION);
+   
+  /* Set internal and external energy meter in modbus map */
+  setEnergyMetersType();
+  
+  /* Set station operation mode in modbus (free, personal or net) */
+  setStationOperationMode();
+  
+  /* Set register BOARD_FW_VERSION_RO and BOOT VERSION */
+  setFwVersion((char*)&infoStation.firmware);
+  
+  /* Init product serial number 100xxxxxx */
+  iniProductSerialNumber((char*)getProductSerialNumberEeprom(), PRODUCT_SN_LENGTH);
+
+  /* Set board serial number Ex: 00013440 */
+  iniBoardSerialNumber((char*)getStationSerialNumber(), BOARD_SN_LENGTH);
+
+  /* Set product code string Ex: 204.CA23B-T2T2W1 */
+  iniProductCodeString((char*)getStationProductCodeString(), PRODUCT_CODE_LENGTH);
+
+  /* Set fake code string Ex: 204CA51FF */
+  iniProductFakeString((char*)getStationFakeCodeCodeString(), FAKE_CODE_LENGTH);
+
+  /* Set register HW_REVISION_RO */
+  setHwVersion(getScuHWverFromEeprom());
+  
+  /* Set MIFARE fw version: null as default Initialization in RfidMng.c  */
+  //setMifareFwVersion("");
+  
+  /* Set Connector number in the EVSE 1 = alto sx; 2 = Alto dx; 3 = basso sx; 4 = basso dx */
+  eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&connNum, 1);
+  switch(connNum & SKT_POS_MASK)
+  {
+    case SKT_HIHG_DX:
+      tmp = (uint16_t)SKT_HIHG_DX_MB;
+      break;
+    case SKT_LOW_DX:
+      tmp = (uint16_t)SKT_LOW_DX_MB;
+      break;
+    case SKT_LOW_SX:
+      tmp = (uint16_t)SKT_LOW_SX_MB;
+      break;
+    default:
+      tmp = (uint16_t)SKT_HIHG_SX_MB;
+      break;
+  }
+	eeprom_param_get(CONNECTOR_NUMBER_EADD, (uint8_t *)&connNum, 1);
+	setConnectorNumber(tmp, connNum);
+  
+  /* Set Connector type in the EVSE  */
+  setConnectorType();
+
+  /* Set maximum typical current */
+  current = setMaxTypicalCurrent();
+  
+  /* Set maximum simplified current */
+  setMaxSimplifiedCurrent();
+
+  /* Set nominal power for this product  */
+  setNominalPower(current);
+
+  /* Set the current UTC time for the SCU */
+  // setUtcDateTimeRegister();   spostato in dbg_task.c 
+  
+  /* Set schedulation saved in Eeprom */
+  setSchedulationInModbusTable(getSchedulationFromMemory());
+  
+  /* Set esito update fw in modbus Map */
+  setUpdateFirmwareByAppResult();
+  
+  /* Set parametri power management */
+  setPowerManagementRegisters();
+  
+  /* Set men? PM non visibile */
+  eeprom_param_get(HIDDEN_MENU_VIS_EADD, &menuVisibility, 1);
+  setPmMenuVisibility(menuVisibility);
+  
+  /* Set men? visibile o meno della ricarica a tempo / a energia*/
+  setChargeTimeVisibility(menuVisibility);
+  
+  /* Set EVSE power mode for app information */
+  setEvsePowerMode();
+  
+  /* Set checks and actuators saved in eeprom in the modbus map */
+  eeprom_param_get(CONTROL_BYTE0_EADD, checks1, 2);
+  checks1[0] &= (uint8_t)(~(REMOTE_CRL0 | PULS_CRL0));  // i bit 4 e 5 hanno un altro significato ovvero BLE e WiFi
+  eeprom_param_get(CONTROL_BYTE2_EADD, checks2, 2);
+  eeprom_param_get(ACTUATORS_EADD, &actuators, 1);
+     
+  checks1Mod = (checks1[1] << 8) | checks1[0]; 
+  checks2Mod = (checks2[1] << 8) | checks2[0];
+  /* recovery HGTP bit */
+  eeprom_param_get(TEMP_CTRL_ENB_EADD, &tmp, 1);
+  checks2Mod &= (uint16_t)(~ERROR2_HGTP); //  
+  if ((tmp & CTRL_HGTP_BIT) != 0)
+  {
+    checks2Mod |= (uint16_t)(ERROR2_HGTP); // set high temperature control bit  
+  }
+  
+  if (actuators & PAUT_ATT0)
+  {
+    checks2Mod |= (uint16_t)(PAUT_CRL2); // set PAUT 
+  }  
+  
+  setHwChecks(checks1Mod, checks2Mod);
+  setHwActuators(actuators);
+  
+  /* get CHARGE IN TIME         */
+  /* Time here is saved as step of 30min */
+  eeprom_param_get(TCHARGE_TIME_EADD, (uint8_t *)&pmMode, 1);
+  setChargeByTime(pmMode); 
+  
+  /* get ENERGY CHARGING         */
+  eeprom_param_get(ENRG_LIMIT_EADD, (uint8_t *)&pmMode, 1);
+  setChargeByEnergy((uint16_t)pmMode);
+
+  /* set current power management mode */
+  eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&pmMode, 1);
+  setPmMode(pmMode);
+
+  /* Set default languages in modbus*/
+  eeprom_param_get(LANG_DEFAULT_EADD, (uint8_t*)&langDef, 1);
+  setDefaultLanguage(langDef);
+  
+  /* Set available languages in modbus */
+  eeprom_param_get(LANG_CONFIG0_EADD, (uint8_t *)langAvail, 4);
+  languages = langAvail[0] | (langAvail[1] << 8) | (langAvail[2] << 16) | (langAvail[3] << 24);
+  setAvailableLanguages(languages);
+  
+  /* Get TIMEZONE_RW */
+  eeprom_param_get(TIME_ZONE_EADD, (uint8_t*)&timeZone, 1);
+  /* Update modbus register */
+  setTimeZone(timeZone);
+}
+
+
+/**
+  * @brief  get stations name   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string station name
+  */
+char * getStationName( void )
+{
+  return infoStation.name;
+}
+   
+/**
+  * @brief  set stations name   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string station name
+  */
+unsigned char  setStationName(char* strName, int length)
+{
+  
+  /* Check if for some reason, the string is too long */
+  if (length > WIFI_CONN_NAME_LEN)
+    length = WIFI_CONN_NAME_LEN;
+  
+  configASSERT(length <= sizeof(infoStation.name));   
+  /*                               destination                   source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.name[0], (uint8_t*)strName, sizeof(infoStation.name)));
+
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  get stations id   
+  *         
+  * @param  none
+  * 
+  * @retval int: number of stations id 
+  */
+uint8_t getStationId(void)
+{
+  uint8_t pass = 0;
+
+  eeprom_param_get(RS485_ADD_EADD, &pass, 1);
+  return pass + 1;
+}
+ 
+/**
+  * @brief  get sinapsi enabling eeprom status    
+  *         
+  * @param  none
+  * 
+  * @retval statusFlag_e: ENABLED / DISABLED  
+  */
+statusFlag_e getSinapsiEepromEn(void)
+{
+  uint8_t result;
+
+  /* get abilitazione SINAPSI       */
+  eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t *)&result, 1);
+//  result &= (uint8_t)SINAPSI_CRL2;
+  if ((result & HIDDEN_MENU_SINAPSI) == (uint8_t)0)
+    return(DISABLED);
+  else
+    return(ENABLED);
+}
+
+/**
+  * @brief  get stations serial number   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string serial number 
+  */
+char*  getStationSerialNumber(void)
+{
+  return((char*)infoStation.serial);
+}
+    
+/**
+  * @brief  get stations product code   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string to product code 
+  */
+char*  getStationProductCodeString(void)
+{
+  return((char*)infoStation.productCode);
+}
+    
+/**
+  * @brief  get stations fake product code   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string to fake code 
+  */
+char*  getStationFakeCodeCodeString(void)
+{
+  return((char*)infoStation.fakeProductCode);
+}
+    
+
+/**
+  * @brief  get stations socket type   
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string serial number 
+  */
+
+sck_wiring_e  getStationSocketType(void)
+{
+  sck_wiring_e tmp;
+
+  /* set socket type  from SOCKET_TYPE_EADD   */
+  eeprom_param_get(SOCKET_TYPE_EADD, (uint8_t *)&tmp, 1); 
+  
+  switch (tmp)
+  {
+    case SOCKET_T2_NO_LID    :     
+    case SOCKET_T2_CLOSE_LID :
+    case SOCKET_T2_OPEN_LID  :
+      return PRESA_TIPO_2;
+      
+    case SOCKET_3C_OPEN_LID  :
+    case SOCKET_3C_NO_LID    :      
+    case SOCKET_3A_OPEN_LID  :
+    case SOCKET_3A_NO_LID    :
+      return PRESA_TIPO_3A;
+      
+    case SOCKET_SK_CLOSE_LID :
+    case SOCKET_SK_NO_LID    :
+      return PRESA_SCHUKO;
+      
+    case SOCKET_T1_TETHERED  :
+      return CONNETTORE_TETHERED_TIPO_1;
+      
+    case SOCKET_T2_TETHERED  :                 
+      return CONNETTORE_TETHERED_TIPO_2;
+
+    // CONNETTORE_TETHERED_TIPO_FF ??
+    // CONNETTORE_TETHERED_TIPO_AA ??     
+      
+    default:
+      return PRESA_NESSUNA;
+  }
+  
+}
+ 
+/**
+  * @brief  get energy meter type type   
+  *         
+  * @param  emEnum_e: internal or external
+  * 
+  * @retval energy_meter_e: enumerate for energy meter type 
+  */
+energy_meter_e  getStationEmType(emEnum_e emPos)
+{
+  EmeterType_en   locEmType;
+  energy_meter_e  emTypeVal;
+
+  locEmType = (EmeterType_en)get_emeter_type(emPos);
+  switch (locEmType)
+  {
+    case EMETER_TYPE_NULL:
+      emTypeVal = NONE;
+      break;
+    case EMETER_TAMP:           
+      emTypeVal = TA;
+      break;
+    case EMETER_TAMP_3:           
+      emTypeVal = TA_TRI;
+      break;
+    case EMETER_MONO_PH_GAVAZZI:
+      emTypeVal = MONO_GAVAZZI;
+      break;
+    case EMETER_MONO_PH_ALGO2:
+      emTypeVal = MONO_ALGO2;
+      break;
+    case EMETER_THREE_PH_GAVAZZI:
+      emTypeVal = TRI_GAVAZZI;
+      break;
+    case EMETER_THREE_PH_ALGO2: 
+      emTypeVal = TRI_ALGO2;
+      break;
+    default:
+      emTypeVal = UNKNOW;
+      break;
+  }
+  return(emTypeVal);
+}
+    
+/**
+  * @brief  get stations internal Energy meter type   
+  *         
+  * @param  none
+  * 
+  * @retval energy_meter_e: code for internal energy meter 
+  */
+energy_meter_e  getStationEmTypeInt(void)
+{
+  return(infoStation.emTypeInt);
+}
+ 
+/**
+  * @brief  get stations external Energy meter type   
+  *         
+  * @param  none
+  * 
+  * @retval energy_meter_e: code for external energy meter 
+  */
+energy_meter_e  getStationEmTypeExt(void)
+{
+  return(infoStation.emTypeExt);
+}
+ 
+/**
+  * @brief  get stations working mode   
+  *         
+  * @param  none
+  * 
+  * @retval modeFun_e: code for working mode 
+  */
+modeFun_e  getStationModeWorking(void)
+{
+  return((modeFun_e)infoStation.evs_mode);
+}
+ 
+/**
+  * @brief  get sinapsi error link counter   
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: error counter  
+  */
+uint8_t  getStationSinapsiRS485Error(void)
+{
+  return(infoStation.sinapsiRS485Errors);
+}
+ 
+/**
+  * @brief  Updating SINAPSI RS485 error and saving   
+  *          
+  * @param  none 
+  * 
+  * @retval none
+  */
+void incStationSinapsiRS485Error(void)
+{
+  uint8_t errorNum; 
+  
+  errorNum = infoStation.sinapsiRS485Errors + 1;
+  /*                                             destination                   source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.sinapsiRS485Errors, (uint8_t*)&errorNum, sizeof(infoStation.sinapsiRS485Errors)));
+  
+  /* save new parameter in EEPROM */
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  Reset SINAPSI RS485 error and saving   
+  *          
+  * @param  none 
+  * 
+  * @retval none
+  */
+void resetStationSinapsiRS485Error(void)
+{
+  uint8_t errorNum; 
+  
+  errorNum = 0;
+  /*                                             destination                   source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.sinapsiRS485Errors, (uint8_t*)&errorNum, sizeof(infoStation.sinapsiRS485Errors)));
+  
+  /* save new parameter in EEPROM */
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+
+/**
+  * @brief  set stations external/internal Energy meter type   
+  *         
+  * @param  energy_meter_e: code for external energy meter
+  * @param  emEnum_e: external/internal
+  * 
+  * @retval  
+  */
+void  setStationEmType(energy_meter_e emType,  emEnum_e pos, EmeterType_en gsyEmType, EmeterType_en webEmType)
+{
+uint16_t         address;
+  EmeterType_en  localWebEmType, localGsyEmType;
+  uint8_t        tmp, emTypeInt, emTypeExt, modePwr;
+
+  localWebEmType = webEmType; localGsyEmType = gsyEmType; 
+  if ((pos == INTERNAL_EM) && (webEmType != EMETER_TYPE_NULL))
+  {
+    emTypeInt = emType;
+    eeprom_param_get(EMETER_SCU_INT_EADD, &tmp, 1);
+    if (tmp != (uint8_t)localWebEmType) 
+    {
+      EEPROM_Save_Config (EMETER_SCU_INT_EADD, (uint8_t*)&localWebEmType, 1);
+    }
+    eeprom_param_get(EMETER_INT_EADD, &tmp, 1);
+    if (tmp != (uint8_t)localGsyEmType) 
+    {
+      EEPROM_Save_Config (EMETER_INT_EADD, (uint8_t*)&localGsyEmType, 1);
+    }
+  }
+  else
+  {
+    emTypeExt = emType;
+  }
+  if ((emTypeExt != UNKNOW) && (pos == EXTERNAL_EM))
+  {
+    switch (emTypeExt)
+    {
+      case MONO_GAVAZZI:
+      case MONO_ALGO2:
+      case MONO_SCAME:
+      case MONO_LOVATO:
+      case MONO_SINAPSI:
+        if (infoStation.pmModeEn == 0)
+        {
+          modePwr = MODE_MONO_PH_NO_PM;
+        }
+        else
+        {
+          modePwr = MODE_MONO_PH_PM;
+        }
+        break;
+
+      default:
+        /* all triphase cases */
+        if (infoStation.pmModeEn == 0)
+        {
+          modePwr = MODE_TRI_PH_NO_PM;
+        }
+        else
+        {
+          if (infoStation.pmUnbalEn == PMNG_UNBAL_OFF)
+          {
+            modePwr = MODE_TRI_PH_PM_UMBAL;
+          }
+          else
+          {
+            modePwr = MODE_TRI_PH_PM_BAL;
+          }
+        }
+        break;
+    }
+  }
+  if (pos == INTERNAL_EM)
+  {
+    switch(emTypeInt)
+    {
+      case MONO_GAVAZZI:
+      case MONO_ALGO2:
+      case MONO_SCAME:
+      case MONO_LOVATO:
+      case MONO_SINAPSI:
+      case MONO_PA775:
+        modePwr = MODE_MONO_PH_NO_PM;
+        break;
+      default:
+        modePwr = MODE_TRI_PH_NO_PM;
+        break;
+    }
+  }
+  if ((infoStation.emTypeInt != emTypeInt) && (pos == INTERNAL_EM))
+  {
+    /*                                             destination                   source                   len   */
+    configASSERT(memCpyInfoSt((uint8_t*)&infoStation.emTypeInt, (uint8_t*)&emTypeInt, sizeof(infoStation.emTypeInt)));
+    address = (uint16_t)SCU_GENERAL_INFO_EE_ADDRES + (uint16_t)(((uint32_t)&infoStation.emTypeInt - (uint32_t)&infoStation));
+    WriteOnEeprom(address, (uint8_t*)&emTypeInt, 1); 
+  }
+  if ((infoStation.emTypeExt != emTypeExt) && (pos == EXTERNAL_EM))
+  {
+    /*                                             destination              source                   len   */
+    configASSERT(memCpyInfoSt((uint8_t*)&infoStation.emTypeExt, (uint8_t*)&emTypeExt, sizeof(infoStation.emTypeExt)));
+    address = (uint16_t)SCU_GENERAL_INFO_EE_ADDRES + (uint16_t)(((uint32_t)&infoStation.emTypeExt - (uint32_t)&infoStation));
+    WriteOnEeprom(address, (uint8_t*)&emTypeExt, 1); 
+  }
+  if (infoStation.modePwr != modePwr)
+  {
+    /*                                             destination          source                   len   */
+    configASSERT(memCpyInfoSt((uint8_t*)&infoStation.modePwr, (uint8_t*)&modePwr, sizeof(infoStation.modePwr)));
+    address = (uint16_t)SCU_GENERAL_INFO_EE_ADDRES + (uint16_t)(((uint32_t)&infoStation.modePwr - (uint32_t)&infoStation));
+    WriteOnEeprom(address, (uint8_t*)&modePwr, 1); 
+  }
+  //parserEmModbusToWeb(emType);
+  //WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t)); 
+  //ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  /* Set internal and external energy meter in modbus map */
+  setEnergyMetersType();
+}
+
+
+/**
+  * @brief  set stations external/internal Energy meter type   
+  *         
+  * @param  energy_meter_e: code for external energy meter
+  * @param  emEnum_e: external/internal
+  * 
+  * @retval  
+  */
+//void  updateStationEmType(EmeterType_en emType,  emEnum_e pos)
+//{
+//  switch(emType)
+//  {
+//   case EMETER_TAMP:
+//    setStationEmType(TA, pos);
+//    break;
+//    
+//   case EMETER_MONO_PH_GAVAZZI:
+//    setStationEmType(MONO_GAVAZZI, pos);
+//    break;
+//    
+//   case EMETER_MONO_PH_ALGO2:
+//    setStationEmType(MONO_ALGO2, pos);
+//    break;
+//    
+//   case EMETER_MONO_PH_LOVATO:
+//    setStationEmType(MONO_LOVATO, pos);
+//    break;
+//    
+//   case EMETER_MONO_PH_SCAME:
+//    setStationEmType(MONO_SCAME, pos);
+//    break;
+//    
+//   case EMETER_TAMP_3:
+//    setStationEmType(TA_TRI, pos);
+//    break;
+//    
+//   case EMETER_THREE_PH_GAVAZZI:
+//    setStationEmType(TRI_GAVAZZI, pos);
+//    break;
+//    
+//   case EMETER_THREE_PH_ALGO2:
+//    setStationEmType(TRI_ALGO2, pos);
+//    break;
+//    
+//   case EMETER_THREE_PH_LOVATO:
+//    setStationEmType(TRI_LOVATO, pos);
+//    break;
+//    
+//   case EMETER_THREE_PH_SCAME:
+//    setStationEmType(TRI_SCAME, pos);
+//    break;
+//  }
+//  
+//  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+//}
+
+
+/**
+  * @brief  parser Energy meter modbus code to EmeterType_en for web page
+  *         
+  * @param  energy_meter_e: code for external energy meter
+  * @param  emEnum_e: external/internal
+  * 
+  * @retval  
+  */
+//void parserEmModbusToWeb(energy_meter_e emCode)
+//{
+//  EmeterType_en emType = EMETER_TYPE_NULL;
+//  
+//  switch(emCode)
+//  {
+//   case UNKNOW:
+//    emType = EMETER_TYPE_NULL;
+//    break;
+//    
+//   case TA:
+//    emType = EMETER_TAMP;
+//    break;
+//    
+//   case MONO_GAVAZZI:
+//    emType = EMETER_MONO_PH_GAVAZZI;
+//    break;
+//    
+//   case MONO_ALGO2:
+//    emType = EMETER_MONO_PH_ALGO2;
+//    break;
+//    
+//   case MONO_LOVATO:
+//    emType = EMETER_MONO_PH_LOVATO;
+//    break;
+//    
+//   case MONO_SCAME:
+//    emType = EMETER_MONO_PH_SCAME;
+//    break;
+//    
+//   case TA_TRI:
+//    emType = EMETER_TAMP_3;
+//    break;
+//    
+//   case TRI_GAVAZZI:
+//    emType = EMETER_THREE_PH_GAVAZZI;
+//    break;
+//    
+//   case TRI_ALGO2:
+//    emType = EMETER_THREE_PH_ALGO2;
+//    break;
+//    
+//   case TRI_LOVATO:
+//    emType = EMETER_THREE_PH_LOVATO;
+//    break;
+//    
+//   case TRI_SCAME:
+//    emType = EMETER_THREE_PH_SCAME;
+//    break;
+//  }
+//  
+//   eeprom_param_set(EMETER_INT_EADD, (uint8_t*)&emType, 1);
+//}
+
+
+/**
+  * @brief  get stations max current in traditional mode   
+  *         
+  * @param  none
+  * 
+  * @retval int32_t: current value 
+  */
+int32_t  getStationMaxCurrentT(void)
+{
+  return(infoStation.max_current);
+}
+ 
+/**
+  * @brief  get stations max current in semplificated mode   
+  *         
+  * @param  none
+  * 
+  * @retval int32_t: current value 
+  */
+int32_t  getStationMaxCurrentS(void)
+{
+  return(infoStation.max_currentSemp);
+}
+ 
+/**
+  * @brief  get stations power and working mode   
+  *         
+  * @param  none
+  * 
+  * @retval modePwr_e: code for power and working mode 
+  */
+modePwr_e  getStationPowerModeWorking(void)
+{
+  return(infoStation.modePwr);
+}
+ 
+/**
+  * @brief  get stations error code    
+  *         
+  * @param  none
+  * 
+  * @retval sck_error_e: state linked to the error 
+  */
+sck_error_e  getErrorStateCoding(void)
+{
+  word32_u    errStatus;
+  uint8_t     bitForRow[3];
+  uint8_t     numErr, row, bit, bitCnt, mask;
+  sck_error_e sckState;
+  
+  sckState = ERROR_NONE;
+  numErr = evs_error_get(errStatus.w32Byte, (uint8_t)1, (uint8_t)1, (uint8_t)6);
+  if (numErr != 0)
+  {
+    bitForRow[0] = bitForRow[1] = 8;  // 8 errori, uno per ogni bit 
+    bitForRow[2] = 2;                 // il terzo byte ha solo due possibili errori 
+    for (row = 0; row < 3; row++)
+    {
+      bitCnt = bitForRow[row];
+      for (bit = 0, mask = 1; bit < bitCnt; bit++, mask = mask << 1)
+      {
+        if ((errStatus.w32Byte[row] & mask) != 0)
+        {
+          sckState = (sck_error_e)((uint8_t)sckState + row * 8 + bit + 1);  //from ERR_RCDM_ANOM0 to ERR_EMETER_EXT_CRL2
+          return(sckState);
+        }
+      }
+    }
+  }
+  return(sckState);
+}
+
+/**
+  * @brief  get stations backup emergency working mode   
+  *         
+  * @param  none
+  * 
+  * @retval batteryBackup_e: code for emergency mode 
+  */
+batteryBackup_e  getStationBatteryBackupMode(void)
+{
+  return(infoStation.batteryBackup);
+}
+ 
+/**
+  * @brief  get stations v230 monitor flag status   
+  *         
+  * @param  none
+  * 
+  * @retval statusFlag_e: ENABLED / DISABLED  
+  */
+statusFlag_e  getStationV230FlagStatus(void)
+{
+  return(infoStation.v230MonFlag);
+}
+ 
+/**
+  * @brief  get info on SBC presence    
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: 1 = true = SBC present  
+  */
+uint8_t sbcPresence (void)
+{
+#ifndef HW_MP28947  
+  uint8_t numRetry;
+
+  numRetry = 0;
+  if ((getPhysicalMdbAddr() == SCU_M_P_ADDR) || (getScuTypeMode() == SCU_GSY))
+  {
+    while ((HAL_GPIO_ReadPin(SBC_CONN_GPIO_Port, SBC_CONN_Pin) == GPIO_PIN_RESET) && (numRetry < 3))
+    {
+      /* this is an anomal condition: try to reset the DBC power */
+      /** SBC and router OFF  OSC OFF **/
+      sbcPowerControl(DISABLED);
+      HAL_Delay(500);
+      /** SBC and router OFF  OSC OFF **/
+      sbcPowerControl(ENABLED);
+      numRetry++;
+      tPrintf("SBC " ANSI_COLOR_RED "RESETTED!!" ANSI_COLOR_RESET "\n\r" );
+    }
+    HAL_Delay(300);
+    if (HAL_GPIO_ReadPin(SBC_CONN_GPIO_Port, SBC_CONN_Pin) == GPIO_PIN_SET)
+    {
+      tPrintf("SBC " ANSI_COLOR_GREEN "PRESENT!!" ANSI_COLOR_RESET "\n\r" );
+      return((uint8_t)1);
+    }
+    else
+    {
+      tPrintf("SBC " ANSI_COLOR_RED "ABSENT!!" ANSI_COLOR_RESET "\n\r" );
+      return((uint8_t)0);
+    }
+  }
+  else
+  {
+    return((uint8_t)0); 
+  }
+#else
+  return((uint8_t)0); 
+#endif  
+}
+
+/**
+  * @brief  set info on WiFi and SBC enviroment    
+  *         
+  * @param  wifiSbcMode_e: SBC_WIFI_ON = SBC & Wifi possible
+  * 
+  * @retval none   
+  */
+void setWifiSbcEnv (wifiSbcMode_e status)
+{
+  wifiSbcTogether = status;
+}
+
+/**
+  * @brief  get info on WiFi and SBC enviroment   
+  *         
+  * @param  none
+  * 
+  * @retval wifiSbcMode_e: SBC_WIFI_OFF / SBC_WIFI_ON  
+  */
+wifiSbcMode_e  getWifiSbcEnv(void)
+{
+  return(wifiSbcTogether);
+}
+
+uint8_t saveWifiAccessPointChannelId( uint8_t id )
+{
+  uint8_t currentId;
+  
+  currentId = id;
+  /*                                             destination          source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.channelId, (uint8_t*)&currentId, sizeof(infoStation.channelId)));
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+uint8_t getWifiAccessPointChannelId(void)
+{
+  return infoStation.channelId;
+}
+ 
+
+/*************** FUNZIONI PER SINAPSI   ******************************************************************************************/
+
+/**
+  * @brief  get potenza contrattuale    
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: potenza in watt  
+  */
+uint32_t getPotenzaContrattuale (void)
+{
+  return((uint32_t)0xFFFFFFFF);
+}
+
+/**
+  * @brief  get potenza disponibile    
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: potenza in watt  
+  */
+uint32_t getPotenzaDisponibile (void)
+{
+  return((uint32_t)0xFFFFFFFF);
+}
+
+/**
+  * @brief  get potenza prelevata    
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: potenza in watt  
+  */
+uint32_t getPotenzaPrelevata (void)
+{
+  return((uint32_t)0xFFFFFFFF);
+}
+
+/**
+  * @brief  get tempo al distacco    
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: secondi al distacco  
+  */
+uint32_t getTempoDistacco (void)
+{
+  return((uint32_t)0xFFFFFFFF);
+}
+
+/**
+  * @brief  abilitazione periodo di ricarica a Potenza maggiorata    
+  *         
+  * @param  uint32_t*: puntatore alla potenza in W massima ammessa Pmaxt
+  * @param  uint32_t*: puntatore alla durata in secondi per cui si può andare a Pmaxt
+  * 
+  * @retval uint8_t: 1 = ricarica a tempo a potenza maggiorata abilitata  
+  */
+uint8_t enaDurataPmaxT (uint32_t* pPmaxT, uint32_t* pDurataPmax)
+{
+  *pPmaxT = (uint32_t)0xFFFFFFFF;
+  *pDurataPmax = (uint32_t)0xFFFFFFFF;
+
+  return((uint8_t)0);
+}
+
+/**
+  * @brief  get sospenzione forzata    
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: 1 sospensione forzata 0=condizione normale  
+  */
+uint8_t enaSospensioneTempoDistacco (void)
+{
+  return((uint8_t)0);
+}
+
+/**
+  * @brief  get authorization   
+  *         
+  * @param  none
+  * 
+  * @retval sck_auth_t*: pointer authorization
+  */
+sck_auth_t*  getAuthorization(void)
+{
+  return((sck_auth_t*)&infoStation.auth);
+}
+
+/**
+  * @brief  salvataggio credenziali in memoria eeprom    
+  *         
+  * @param  char *user nome utente
+  *         char *pass password
+  * 
+  * @retval none  
+  */
+void saveAuthorization(char *user, char *pass)
+{
+  sck_auth_t*     pLocAuth;   
+
+  /* make a copy of auth field  */
+  pLocAuth = (sck_auth_t*)malloc(sizeof(infoStation.auth));
+  memset((void*)pLocAuth, 0, sizeof(infoStation.auth));
+
+  pLocAuth->auth_state = AUTH_SETTED;
+  /*                                             destination                source                   len   */
+  memcpy ((void*)pLocAuth->user, (void*)user, sizeof(infoStation.auth.user));
+  memcpy ((void*)pLocAuth->pass, (void*)pass, sizeof(infoStation.auth.pass));
+  /*                                             destination     source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.auth, (uint8_t*)pLocAuth, sizeof(infoStation.auth)));
+  
+  free(pLocAuth);
+  /* save on EEPROM */
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  get schedulation   
+  *         
+  * @param  none
+  * 
+  * @retval sck_auth_t*: pointer authorization
+  */
+sck_schedule_t * getSchedulationFromMemory(void)
+{
+  return (sck_schedule_t*)&infoStation.scheds;
+}
+
+/**
+  * @brief  salvataggio schedulazione in memoria eeprom    
+  *         
+  * @param  sck_schedule_t *schedulation array di schedulazioni
+  * 
+  * @retval none  
+  */
+void saveSchedulation(sck_schedule_t *schedulation)
+{
+  infoStation_t*      pInfoStation;
+
+  pInfoStation = (infoStation_t*)malloc(sizeof(infoStation_t));
+  /* make a copy of current structure values */
+  memcpy ((void*)pInfoStation, (void*)&infoStation, sizeof(infoStation_t));
+
+  for(int i = 0; i < MAX_SCHEDULATION_NUMBER; i++)
+  {
+    pInfoStation->scheds[i].days = schedulation[i].days;
+    pInfoStation->scheds[i].id = i;
+    pInfoStation->scheds[i].start_hour = schedulation[i].start_hour;
+    pInfoStation->scheds[i].start_min = schedulation[i].start_min;
+    pInfoStation->scheds[i].end_hour = schedulation[i].end_hour;
+    pInfoStation->scheds[i].end_min = schedulation[i].end_min;
+    pInfoStation->scheds[i].power = schedulation[i].power;
+    pInfoStation->scheds[i].enable = schedulation[i].enable;
+  }
+  /*              destination                source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation, (uint8_t*)pInfoStation, sizeof(infoStation_t)));
+  free(pInfoStation);
+  
+  /* save on EEPROM */
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+
+/**
+* @brief  set the new state for hardware configuration
+*  
+* @param [in ]  uint32_t: flag status
+* @param [in ]  uint32_t: flag mask
+* @retval None
+*/
+void setFlagHwInfo(uint32_t statusIn, uint32_t mask)
+{
+  uint32_t status;
+  uint32_t  val;
+
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO);
+
+  status = val & (~mask); 
+  status |= statusIn;
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO, status);
+}
+
+/**
+* @brief  get the info on lcd hw management type
+*  
+* @param [in ]  none
+* 
+* @retval uint32_t: type of lcd management 
+*/
+uint32_t getLcdHwMng(void)
+{
+  uint32_t status;
+  uint32_t  val;
+
+  status = LCD_MODE_FULL_BIDIR;
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO);
+
+  if (((val & MASK_FOR_LCD_MODE) & KEY_FOR_LCD_MODE) == KEY_FOR_LCD_MODE)
+  {
+    /* info on RTC backup is valid */
+    if ((val & LCD_MODE_OPEN_DRAIN) == LCD_MODE_OPEN_DRAIN)
+    {
+      status = LCD_MODE_OPEN_DRAIN;
+    }
+  }
+  return(status);
+}
+
+/**
+* @brief  get the info on rs485 address validity
+*  
+* @param [in ]  none
+* 
+* @retval uint32_t: 0 if no address is present  
+*/
+uint32_t getAddrSetting(void)
+{
+  uint32_t status;
+  uint32_t  val;
+
+  status = 0;
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_HW_INFO);
+
+  if (((val & MASK_FOR_RS485_ADD_SET) & KEY_FOR_RS485_ADD) == KEY_FOR_RS485_ADD)
+  {
+    /* info on RTC backup is valid */
+    if ((val & RS485_ADD_SET) == RS485_ADD_SET)
+    {
+      status = RS485_ADD_SET;
+    }
+  }
+  return(status);
+}
+
+/**
+*
+* @brief        set PEN signal filtering   
+*
+* @param [in]   statusFlag_e: status  ENABLED / DISABLED
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void  setPenFilteringStatus (statusFlag_e penSt)
+{
+  filteringPEN = penSt;
+}
+
+/**
+*
+* @brief        send a message to ioExp manager to start with polling on pEN pin   
+*
+* @param [in]   none
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void startIoExpPenFiltering (void)
+{
+  ioMngMsg_st   ioExpMsg;
+
+  /* attivazione filtering on PEN pin   */
+  ioExpMsg.taskEv = IO_EVENT_PEN_FILTERING;
+  ioExpMsg.outRegId = NUM_OUT_IOEXP;
+  ioExpMsg.val = 0;
+  xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, portMAX_DELAY);
+}
+
+/**
+* @brief  set the new state for Power down pin 
+*  
+* @param [in ]  statusFlag_e: ENABLED / DISABLED 
+* @retval None
+*/
+void powerDownPin(statusFlag_e statusIn)
+{
+  GPIO_PinState       pinSt;
+  RCC_OscInitTypeDef  RCC_OscInitStruct = {0};
+
+  pinSt = GPIO_PIN_RESET;
+  if(statusIn == DISABLED)
+  {
+    pinSt = GPIO_PIN_SET;
+    /** Initializes the CPU, AHB and APB busses clocks 
+    */
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+    RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+    RCC_OscInitStruct.HSIState = RCC_HSI_OFF;
+    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+    RCC_OscInitStruct.PLL.PLLM = 25; // 50MHz / 25 = 2MHz
+    RCC_OscInitStruct.PLL.PLLN = 216;
+    RCC_OscInitStruct.PLL.PLLP = 2;
+    RCC_OscInitStruct.PLL.PLLQ = 9;
+  }
+  else
+  {
+    /** Initializes the CPU, AHB and APB busses clocks 
+    */
+    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+    RCC_OscInitStruct.HSEState = RCC_HSE_BYPASS;
+    RCC_OscInitStruct.HSIState = RCC_CR_HSION;
+    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+    RCC_OscInitStruct.PLL.PLLM = 8; // 16MHz / 8 = 2MHz
+    RCC_OscInitStruct.PLL.PLLN = 216;
+    RCC_OscInitStruct.PLL.PLLP = 2;
+    RCC_OscInitStruct.PLL.PLLQ = 9;
+  }
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** SBC and router OFF  OSC OFF **/
+  HAL_GPIO_WritePin(SBC_PWR_GPIO_Port, SBC_PWR_Pin, pinSt);
+}
+
+
+/**
+*
+* @brief        starting from local time save date and time in GMT in according to time zone and DST   
+*
+* @param [in]   (struct DataAndTime_t*: pointer to local date and time structure 
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void setDateTimeWithTimeZone (struct DataAndTime_t* pLocDateTime)
+{
+  struct tm             structUnixTime = {0} ;
+  struct DataAndTime_t  LocDateTime;
+  uint32_t              currentUnixTime;
+  char                  timeZone;
+  uint8_t               dstRunning;
+  time_t                unixT;
+  
+
+  structUnixTime.tm_sec  = (int)pLocDateTime->Second;
+  structUnixTime.tm_min  = (int)pLocDateTime->Minute;
+  structUnixTime.tm_hour = (int)pLocDateTime->Hour;
+  structUnixTime.tm_mday = (int)pLocDateTime->Day;
+  structUnixTime.tm_mon  = (int)pLocDateTime->Month - 1;
+  structUnixTime.tm_year = (int)pLocDateTime->Year - 1900;
+  //structUnixTime.tm_wday = (int)pLocDateTime->DayWeek;
+  currentUnixTime = (uint32_t)mktime((struct tm *)&structUnixTime); 
+
+  /* get time zone         */
+  eeprom_param_get(TIME_ZONE_EADD, (uint8_t *)&timeZone, 1);
+  /* get abilitazione ora legale      */
+  eeprom_param_get(DST_EADD, (uint8_t *)&pLocDateTime->dstFlag, 1);
+
+  currentUnixTime = (uint32_t)((int32_t)currentUnixTime - (int32_t)timeZone * (int32_t)3600);
+
+  checkLegalPeriod((uint32_t)currentUnixTime);
+
+  eeprom_param_get(DST_STATUS_EADD, (uint8_t*)&dstRunning, 1);   // read if DST is running 
+
+  if ((pLocDateTime->dstFlag != (char)0) && (dstRunning > (int)0))
+  {
+    /* ora legale abilitata ed attiva */
+    currentUnixTime -= (uint32_t)3600;
+  }
+  unixT = (time_t)currentUnixTime;
+  
+  /* update globat date and time structure  **/
+  LocDateTime = GetDateTime_from_Unix(unixT);   /* Ticket SCU-100 */         
+  
+  DateTimeSet(&LocDateTime);
+
+  // Aggiorno data e ora nella struttura globale 
+  UpdateGlobalDT();
+}
+
+/**
+*
+* @brief        get the status of SW1 flag reset and reset it if active        
+*
+* @param [in]   none
+*
+* @retval       uint32_t: code sw1 flags   
+*
+***********************************************************************************************************************/
+uint8_t getSW1flagAndReset(void)
+{
+  uint32_t  val;
+
+  val = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*) getHandleRtc(), BACKUP_HW_INFO);
+  if ((val & RESET_BY_SW1_MASK) == RESET_BY_SW1_VALID)
+  {
+    val |= RESET_BY_SW1_MASK; 
+    val &= (~RESET_WIFI_ANT_MASK);
+    val |= RESET_WIFI_ANT_VALID; 
+    /* reset in RTC the flag for "reset by long SW1 pression */
+    HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO, val); 
+
+    return((uint8_t)TRUE);
+  }
+  return ((uint8_t)FALSE);
+}
+
+
+/**
+*
+* @brief        reset to product default value all RTC backup register   
+*
+* @param [in]   none 
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void restoreFactoryDefault (void)
+{
+//  uint16_t    ix, error;
+  uint8_t     valid, numReg;
+//  uint8_t*    pBuff;
+// uint8_t     snCurrent[4];
+//  uint8_t     prdCurrent[9];
+  
+//  pBuff = (uint8_t*)malloc(1024);
+//
+//  if (ReadFromEeprom(SCU_SN_EE_ADDRES, snCurrent, 4) == osOK)    // recupero numero di serie
+//  {
+//    if (ReadFromEeprom(PRD_SN_EE_ADDRES, prdCurrent, 9) == osOK)    // recupero product SN 
+//    {
+//      do
+//      {
+//        error = (uint8_t)0;
+//        memset((void*)pBuff, 0xFF, 1024); 
+//        if (WriteOnEeprom((uint16_t)EDATA_VALID_EADD, pBuff, (uint16_t)1024) == 0)
+//        {
+//          tPrintf("Reset Parametri in EEPROM!!\n\r");
+//          if (ReadFromEeprom(SERNUM_BYTE0_EADD, pBuff, 1024) == osOK)    // rileggo la eeprom
+//          {
+//            for (ix = 0; ix < 1024; ix++)
+//            {
+//              if (pBuff[ix] != (uint8_t)0xFF)
+//              {
+//                error++;
+//              }
+//            }
+//          }
+//        }
+//      } while (error != (uint8_t)0);
+//    }
+//  }
+//  free(pBuff);
+//  /* restore SCU SN */
+//  WriteOnEeprom(SERNUM_BYTE0_EADD, snCurrent, 4);
+
+  valid = EDATA_FACTORY_PRG;
+
+  WriteOnEeprom(EDATA_VALID_EADD, &valid, 1);
+
+  tPrintf("Reset Parametri in EEPROM!!\n\r");
+  
+  Eeprom_Master_User_card_Force_Reset();   /* Fixed ticket SCU-76 */
+  tPrintf("Reset of Master and all User card! \n\r");   /* Fixed ticket SCU-76 */
+  
+  for (numReg = 0; numReg <= LAST_BACKUP_REG; numReg++)
+  {
+#ifdef COME_ERA
+    if ((numReg != BACKUP_EM_ENRG_ACT) && (numReg != BACKUP_SCAME_TOTAL_ENRG) &&
+        (numReg != BACKUP_CALM_RTC) && (numReg != BACKUP_CALP_RTC))
+#else
+    /* 31/03/2025 azzeriamo i registri dell'energia per EM Scame */
+    if ((numReg != BACKUP_CALM_RTC) && (numReg != BACKUP_CALP_RTC))
+#endif
+    {
+      HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)numReg, 0L); 
+    }
+  }
+  /* set in RTC the flag for "reset by long SW1 pression */
+  /* set in RTC the flag for "IRC16M OSC" validity */
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_HW_INFO, (IRC16M_OSC_VALID_FLAG | RESET_BY_SW1_VALID | 0xAA000000L)); 
+
+  TransactionRegister_clearAll();
+  SecureArea_restoreDefault();
+  osDelay(100);
+  setFlagForNvic();
+  NVIC_SystemReset();
+}
+
+/**
+*
+* @brief        activation ethernet and motor driver modules    
+*
+* @param [in]   none 
+*
+* @retval       none
+*
+***********************************************************************************************************************/
+void ethMotorPowerOn (void)
+{
+#ifndef HW_MP28947  
+  /** enable ethernet and motor driver    */
+  HAL_GPIO_WritePin(PWRDWN1L_GPIO_Port, PWRDWN1L_Pin, GPIO_PIN_SET);
+#else
+  /** release RST pin of Ethernet chip */
+  HAL_GPIO_WritePin(ETH_RST_GPIO_Port, ETH_RST_Pin, GPIO_PIN_SET);
+ 
+#endif  
+}
+
+/*************** FUNZIONI PER BLUETHOOT   ******************************************************************************************/
+
+/**
+  * @brief  get fast bridge condition    
+  *         
+  * @param  none
+  * 
+  * @retval statusFlag_e: current status  
+  */
+statusFlag_e getFastBridge (void)
+{
+  return(fastBridgeStatus);
+}
+
+
+/**
+  * @brief  set fast bridge status    
+  *         
+  * @param  none
+  * 
+  * @retval statusFlag_e: new state   
+  */
+void setFastBridge (statusFlag_e fbStatus)
+{
+  fastBridgeStatus = fbStatus;
+  if (fbStatus == DISABLED)
+  {
+    counterSlaveDwnl = (uint32_t)NUM_BUFF_SBC_MSG_RX;
+  }
+}
+
+/**
+  * @brief  get fast bridge condition    
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: counter value  
+  */
+uint32_t getCounterSlaveDwnl (void)
+{
+  return(counterSlaveDwnl);
+}
+
+
+/**
+  * @brief  set the counter for receive packet in slave download     
+  *         
+  * @param  none
+  * 
+  * @retval statusFlag_e: new value   
+  */
+void setCounterSlaveDwnl (uint32_t value)
+{
+  counterSlaveDwnl = (uint32_t)value;
+}
+
+
+/*************** FUNZIONI PER MODULO WIFI   ******************************************************************************************/
+
+/**
+  * @brief  set user pin  
+  *         
+  * @param  char*: user pin chosen by user from app
+  * @param  uint8_t: length of the user pin (5 digit --> 6 bytes)
+  * 
+  * @retval none
+  */
+unsigned char setUserPin(char* pin, uint8_t length)
+{
+  uint8_t pinStr[sizeof(infoStation.userPin)];
+
+  configASSERT(length <= sizeof(infoStation.userPin));  
+   
+  memset(&pinStr[0], 0, sizeof(infoStation.userPin));
+  /*         destination            source */
+  if(length == 0)
+    strcpy((char *)&pinStr[0], pin);
+  else 
+  {
+    strncpy((char *)&pinStr[0], pin, length);
+    pinStr[length] = '\0';
+  }
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.userPin[0], (uint8_t*)&pinStr[0], sizeof(infoStation.userPin)));
+  
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+/**
+  * @brief  get stations user pin chosen from App  
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string user pin
+  */
+char*  getUserPin(void)
+{
+  return((char*)infoStation.userPin);
+}
+
+
+/**
+  * @brief  set Router SSID of a home network  
+  *         
+  * @param  char*: SSID of a router home network
+  * @param  uint8_t: length of the user pin (32 bytes)
+  * 
+  * @retval none
+  */
+unsigned char  setRouterSsid(char* ssid, uint8_t length)
+{
+  uint8_t locStr[sizeof(infoStation.routerSsid)];
+  
+  /* Check if some reason, the string is too long */
+  if (length > MAX_ROUTER_SSID_LENGTH)
+    length = sizeof(infoStation.routerSsid);
+
+  /* Format RouterSsid to zero (ref. JAPPT-206) */
+  memset(&locStr[0], 0, sizeof(infoStation.routerSsid));
+
+  /*         destination            source */
+  if(length == 0)
+    strcpy((char *)&locStr, ssid);
+  else 
+  {
+    strncpy((char *)&locStr, ssid, length);
+  } 
+   
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerSsid[0], (uint8_t*)locStr, sizeof(infoStation.routerSsid)));
+  
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  reset Router SSID of a home network  
+  *         
+  * @param  none
+  * 
+  * @retval none
+  */
+uint8_t  resetRouterSsid(void)
+{
+  uint8_t locStr[sizeof(infoStation.routerSsid)];
+
+  /* Format RouterSsid to zero (ref. JAPPT-206) */
+  memset(&locStr[0], 0, sizeof(infoStation.routerSsid));
+  memset(pAppRwRegs->RoutSSID, 0, sizeof(infoStation.routerSsid));        /* Fixed ticket SCU-79 */
+
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerSsid[0], (uint8_t*)locStr, sizeof(infoStation.routerSsid)));
+
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  reset Router password of a home network  
+  *         
+  * @param  none
+  * 
+  * @retval 0 success, otherwise fail.
+  */
+uint8_t resetRouterPass(void)
+{
+  uint8_t locStr[sizeof(infoStation.routerPass)];
+  uint8_t mdbAddr;
+  appMapRwRegister_st* pAppRwRegs;
+  
+  mdbAddr = getLogicalMdbAddr();
+  pAppRwRegs = getAppMdbRwRegs(mdbAddr);
+  
+  memset(&locStr[0], 0, sizeof(infoStation.routerPass));
+  memset(pAppRwRegs->RoutPass, 0, sizeof(infoStation.routerPass));
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerPass[0], (uint8_t*)locStr, sizeof(infoStation.routerPass)));
+
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+/**
+  * @brief  get router SSID of a home network  
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string router SSID
+  */
+char*  getRouterSsid(void)
+{
+  return((char*)infoStation.routerSsid);
+}
+
+
+/**
+  * @brief  set router password of a home network  
+  *         
+  * @param  char*: router password 
+  * @param  uint8_t: length of the password (5 digit --> 6 bytes)
+  * 
+  * @retval none
+  */
+unsigned char  setRouterPass(char* pass, uint8_t length)
+{
+  uint8_t locStr[sizeof(infoStation.routerPass)];
+
+  configASSERT(length <= sizeof(infoStation.routerPass));  
+
+  memset(&locStr[0], 0, sizeof(infoStation.routerPass));
+
+  /*         destination            source */
+  if(length == 0)
+    strcpy((char *)&locStr[0], pass);
+  else 
+  {
+    strncpy((char *)&locStr[0], pass, length);
+    locStr[length] = '\0';
+  }
+  
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerPass[0], (uint8_t*)locStr, sizeof(infoStation.routerPass)));
+  
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+/**
+  * @brief  get stations router password of a home network  
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string router password
+  */
+char*  getRouterPass(void)
+{
+  return((char*)infoStation.routerPass);
+}
+
+
+/**
+  * @brief  set installer pin  
+  *         
+  * @param  char*: installer pin calculated 
+  * @param  uint8_t: length of the installer pin (5 digit --> 6 bytes)
+  * 
+  * @retval none
+  */
+unsigned char setInstallerPin(char* pin, uint8_t length)
+{
+  uint8_t locStr[sizeof(infoStation.installerPin)];
+
+  configASSERT(length <= sizeof(infoStation.installerPin));  
+
+  memset(&locStr[0], 0, sizeof(infoStation.installerPin));
+
+  /*         destination            source */
+  if(length == 0)
+    strcpy((char *)&locStr[0], pin);
+  else 
+  {
+    strncpy((char *)&locStr[0], pin, length);
+    locStr[length] = '\0';
+  }
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.installerPin[0], (uint8_t*)locStr, sizeof(infoStation.installerPin)));
+  
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+/**
+  * @brief  get stations installer pin calculated  
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string installer pin
+  */
+char* getInstallerPin(void)
+{
+  return((char*)infoStation.installerPin);
+}
+
+
+/**
+  * @brief  set activation socket flag (1 when socket activated)  
+  *          
+  * @param  uint8_t: flag 0 = not activated yet, 1 = activated
+  * 
+  * @retval none
+  */
+unsigned char setActivationFlag(uint8_t flag)
+{
+  uint8_t   actFlag;
+  
+  actFlag = flag;
+
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.socketActivatedFlag, (uint8_t*)&actFlag, sizeof(infoStation.socketActivatedFlag)));
+  
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+/**
+  * @brief  get stations installer pin calculated  
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string installer pin
+  */
+uint8_t getActivationFlag(void)
+{
+  return(infoStation.socketActivatedFlag);
+}
+
+
+/**
+  * @brief  get boot event  
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: boot event value
+  */
+bootReg_e getBootEvent(void)
+{
+  return(infoStation.bootEvent);
+}
+
+
+/**
+  * @brief  set boot event 
+  *          
+  * @param  bootReg_e: boot event to set 
+  * 
+  * @retval unsigned char: result of the set operation
+  */
+unsigned char setBootEvent(bootReg_e boot)
+{
+  bootReg_e   locFlag;
+  
+  locFlag = boot;
+
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.bootEvent, (uint8_t*)&locFlag, sizeof(infoStation.bootEvent)));
+  
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+/**
+  * @brief  set product serial number  
+  *         
+  * @param  char*: product serial number
+  * @param  uint8_t: length of the product serial number (9 digit --> 9 bytes)
+  * 
+  * @retval none
+  */
+unsigned char  setProductSerialNumberEeprom(char* key, uint8_t length, uint8_t setAll)
+{
+  uint8_t       locStr[sizeof(infoStation.productSn)];
+  unsigned char result, keySN;
+
+  configASSERT(length <= sizeof(infoStation.productSn));  
+
+  memset(&locStr[0], 0, sizeof(infoStation.productSn));
+
+  /*         destination            source */
+  if(length == 0)
+    strcpy((char *)&locStr[0], key);
+  else 
+  {
+    strncpy((char *)&locStr[0], key, length);
+    locStr[length] = '\0';
+  }
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.productSn[0], (uint8_t*)locStr, sizeof(infoStation.productSn)));
+
+  if (setAll)
+  {
+    /* save new parameter in reserved EEPROM area */
+    result = WriteOnEeprom(PRD_SN_EE_ADDRES, (uint8_t*)infoStation.productSn, PRODUCT_SN_LENGTH);
+    keySN = (uint8_t)0xA6;
+    /* save on key  SN */
+    result |= WriteOnEeprom(SN_KEY_EE_ADDRES, (uint8_t*)&keySN, 1);
+    /* save on EEPROM */
+    result |= WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+
+    if (result == osOK)
+    {
+      tPrintf("Set SNs and key done!!\n\r");
+    }
+  }
+  /* Init product serial number 100xxxxxx */
+  iniProductSerialNumber((char*)getProductSerialNumberEeprom(), PRODUCT_SN_LENGTH);
+  
+  return result;
+}
+
+                
+/**
+  * @brief  check if it is possible to start with download  
+  *         
+  * @param  char*: pointer to info data download
+  * @param  uint8_t: length of the info data
+  * @param  uint8_t: SCU phisical address on RS485 bus (0 for broadcast)
+  * 
+  * @retval none
+  */
+void checkStartFwDwld (char* pSrc, uint16_t lenRegByte, uint16_t index, uint8_t scuPhyAddr)
+{
+  uint16_t              command;
+  uint32_t              fileSize;
+  scuRwMapRegister_st*  pRwRegs;
+  uint8_t               mdbAddr;
+
+  mdbAddr = getLogicalMdbAddrSem();
+  pRwRegs = getRwMdbRegs(mdbAddr);
+
+  if ((index == (uint16_t)FILE_COMMAND_RW) && (lenRegByte == 2)) 
+  {
+    command = *((uint16_t*)pSrc);
+    pRwRegs->scuSetRegFwUpd.fileCommand  = command;
+    pRwRegs->scuSetRegFwUpd.commandRx  = TRUE;
+  }
+  if ((index == (uint16_t)FILE_SIZE_RW) && (lenRegByte == 4)) 
+  {
+    fileSize = *((uint32_t*)&pSrc[0]);
+    pRwRegs->scuSetRegFwUpd.fileSize = fileSize;
+    pRwRegs->scuSetRegFwUpd.filesizeRx = TRUE;
+  }
+
+  setSlavaInDownload(scuPhyAddr);
+
+  if ((pRwRegs->scuSetRegFwUpd.commandRx == TRUE) && (pRwRegs->scuSetRegFwUpd.filesizeRx == TRUE) && 
+      ((getPhysicalMdbAddr() == scuPhyAddr) || (scuPhyAddr == MODBUS_BROADCAST_ADDR) || (getScuOpMode() == SCU_M_STAND_ALONE)))
+  {
+    pRwRegs->scuSetRegFwUpd.commandRx = pRwRegs->scuSetRegFwUpd.filesizeRx = FALSE;
+    if ((((pRwRegs->scuSetRegFwUpd.fileCommand) & (uint16_t)0x0001) == (uint16_t)0x0001) ||
+       (((pRwRegs->scuSetRegFwUpd.fileCommand) & FILE_COMMAND_MASK) == FILE_COMMAND_BROAD))
+    {
+      pRwRegs->scuSetRegFwUpd.fileCommand &= FILE_COMMAND_MASK;
+      fileSize = pRwRegs->scuSetRegFwUpd.fileSize;
+      if ((fileSize % 1024) == 0)
+      {
+        /* il byte HH della lunghezza deve essere a 0 così come il byte LL (il FW è multiplo di 1024) */
+        setCodeLen(fileSize);
+        if (getPhysicalMdbAddr() == scuPhyAddr) 
+        {
+          if (((pRwRegs->scuSetRegFwUpd.fileCommand) & (uint16_t)FILE_COMMAND_BROAD) == (uint16_t)FILE_COMMAND_BROAD)
+          {
+            setBroadcastDownload(TRUE);
+            /* the master detect a broadcast download has benn required */
+            sendDownloadMsg(UART_RX_START_BRD_DWLD);
+          }
+          else
+          {
+            if (getScuOpMode() == SCU_M_STAND_ALONE)
+            {
+              sendDownloadMsg(SLAVE_IN_DWNL); // scuGsyDwldTask()
+            }
+            else
+            {
+              sendDownloadMsg(UART_RX_START_DWLD);   // scuGsyDwldTask()
+            }
+          }
+        }
+        else
+        {
+          if (scuPhyAddr == MODBUS_BROADCAST_ADDR)
+          {
+            setBroadcastDownload(TRUE);
+            /* the slave detect a broadcast download has been required */
+            sendDownloadMsg(UART_RX_START_BRD_DWLD); 
+          }
+          else
+          {
+            if (isSemMasterFz() == TRUE)
+            {
+              sendDownloadMsg(SLAVE_IN_DWNL);       // scuGsyDwldTask()
+            }
+            else
+            {
+              sendDownloadMsg(OTHER_SLAVE_IN_DWNL); // scuGsyDwldTask()
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/**
+  * @brief  reset all EEPROM  
+  *         
+  * @param  none
+  * 
+  * @retval none
+  */
+void  resetEEpromAll(void)
+{
+  uint16_t  eeArea;
+  uint32_t  reg;
+  uint8_t   result;
+  
+  eeArea = END_SN_EE_ADDRES + 1;
+  memset((void*)&areaTransaction, 0xFF, eeArea); 
+  /* save on EEPROM */
+  result =  WriteOnEeprom(START_EE_ADDRES, (uint8_t*)&areaTransaction, eeArea);
+
+  for (reg = BACKUP_NVIC_RESET_REG; reg <= LAST_BACKUP_REG; reg++)
+  {
+#ifdef COME_ERA
+    if ((reg != BACKUP_EM_ENRG_ACT) && (reg != BACKUP_SCAME_TOTAL_ENRG) &&
+        (reg != BACKUP_CALM_RTC) && (reg != BACKUP_CALP_RTC))
+#else
+    if ((reg != BACKUP_CALM_RTC) && (reg != BACKUP_CALP_RTC))
+#endif
+    {
+      HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), reg, (uint32_t)0); 
+    }
+  }
+  
+    
+  if (result == osOK)
+  {
+    tPrintf("Reset All SNs and key done!!\n\r");
+  }
+  /** Restart the system by NVIC reset */
+  /*  EEPROM will be initialized at restart ( by eepromRead_all func ) */  
+  setFlagForNvic();
+  NVIC_SystemReset();
+
+}
+
+/**
+  * @brief  set SCU serial number  
+  *         
+  * @param  char*: product serial number
+  * @param  uint8_t: length of the product serial number (4  byte --> 8 nibbles )
+  * 
+  * @retval none
+  */
+unsigned char  setScuSerialNumberEeprom(char* key, char* keyString)
+{
+  uint8_t       locStr[sizeof(infoStation.serial)];
+
+  memset(&locStr[0], 0, sizeof(infoStation.serial));
+
+  /*         destination         source              len         */
+  strncpy((char *)&locStr[0], keyString, sizeof(infoStation.serial));
+
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.serial[0], (uint8_t*)locStr, sizeof(infoStation.serial)));
+
+  return ( WriteOnEeprom(SCU_SN_EE_ADDRES, (uint8_t*)key, 4));
+}
+
+/**
+  * @brief  set MP code and hardware version of the board   
+  *         
+  * @param  char*: MP index pointer 
+  * 
+  * @retval none
+  */
+unsigned char  setScuHardwareVersionEeprom(char* hwVerStr)
+{
+  memset(scu_hw_version, 0, sizeof(scu_hw_version));
+  scu_hw_version[0] = hwVerStr[0];  scu_hw_version[1] = hwVerStr[1];
+  /* Set register HW_REVISION_RO */
+  setHwVersion((char*)scu_hw_version);
+
+  /* typically: 8D when we have MP00078 product version V4.4 or 3D whit MP70433 V4.4 */
+  return (WriteOnEeprom(PRD_HV_EE_ADDRES, (uint8_t*)hwVerStr, 2));
+}
+
+/**
+  * @brief  get pointer to hardware version string  
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string hardware version 
+  */
+char*  getScuHWverFromEeprom(void)
+{
+  memset(scu_hw_version, 0, sizeof(scu_hw_version));
+  if (ReadFromEeprom(PRD_HV_EE_ADDRES, (uint8_t*)scu_hw_version, 2) == osOK)    // recupero hardware version
+  {
+    if((IsUpperChar(scu_hw_version[0]) == FALSE) && (IsDigit(scu_hw_version[0]) == FALSE)) 
+    {
+      scu_hw_version[0] = (char)'8'; 
+      scu_hw_version[1] = (char)'A'; 
+    }
+  }
+  else
+  {
+    scu_hw_version[0] = (char)'8'; 
+    scu_hw_version[1] = (char)'A'; 
+  }
+  
+  if (((scu_hw_version[1] >= 'D') && (scu_hw_version[1] <= 'Z')) || ((scu_hw_version[1] >= 'd') && (scu_hw_version[1] <= 'z')))
+    OutOfPowerDownAt15V = TRUE;
+  else
+    OutOfPowerDownAt15V = FALSE;    
+  
+  return((char*)scu_hw_version);
+}
+
+/**
+*
+* @brief       get the char linked to hardware version 
+*
+* @param [in]  
+*  
+* @retval      char: version char  
+*  
+****************************************************************/
+char  getCodeHwVersion (void) 
+{
+  scuRoMapRegister_st*  pRoRegs;
+  uint8_t               mdbAddr;
+
+  /* get address on modbus and relative modbus pointer area   */
+  mdbAddr = getLogicalMdbAddrSem();
+  pRoRegs = getRoMdbRegs(mdbAddr);
+  return((char)pRoRegs->scuMapRegInfoVer.hwRev[1]);
+}
+
+/**
+  * @brief  set product serial number  
+  *         
+  * @param  char*: product serial number
+  * @param  uint8_t: length of the product serial number (9 digit --> 9 bytes)
+  * 
+  * @retval none
+  */
+unsigned char  setSerialNumberEeprom(char* key, uint8_t length)
+{
+  uint8_t       locStr[sizeof(infoStation.serial)];
+
+  configASSERT(length <= sizeof(infoStation.serial));  
+
+  memset(&locStr[0], 0, sizeof(infoStation.serial));
+
+  if(length != 0)
+  {
+    /*         destination    source  len         */
+    strncpy((char *)&locStr[0], key, length);
+  }
+
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.serial[0], (uint8_t*)locStr, sizeof(infoStation.serial)));
+
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+/**
+  * @brief  get product serial number  
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string product serial number
+  */
+char*  getProductSerialNumberEeprom(void)
+{
+  return((char*)infoStation.productSn);
+}
+
+
+/**
+  * @brief  set product serial number  
+  *         
+  * @param  uint16_t maximun random delay value set for UK market
+  * 
+  * @retval none
+  */
+unsigned char setMaxRandomDelay(uint16_t delay)
+{
+  uint16_t   locFlag;
+  
+  locFlag = delay;
+
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.maxRandomDelay, (uint8_t*)&locFlag, sizeof(infoStation.maxRandomDelay)));
+ 
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+
+/**
+  * @brief  get product serial number  
+  *         
+  * @param  none
+  * 
+  * @retval char*: pointer string product serial number
+  */
+char*  getMaxRandomDelay(void)
+{
+  char* string = "";
+  sprintf(string, "%u", infoStation.maxRandomDelay);
+
+  return(string);
+}
+
+
+/**
+  * @brief  set update fw result 
+  *         
+  * @param  uint8_t: update firmware status
+  * 
+  * @retval result of operation
+  */
+unsigned char  setEsitoUpdateFw(uint8_t esito)
+{
+  uint8_t   locFlag;
+  
+  locFlag = esito;
+ 
+  if (infoStation.esitoUpdateFw != esito)
+  {
+    /*                               destination                         source                   len   */
+    configASSERT(memCpyInfoSt((uint8_t*)&infoStation.esitoUpdateFw, (uint8_t*)&locFlag, sizeof(infoStation.esitoUpdateFw)));
+  
+    /* save new parameter in EEPROM */
+    return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  }
+  else
+  {
+    return (0);
+  }
+}
+
+/**
+  * @brief  set fake code  
+  *         
+  * @param  uint8_t*: pointer to fake code string 
+  * @param  uint8_t:  string length  
+  * 
+  * @retval result of operation
+  */
+unsigned char  setStationFakeProductCode(char* pCode, uint8_t length)
+{
+  uint8_t       locStr[sizeof(infoStation.fakeProductCode)];
+
+  configASSERT(length <= sizeof(infoStation.fakeProductCode)); 
+   
+  memset(&locStr[0], 0, sizeof(infoStation.fakeProductCode));
+
+  if(length != 0)
+  {
+    /*         destination      source           len         */
+    strncpy((char *)&locStr[0], (char *)pCode, length);
+  }
+
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.fakeProductCode[0], (uint8_t*)locStr, sizeof(infoStation.fakeProductCode)));
+ 
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+/**
+ * @brief  set fake code  
+ *         
+ * @param  uint8_t*: pointer to fake code string 
+ * @param  uint8_t:  string length  
+ * 
+ * @retval result of operation
+ */
+unsigned char  setStationProductCode(char* pCode, uint8_t length)
+{
+  uint8_t       locStr[sizeof(infoStation.productCode)];
+
+  memset(&locStr[0], 0, sizeof(infoStation.productCode));
+
+  configASSERT(length <= sizeof(infoStation.productCode));   
+
+  /*         destination            source */
+  if(length != 0)
+  {
+    /* Check product code validity: must be 204 - 205 or TIC */
+    if ((strncmp (pCode, "204", 3) != 0) && 
+        (strncmp (pCode, "205", 3) != 0) &&
+        (strncmp (pCode, "292", 3) != 0) &&
+        (strncmp (pCode, "281", 3) != 0) &&
+        (strncmp (pCode, "TIC", 3) != 0)) 
+    {
+      return 4;  
+    }
+    /*       destination   source */
+    strncpy((char*)locStr, pCode , length);
+  }
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.productCode[0], (uint8_t*)locStr, sizeof(infoStation.productCode)));
+
+  /* save in EEPROM also  */
+  (void) (WriteOnEeprom(PRD_CODE_EE_ADDRES, (uint8_t*)infoStation.productCode, PRODUCT_CODE_LENGTH));
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+  /**
+    * @brief  get update firmware status  
+    *         
+    * @param  none
+    * 
+    * @retval uint8_t: update firmware result
+    */
+  uint8_t  getEsitoUpdateFw(void)
+  {
+    return infoStation.esitoUpdateFw;
+  }
+
+
+/**
+  * @brief  function to manage schedulation received from Wi-Fi module  
+  *         
+  * @param  none
+  * 
+  * @retval none
+  */
+void scheduleReceivedFromWifi()
+{ 
+  appMapRwRegister_st*  pAppRwRegs;
+  uint8_t               mdbAddr;
+  uint16_t              *ptrToData;
+  sck_schedule_t        scheduleToSaved[4];
+  
+  mdbAddr = getLogicalMdbAddrSem();
+  pAppRwRegs = getAppMdbRwRegs(mdbAddr);
+  ptrToData = (uint16_t*)(&pAppRwRegs->schFlag1);
+  for(uint8_t id=0; id < MAX_SCHEDULATION_NUMBER; id++)
+  {
+    scheduleToSaved[id].id = id;
+    /* schFlag has bit 7 to enable/disable, bit 6 = dom, bit 5 = sab, bit 4 = ven... */
+    scheduleToSaved[id].enable = (*ptrToData) & 0x80;
+    scheduleToSaved[id].days = (*ptrToData) & 0x7F;    
+    scheduleToSaved[id].start_hour = (*(++ptrToData) & 0xFF00) >> 8;
+    scheduleToSaved[id].start_min = (*ptrToData) & 0x00FF;    
+    scheduleToSaved[id].end_hour = (*(++ptrToData) & 0xFF00) >> 8;
+    scheduleToSaved[id].end_min = (*ptrToData) & 0x00FF;
+    scheduleToSaved[id].power = *((int32_t*)(++ptrToData));
+    ptrToData = ptrToData + 2;
+  }
+  saveSchedulation(scheduleToSaved);
+  Scheduler_scheduleCharge(scheduleToSaved);
+}
+
+/**
+  * @brief  -
+  *         
+  * @param  none
+  * 
+  * @retval none
+  */
+void mirror_contact_check_enable(void)
+{
+  
+#ifdef HW_MP28947
+    return;
+#else    
+  ioMngMsg_st   ioExpMsg;
+
+  /* attivazione mirror contact detect   */
+  ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+  ioExpMsg.outRegId = MIRROR_ENA;
+  ioExpMsg.val = (uint8_t)TRUE;
+  while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS);
+#endif  
+  
+}
+
+/**
+  * @brief  -
+  *         
+  * @param  none
+  * 
+  * @retval none
+  */
+void mirror_contact_check_disable(void)
+{
+  
+#ifdef HW_MP28947
+    return;
+#else     
+  ioMngMsg_st   ioExpMsg;
+  //uint8_t       status;
+
+  //status = checkVbusFlag();
+  //if (status == (uint8_t)0)
+  {
+    /* attivazione mirror contact detect   */
+    ioExpMsg.taskEv = IO_EVENT_IO_WRITING;
+    ioExpMsg.outRegId = MIRROR_ENA;
+    ioExpMsg.val = (uint8_t)FALSE;
+    while(xQueueSendToBack(getIoMngQueueHandle(), (void *)&ioExpMsg, ( TickType_t ) 100) != pdPASS);
+  }
+#endif 
+  
+}
+
+/** * @brief  Save Date and TIme received from App, into BKP SRAM area
+  *         
+  * @param  None
+  * 
+  * @retval none
+  */
+void BKP_SRAM_UnixTimestamp_Save (uint32_t Unixtimestamp)
+{
+ 
+  /* Save Unix Timestamp in BKP SRAM region */
+  BKP_SRAM_UnixTimestamp = Unixtimestamp;   
+    
+}
+
+
+/** * @brief  function to set RTC with UTC_DATE_TIME_RW modbus register
+  *         
+  * @param  
+  * 
+  * @retval none
+  */
+void setCurrentTimestamp()
+{
+  //struct DataAndTime_t  recDateTime;
+  struct tm             structUnixTime = {0} ;
+
+  scuRwMapRegister_st*  pRwRegs;
+  uint8_t               mdbAddr, timezoneRam, DSTcurr, DSTram;
+  int16_t               timezone;
+  uint8_t               timezoneEeprom = 0x00; 
+        
+  mdbAddr = getLogicalMdbAddrSem();
+  pRwRegs = getRwMdbRegs(mdbAddr);
+  
+  // Prelevo i dati dalla mappa Modbus
+  memcpy(&structUnixTime.tm_sec, &pRwRegs->scuSetRegister.rtcInf[0], 2); 
+  memcpy(&structUnixTime.tm_min, &pRwRegs->scuSetRegister.rtcInf[2], 2);
+  memcpy(&structUnixTime.tm_hour, &pRwRegs->scuSetRegister.rtcInf[4], 2);
+  memcpy(&structUnixTime.tm_mday, &pRwRegs->scuSetRegister.rtcInf[6], 2);
+  memcpy(&structUnixTime.tm_mon, &pRwRegs->scuSetRegister.rtcInf[8], 2);
+  memcpy(&structUnixTime.tm_year, &pRwRegs->scuSetRegister.rtcInf[10], 2);
+  memcpy(&structUnixTime.tm_wday, &pRwRegs->scuSetRegister.rtcInf[12], 2);
+  
+  uint32_t currentUnixTime = (uint32_t)mktime((struct tm *)&structUnixTime); 
+
+  /* Save Date and Time informations received from App, into BKP SRAM region */
+  /* Save also the checksum */
+  BKP_SRAM_UnixTimestamp_Save(currentUnixTime);    /* Ticket SCU-100 */
+  
+  /* get time zone         */
+  eeprom_param_get(TIME_ZONE_EADD, (uint8_t *)&timezoneRam, 1);
+  /* get abilitazione ora legale      */
+  eeprom_param_get(DST_EADD, (uint8_t *)&DSTram, 1);
+
+  /* Set timezone in Eeprom se diverso */
+  timezone = pRwRegs->scuSetRegister.rtcTimeZone;
+  timezone = timezone / 60;
+  timezoneEeprom = (uint8_t)(timezone);
+  if (timezoneRam != timezoneEeprom)
+  {
+    EEPROM_Save_Config (TIME_ZONE_EADD, (uint8_t*)&timezoneEeprom, 1);
+  }
+  
+  /* Set DST in Eeprom */
+  DSTcurr = pRwRegs->scuSetRegister.rtcInf[16];
+  if (DSTcurr != DSTram)
+  {
+    EEPROM_Save_Config (DST_EADD, (uint8_t*)&DSTcurr, 1);
+  }
+  
+  /* Set new UTC time and update RTC */
+  setDateTimeFromUnixT (currentUnixTime);
+}
+
+/**
+  * @brief  get active energy for EM SCAME product from EEPROM   
+  *         
+  * @param  uint32_t: the active energy offset from EM SCAME
+  * @param  uint8_t: flag read=1 / write=0 
+  * 
+  * @retval  
+  */
+void   setScameActEnergyEepromOffset(uint32_t currActEnergy, uint8_t flagRW, uint8_t flagCharging, uint16_t* pEmFault)
+{
+  uint8_t   result, good;
+
+  good = (uint8_t)TRUE;
+
+#ifdef USE_EEPROM
+  /* check active energy EM SCAME  in reserved area */
+  if (keyActEnrg != (uint8_t)0xA6)
+  {
+    /*         destination            source */
+    ReadFromEeprom(EM_SCAME_KEY_EACT_EE_ADDRES, (uint8_t*)&keyActEnrg, 1);     // recupero key Active energy
+
+    if (keyActEnrg != (uint8_t)0xA6)
+    {
+      keyActEnrg = (uint8_t)0xA6;
+      actEnrgEmScame = (uint32_t)0;
+      /* save on EEPROM active energy value  */
+      result = WriteOnEeprom(EM_SCAME_EACT_EE_ADDRES, (uint8_t*)&actEnrgEmScame, 4);
+      /* save  key */
+      result |= WriteOnEeprom(SN_KEY_EE_ADDRES, (uint8_t*)&keyActEnrg, 1);
+      if (result == osOK)
+      {
+        tPrintf("SCAME EM Act Energy set value done!!\n\r");
+      }
+    }
+  } 
+
+  if (good == (uint8_t)TRUE)
+  {
+    if (flagRW == (uint8_t)1)
+    {
+      /*                   source                         destination*/
+      ReadFromEeprom(EM_SCAME_EACT_EE_ADDRES, (uint8_t*)&actEnrgEmScame, 4);     // recupero total act energy 
+    }
+    else
+    {
+      actEnrgEmScame = currActEnergy;
+      /* save on EEPROM active energy value  */
+      result = WriteOnEeprom(EM_SCAME_EACT_EE_ADDRES, (uint8_t*)&actEnrgEmScame, 4);
+      if (result != osOK)
+      {
+        tPrintf("ERROR saving SCAME EM Act Energy!!\n\r");
+      }
+    }
+  }
+#else
+  int32_t   signedEnergy;
+  uint32_t  deltaE;
+
+
+  /* check active energy EM SCAME  in reserved area */
+  if (emSscameTotEnrg.keyActEnrg != (uint8_t)0xA6)
+  {
+    /*         destination            source */
+    ReadFromEeprom(EM_SCAME_KEY_EACT_EE_ADDRES, (uint8_t*)&emSscameTotEnrg, sizeof(emSscameTotEnrg_st));     // recupero key Active energy
+
+    if (emSscameTotEnrg.keyActEnrg != (uint8_t)0xA6)
+    {
+      emSscameTotEnrg.keyActEnrg = (uint16_t)0xA6;
+      emSscameTotEnrg.actEnrgEmScame = (uint32_t)0;
+      emSscameTotEnrg.keyActEnrgE0 = (uint16_t)0;
+      HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_SCAME_TOTAL_ENRG, emSscameTotEnrg.actEnrgEmScame);
+      emSscameTotEnrg.actEnrgEmScameE0 = (uint32_t)0;
+      result = WriteOnEeprom(EM_SCAME_KEY_EACT_EE_ADDRES, (uint8_t*)&emSscameTotEnrg, sizeof(emSscameTotEnrg_st));
+      if (result != osOK)
+      {
+        tPrintf("ERROR saving Energy!!\n\r");
+      }
+      else
+      {
+        tPrintf("SCAME EM Act Energy set value done!!\n\r");
+      }
+    }
+    else
+    {
+      emSscameTotEnrg.keyActEnrgE0 = (uint16_t)0;
+      emSscameTotEnrg.actEnrgEmScame = HAL_RTCEx_BKUPRead((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_SCAME_TOTAL_ENRG);
+    }
+    good = (uint8_t)FALSE;
+  }
+
+  if ((good == (uint8_t)TRUE) && (flagCharging == TRUE))
+  {
+    if (flagRW == (uint8_t)0)
+    {
+      signedEnergy = (int32_t)currActEnergy;
+      if (signedEnergy > 0)
+      {
+        if (emSscameTotEnrg.keyActEnrgE0 == (uint16_t)0)
+        {
+          emSscameTotEnrg.keyActEnrgE0 = (uint16_t)0xA6;
+          emSscameTotEnrg.actEnrgEmScameE0 = currActEnergy;
+        }
+        if (currActEnergy > emSscameTotEnrg.actEnrgEmScameE0)
+        {
+          deltaE = (uint32_t)currActEnergy - (uint32_t)emSscameTotEnrg.actEnrgEmScameE0;
+          if (((deltaE >= MIN_DELTA_ENRG_VALID) && (deltaE <= MAX_DELTA_ENRG_VALID)) || (*pEmFault == (uint16_t)TRUE))
+          {
+            /* if  *pEmFault is TRUE we come back from a period where no energy has been read, so the current deltaE */
+            /* could be more then MAX_DELTA_ENRG_VALID  (path per Romania)                                           */
+            *pEmFault = (uint16_t)FALSE;  /* reset emFault error */
+            /* we consider only delta energy in the range 10- 100Wh */
+            emSscameTotEnrg.actEnrgEmScame += deltaE;
+            HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_SCAME_TOTAL_ENRG, emSscameTotEnrg.actEnrgEmScame);
+            /* set new E0 reference energy */
+            emSscameTotEnrg.actEnrgEmScameE0 = currActEnergy;
+          }
+          else
+          {
+            if (deltaE > MAX_DELTA_ENRG_VALID)
+            {
+              /* set new E0 reference energy  if the deltaE is over upper limit 11/09/2024 (for Romania, I hope solve fail on increasing energy)*/
+              emSscameTotEnrg.actEnrgEmScameE0 = currActEnergy;
+            }
+          }
+        }
+        else
+        {
+          /* the SCAME EM resetted? Set the new E0 reference to current value */
+          emSscameTotEnrg.actEnrgEmScameE0 = currActEnergy;
+        }
+      }
+    }
+    else
+    {
+      emSscameTotEnrg.keyActEnrgE0 = (uint16_t)0;
+    }
+  }
+
+#endif
+}
+
+/**
+  * @brief  save active energy for EM SCAME product on EEPROM   
+  *         
+  * @param  none
+  * 
+  * @retval  
+  */
+void   saveScameActEnergyEeprom(void)
+{  
+  if (emSscameTotEnrg.keyActEnrg == (uint8_t)0xA6)
+  {
+    WriteOnEeprom(EM_SCAME_KEY_EACT_EE_ADDRES, (uint8_t*)&emSscameTotEnrg, sizeof(emSscameTotEnrg_st));
+  }
+}
+
+/**
+  * @brief  get active energy for EM SCAME product   
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: the active energy offset from EM SCAME 
+  */
+uint32_t  getScameActEnergyOffset(void)
+{
+  return(emSscameTotEnrg.actEnrgEmScame);
+}
+
+/**
+  * @brief  reset the key for energy meter at start    
+  *         
+  * @param  none
+  * 
+  * @retval none 
+  */
+void  resetScameActEnergyE0Key(void)
+{
+  emSscameTotEnrg.keyActEnrgE0 = (uint16_t)0;
+}
+    
+
+/** * @brief  function to detect stack overflow in some task   
+  *         
+  * @param  
+  * 
+  * @retval none
+  */
+void 	vApplicationStackOverflowHook(TaskHandle_t xTask, signed char* pcTaskName )
+{
+  tPrintf("Stack overflow on task: %s\n\r", pcTaskName);
+}
+
+/**
+  * @brief  get condition for sinapsi activation (to recovery 4.1.6 and 4.1.7 FW error on PM enabling from APP)   
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: TRUE if SINAPSI must be re-enabled  
+  */
+uint8_t  getSinapsiNewEnable(void)
+{
+#ifdef SOSPESA
+  /* genera ogni tanto una attivazione errata della flag SINAPSI */
+  uint8_t pmFlag, sinapsiFlag, retSinapsiFlag, sinapsiOldSet;
+
+  retSinapsiFlag = FALSE;
+  /* get power manager enabling  flag                          */
+  eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t*)&pmFlag, 1);
+  sinapsiFlag = (pmFlag & HIDDEN_MENU_SINAPSI);
+  pmFlag &= HIDDEN_MENU_PMNG_ENB;
+  
+
+  if ((pmFlag == HIDDEN_MENU_PMNG_ENB) && (sinapsiFlag != HIDDEN_MENU_SINAPSI))
+  {
+    /* power management is enabled and sinapsi disable: check if sinapsi has been set in the production   */
+    sinapsiOldSet = getStationSinapsiRS485Error();
+    if (sinapsiOldSet != (uint8_t)0xFF)
+    {
+      /* a bug in the previous FW has resetted the SINAPSI flag, so it must be re-enabled */
+      retSinapsiFlag = TRUE;
+      /* and save it in the EEPROM */
+      pmFlag |= HIDDEN_MENU_SINAPSI;
+      /* save PM and SINAPSI enable flag *****/
+      eeprom_param_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&pmFlag, 1);
+    }
+  }
+  return(retSinapsiFlag);
+#else
+  return(FALSE);
+#endif
+}
+
+/**
+  * @brief  check if the variation is over a fixed delta   
+  *         
+  * @param  uint32_t: new value
+  * @param  uint32_t: old value
+  * @param  uint32_t: delta value
+  * 
+  * @retval uint8_t: TRUE if the absolute difference is over the delta 
+  */
+static uint8_t  absDiff(uint32_t newVal, uint32_t oldVal, uint32_t delta)
+{
+  uint32_t deltaVal;
+
+  if (newVal >= oldVal) deltaVal = newVal - oldVal; else  deltaVal = oldVal - newVal;
+
+  if (deltaVal >= delta) return(TRUE); else return (FALSE); 
+}
+
+/**
+  * @brief  set id session    
+  *         
+  * @param  uint32_t: session identifier 
+  * 
+  * @retval none
+  */
+void saveSessionId (uint32_t sessId)
+{ 
+  uint32_t   locFlag;
+  
+  locFlag = sessId;
+
+  /*                               destination                         source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.sessionIdNum, (uint8_t*)&locFlag, sizeof(infoStation.sessionIdNum)));
+
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+   
+/**
+  * @brief  get id session    
+  *         
+  * @param  none 
+  * 
+  * @retval uint16_t: current session identifier 
+  */
+uint32_t recoverySessionId (void)
+{
+  return(infoStation.sessionIdNum);
+}
+   
+/**
+  * @brief  send a message to download manager     
+  *         
+  * @param  messageEv_e: event identifier 
+  * 
+  * @retval none
+  */
+void sendDownloadMsg (messageEv_e eventMsg)
+{
+  headerFrameSbcRx_st   headerFrameSbcRx;
+
+  headerFrameSbcRx.messageEv = eventMsg;
+  configASSERT(xQueueSendToBack(getScuGsyDwldQueueHandle(), (void *)&headerFrameSbcRx, portMAX_DELAY) == pdPASS);  // scuGsyDwldTask()
+}
+
+/**
+  * @brief  set the number of socket inside the product (from fakeCode)  
+  *         
+  * @param  uint8_t: number of socket 
+  * 
+  * @retval operation result
+  */
+unsigned char setNumSocketFromFakeCode(uint8_t num)
+{
+  uint8_t semFlag;
+
+  /* read current value for SEM Flags */
+  eeprom_param_get(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);
+  semFlag &= (~SCU_SKT_NUM_MASK);
+
+  semFlag |= ((num & (((uint8_t)SCU_SKT_NUM_MASK) >> 1)) << 1);
+  /* read current value for SEM Flags */
+  // xx eeprom_array_set(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);    
+  return EEPROM_Save_Config(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);
+}
+
+/**
+  * @brief  get the counter zero crossing   
+  *         
+  * @param  none 
+  * 
+  * @retval uint16_t: number of zero crossing detected 
+  */
+uint16_t getCounterZC (void)
+{
+  return(infoV230.edgeCounter);
+}
+
+/**
+  * @brief  set initial value for active energy for EM SCAME product    
+  *         
+  * @param  uint32_t: the active energy offset from EM SCAME
+  * @param  uint8_t: flag read=1 / write=0 
+  * 
+  * @retval  
+  */
+void   setScameInitActEnergy(void)
+{
+  uint8_t   result;
+
+
+  emSscameTotEnrg.keyActEnrg = (uint16_t)0xA6; 
+  emSscameTotEnrg.actEnrgEmScame = (uint32_t)0;
+  emSscameTotEnrg.keyActEnrgE0 = (uint16_t)0;
+  HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), BACKUP_SCAME_TOTAL_ENRG, emSscameTotEnrg.actEnrgEmScame);
+  emSscameTotEnrg.actEnrgEmScameE0 = (uint32_t)0;
+  result = WriteOnEeprom(EM_SCAME_KEY_EACT_EE_ADDRES, (uint8_t*)&emSscameTotEnrg, sizeof(emSscameTotEnrg_st));
+  if (result != osOK)
+  {
+    tPrintf("ERROR saving Energy!!\n\r");
+  }
+  else
+  {
+    tPrintf("SCAME EM Act Energy set value done again!!\n\r");
+  }
+}
+
+/**
+  * @brief  checksum calculation for infoStation structure     
+  *         
+  * @param  uint8_t*: pointer to start structure 
+  * 
+  * @retval uint32_t: the checksum  
+  */
+uint32_t findInfoStationCheksum(uint8_t* pInfoSt)
+{
+  uint32_t  val;
+  uint16_t  i;
+  uint8_t*  pTag1;
+
+  for(i = 0, val = 0, pTag1 = pInfoSt; i < sizeof(infoStation_t) - sizeof(infoStation.checksum); i++)
+  {
+    val += pTag1[i]; 
+  }
+  return(val);
+}
+
+/**
+  * @brief  save in infoStation structures the timeout value from EV to EVSE    
+  *         
+  * @param  uint32_t: timeout value  
+  * 
+  * @retval none
+  */
+void saveTimeoutRange1 (uint16_t toVal)
+{ 
+  toRange1_s   locToRange1;
+  
+  locToRange1.timeRangeVal = toVal;
+  locToRange1.keyValue = KEY_FOR_INFO_VALID;
+
+  /*                               destination                         source                       len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.toRange1, (uint8_t*)&locToRange1, sizeof(infoStation.toRange1)));
+
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  store infoStation structure     
+  *         
+  * @param  uint8_t*: pointer to start structure in protected area
+  * @param  uint8_t*: pointer to structure field to be copied
+  * @param  uint16*:  lenght field to be copied
+  * 
+  * @retval uint8_t:  1 for successfully  
+  */
+uint8_t memCpyInfoSt(uint8_t* pInfoSt, uint8_t* pData, uint16_t lenField)
+{
+  uint16_t        lenExpected, lenName;
+  uint32_t        currCks;
+  uint8_t         resultOk;
+  infoStation_t*  pLocInfoStation;
+
+  resultOk = TRUE; lenName = lenExpected = (uint16_t)0xFFFF;
+  pLocInfoStation = (infoStation_t*)&infoStation;
+  
+  if ((void*)&infoStation == (void*)pInfoSt) {lenExpected = sizeof(infoStation_t); lenName = sizeof(infoStation.name);}
+  else if ((void*)&infoStation.serial[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.serial);
+  else if ((void*)&infoStation.firmware[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.firmware);
+  else if ((void*)&infoStation.wiring == (void*)pInfoSt) lenExpected = sizeof(infoStation.wiring);
+  else if ((void*)&infoStation.max_current == (void*)pInfoSt) lenExpected = sizeof(infoStation.max_current);
+  else if ((void*)&infoStation.max_currentSemp == (void*)pInfoSt) lenExpected = sizeof(infoStation.max_currentSemp);
+  else if ((void*)&infoStation.emTypeInt == (void*)pInfoSt) lenExpected = sizeof(infoStation.emTypeInt);
+  else if ((void*)&infoStation.emTypeExt == (void*)pInfoSt) lenExpected = sizeof(infoStation.emTypeExt);
+  else if ((void*)&infoStation.evs_mode == (void*)pInfoSt) lenExpected = sizeof(infoStation.evs_mode);
+  else if ((void*)&infoStation.modePwr == (void*)pInfoSt) lenExpected = sizeof(infoStation.modePwr);
+  else if ((void*)&infoStation.pmModeEn == (void*)pInfoSt) lenExpected = sizeof(infoStation.pmModeEn);
+  else if ((void*)&infoStation.pmUnbalEn == (void*)pInfoSt) lenExpected = sizeof(infoStation.pmUnbalEn);
+  else if ((void*)&infoStation.batteryBackup == (void*)pInfoSt) lenExpected = sizeof(infoStation.batteryBackup);
+  else if ((void*)&infoStation.v230MonFlag == (void*)pInfoSt) lenExpected = sizeof(infoStation.v230MonFlag);
+  else if ((void*)&infoStation.auth.user == (void*)pInfoSt) {
+    if (lenField == sizeof(infoStation.auth.user)) lenExpected = sizeof(infoStation.auth.user);
+    else if (lenField == sizeof(infoStation.auth)) lenExpected = sizeof(infoStation.auth);
+  } else if ((void*)&infoStation.auth.pass == (void*)pInfoSt) lenExpected = sizeof(infoStation.auth.pass);
+  else if ((void*)&infoStation.auth.auth_state == (void*)pInfoSt) lenExpected = sizeof(infoStation.auth.auth_state);
+  else if ((void*)&infoStation.scheds[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.scheds);
+  else if ((void*)&infoStation.key == (void*)pInfoSt) lenExpected = sizeof(infoStation.key);
+  else if ((void*)&infoStation.reserved[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.reserved);
+  else if ((void*)&infoStation.userPin[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.userPin);
+  else if ((void*)&infoStation.routerSsid[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.routerSsid);
+  else if ((void*)&infoStation.routerPass[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.routerPass);
+  else if ((void*)&infoStation.installerPin[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.installerPin);
+  else if ((void*)&infoStation.socketActivatedFlag == (void*)pInfoSt) lenExpected = sizeof(infoStation.socketActivatedFlag);
+  else if ((void*)&infoStation.bootEvent == (void*)pInfoSt) lenExpected = sizeof(infoStation.bootEvent);
+  else if ((void*)&infoStation.productSn[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.productSn);
+  else if ((void*)&infoStation.maxRandomDelay == (void*)pInfoSt) lenExpected = sizeof(infoStation.maxRandomDelay);
+  else if ((void*)&infoStation.esitoUpdateFw == (void*)pInfoSt) lenExpected = sizeof(infoStation.esitoUpdateFw);
+  else if ((void*)&infoStation.antennaPresence == (void*)pInfoSt) lenExpected = sizeof(infoStation.antennaPresence);
+  else if ((void*)&infoStation.sinapsiRS485Errors == (void*)pInfoSt) lenExpected = sizeof(infoStation.sinapsiRS485Errors);
+  else if ((void*)&infoStation.keyForRestoreModule == (void*)pInfoSt) lenExpected = sizeof(infoStation.keyForRestoreModule);
+  else if ((void*)&infoStation.restoreModule == (void*)pInfoSt) lenExpected = sizeof(infoStation.restoreModule);
+  else if ((void*)&infoStation.productCode[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.productCode);
+  else if ((void*)&infoStation.fakeProductCode[0] ==(void*)pInfoSt) lenExpected = sizeof(infoStation.fakeProductCode);
+  else if ((void*)&infoStation.sessionIdNum == (void*)pInfoSt) lenExpected = sizeof(infoStation.sessionIdNum);
+  else if ((void*)&infoStation.channelId == (void*)pInfoSt) lenExpected = sizeof(infoStation.channelId);
+  else if ((void*)&infoStation.toRange1 == (void*)pInfoSt) lenExpected = sizeof(infoStation.toRange1);
+  else if ((void*)&infoStation.passWebServiceHash == (void*)pInfoSt) lenExpected = sizeof(infoStation.passWebServiceHash);
+  else if ((void*)&infoStation.passWebWiFiHash == (void*)pInfoSt) lenExpected = sizeof(infoStation.passWebWiFiHash);
+  else if ((void*)&infoStation.startTimeWebCollaudo == (void*)pInfoSt) lenExpected = sizeof(infoStation.startTimeWebCollaudo);
+  else if ((void*)&infoStation.confDataAndPassStatus == (void*)pInfoSt) lenExpected = sizeof(infoStation.confDataAndPassStatus);
+  else if ((void*)&infoStation.checksum == (void*)pInfoSt) lenExpected = sizeof(infoStation.checksum);
+  
+  if ((lenExpected == (uint16_t)0xFFFF) || ((lenExpected != lenField) && (lenField != lenName)))
+  {
+    /* an error occurred  */
+    resultOk = FALSE;
+  }
+  else
+  {
+    if (infoStation.key == KEY_FOR_INFOSTATION_VX)
+    {
+      currCks = findInfoStationCheksum((uint8_t*)pLocInfoStation);
+      configASSERT(currCks == infoStation.checksum);   
+    }
+    /*** suspend protection area to set checksum and new data in the structure ***/
+    /* Disable MPU */
+    HAL_MPU_Disable();
+    /*       destination       source            Len  */
+    memcpy((void*)pInfoSt, (void*)pData, (size_t)lenField);
+    /* check the integrity for somestructure  field  */
+    //configASSERT(Data_Integrity_Check(ON_ALL_DATA) == NO_ERROR_ON_SRAM_DATA)
+    /** if all OK the checksum is attached  */
+    currCks = findInfoStationCheksum((uint8_t*)pLocInfoStation);
+    /* set new checksum   */
+    pLocInfoStation->checksum = currCks;
+   /* Enable MPU */
+//    HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+    /*** restored protection area to avoid any writing in this area outside this contest  ***/
+  }
+  return(resultOk);
+}
+
+/**
+  * @brief  reset all spare area protected by MPU     
+  *         
+  * @param  none
+  * 
+  * @retval none  
+  */
+static void resetSpareMpuArea(void)
+{
+  /* Disable MPU */
+  HAL_MPU_Disable();
+  memset(infoStationSpareArray, 0, sizeof(infoStationSpareArray));
+ /* Enable MPU */
+  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+}
+
+/**
+  * @brief  reset all spare area protected by MPU     
+  *         
+  * @param  none
+  * 
+  * @retval none  
+  */
+uint8_t Get_RST_Origin (void)
+{
+  uint8_t x = 0;
+  
+  if (LL_RCC_IsActiveFlag_SFTRST() != (uint32_t)0) 
+    x = 3;
+  if (LL_RCC_IsActiveFlag_IWDGRST() != (uint32_t)0) 
+    x = 2; 
+  if (LL_RCC_IsActiveFlag_PORRST() != (uint32_t)0) 
+    x = 1;
+  if (LL_RCC_IsActiveFlag_PINRST() != (uint32_t)0) 
+    x = 0;
+      
+  return x;
+}
+
+/**
+  * @brief  get stations start collaudo web server time   
+  *         
+  * @param  none
+  * 
+  * @retval uint32_t: collaudo start web unix time  
+  */
+uint32_t  getStationStartTimeWebCollaudo(void)
+{
+  return(infoStation.startTimeWebCollaudo);
+}
+    
+/**
+  * @brief  set the time of first access on collaudo account    
+  *         
+  * @param  uint32_t: unixtime at the first access 
+  * 
+  * @retval none
+  */
+void saveStartTimeWebCollaudo (uint32_t unixTimeSession)
+{ 
+  uint32_t   locFlag;
+  
+  locFlag = unixTimeSession;
+
+  /*                               destination                               source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.startTimeWebCollaudo, (uint8_t*)&locFlag, sizeof(infoStation.startTimeWebCollaudo)));
+
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+   
+/**
+  * @brief  check if developer password is correct or wrong   
+  *         
+  * @param  char*:    pointer to password string
+  * @param  uint16_t: length of to password string
+  * 
+  * @retval access_e: ACCESS_ALLOWED  / ACCESS_DENIED  
+  */
+access_e  checkSviluper(char* pPassString, uint16_t length)
+{
+  char      expectedPass[16];
+  uint32_t  len;
+  struct    DataAndTime_t*  pDataTime;
+
+  if (length > sizeof(expectedPass))
+  {
+    return(ACCESS_DENIED); 
+  }
+
+  pDataTime =  getCurrentLocalTime(&len);
+
+  len = (uint16_t)sprintf(expectedPass, "Clu%02dso%02dne%02d@", pDataTime->Day, pDataTime->Month, pDataTime->Hour);
+
+  if ((strncmp(expectedPass, pPassString, (size_t)length) == 0) && (length == (uint16_t)len))
+  {
+    return(ACCESS_ALLOWED); 
+  }
+  return(ACCESS_DENIED); 
+}
+
+/**
+  * @brief  check if service password is correct or wrong   
+  *         
+  * @param  char*:    pointer to password string
+  * @param  uint16_t: length of to password string
+  * 
+  * @retval access_e: ACCESS_ALLOWED / ACCESS_DENIED 
+  */
+access_e  checkServicePassword(char* pPassString, uint16_t length)
+{
+  uint32_t      hashServicePassword;
+
+  hashServicePassword = (uint32_t)crcEvaluation ((uint8_t*)pPassString, length);
+
+  if (infoStation.passWebServiceHash == hashServicePassword)
+  {
+    return(ACCESS_ALLOWED);
+  }
+  return(ACCESS_DENIED);
+}
+
+/**
+  * @brief  check if all config data (serial number, tec code,...) and password has been set   
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: TRUE if all info are present 
+  */
+uint8_t  allConfDataAndPassword(void)
+{
+  if ((infoStation.confDataAndPassStatus & CONF_DATA_AND_PASSWORD_MASK) == CONF_DATA_AND_PASSWORD_OK)
+  {
+    return(TRUE);
+  }
+#ifdef SOSPESA_DA_DEFINIRE_NICK
+  return(FALSE);
+#else
+  return(TRUE);
+#endif
+}
+
+/**
+  * @brief  save the flag to notify Serial number received   
+  *         
+  * @param  none
+  * 
+  * @retval uint8_t: 0 when successfull write, error code otherwise  
+  */
+uint8_t  setSerialReceivedFlag(void)
+{
+  uint16_t      locConfDataAndPassStatus;
+
+  locConfDataAndPassStatus = ((infoStation.confDataAndPassStatus & (~CONF_DATA_OK_MASK)) | CONF_DATA_OK);
+  /*                               destination                            source                   len   */
+  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.confDataAndPassStatus, (uint8_t*)&locConfDataAndPassStatus, sizeof(infoStation.confDataAndPassStatus)));
+
+  /* save new parameter in EEPROM */
+  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+}
+
+/**
+  * @brief  Set in the option byte the read protection level    
+  *         
+  * @param  none
+  * 
+  * @retval none  
+  */
+void setRplOptionByte(uint8_t rdpLevel)
+{
+  FLASH_OBProgramInitTypeDef OBInit;
+
+  __disable_irq();
+
+  /* Get Option Byte Configuration */
+  HAL_FLASHEx_OBGetConfig(&OBInit);
+  /* Allow Access to option bytes sector */
+  HAL_FLASH_OB_Unlock();
+  /* Allow Access to Flash control registers and user Flash */
+  HAL_FLASH_Unlock();
+  /* Check Read Protection Level status */
+  if (OBInit.RDPLevel == OB_RDP_LEVEL_0) 
+  {
+    /* Enable Protection Level 1
+     * Read protection of memories (debug features limited)
+     * */
+    //OBInit.RDPLevel = OB_RDP_LEVEL_1;
+    OBInit.RDPLevel = (uint32_t)rdpLevel;
+    HAL_FLASHEx_OBProgram(&OBInit);
+    /* Start the Option Bytes programming process */
+    if (HAL_FLASH_OB_Launch() != HAL_OK)
+    {
+      /* User can add here some code to deal with this error */
+      while (1)
+      {
+      }
+    }
+  }
+  /* Prevent Access to option bytes sector */
+  HAL_FLASH_OB_Lock();
+  /* Disable the Flash option control register access
+   * (recommended to protect the option Bytes against possible unwanted operations)
+   * */
+  HAL_FLASH_Lock();
+  /* Get Option Byte Configuration  */
+  HAL_FLASHEx_OBGetConfig(&OBInit);
+
+}
+
+/**
+  * @brief  Station_Cfg_Update  
+  *         
+  *   Update station config informations in RAM ( infoStation )
+  *         
+  * @param  Addr where to store data - Data to store
+  * 
+  * @retval none
+  */
+
+void Station_Cfg_Update (uint8_t EEpromAddr, infoStation_t* pCfgData, uint8_t* pData)
+{
+    uint8_t tmp;
+    char *ptr;
+
+    switch (EEpromAddr)
+    {
+        case RS485_ADD_EADD:                    /* AGGIUNGERE PARAMETRO IN INFOSTATION !!!*/
+            /* Update RS485 address */
+            scuAddr = *pData;
+            /* Check RS485 address */
+            if (scuAddr == (SCU_S_REPL_ADDR - 1))
+            {
+                /* jolly SCU has display number 99 but logic reference is 16 */
+                scuAddr = RS485_ADD_MAX;
+            }
+            break;
+
+        case SOCKET_TYPE_EADD:
+            /* Update socket information  */
+            pCfgData->wiring = (sck_wiring_e) *pData;
+            break;
+
+        case M3T_CURRENT_EADD:
+            pCfgData->max_current = (int32_t) *pData * 1000;
+            break;
+
+        case M3S_CURRENT_EADD:
+            pCfgData->max_currentSemp = (int32_t) *pData * 1000;
+            break;
+
+        case EVS_MODE_EADD:
+            pCfgData->evs_mode = (evs_mode_en) *pData;
+            break;
+
+        case HIDDEN_MENU_ENB_EADD:
+            pCfgData->pmModeEn = (*pData & HIDDEN_MENU_PMNG_ENB);
+            break;
+
+        case PMNG_UNBAL_EADD:
+            pCfgData->pmUnbalEn = (power_management_unbal_en) *pData;
+            break;
+
+        case BATTERY_CONFIG_EADD:
+            pCfgData->batteryBackup = (batteryBackup_e) *pData;
+            break;
+
+        case SERNUM_BYTE0_EADD:
+            // point to Serial number
+            ptr = (char*)pCfgData->serial;
+            /*       destination       source     normLen  */
+            memcpy((void*)ptr, (void*)"FFFFFFFFF", (size_t)8);
+            if (*(pData + 3) != 0xFF)
+            {
+                ptr[1] = (*pData & 0x0F) + '0';
+                ptr[0] = ((*pData >> 4) & 0x0F) + '0';
+            }
+            if (*(pData + 2) != 0xFF)
+            {
+                ptr[3] = (*(pData + 1) & 0x0F) + '0';
+                ptr[2] = ((*(pData + 1) >> 4) & 0x0F) + '0';
+            }
+            if (*(pData + 1) != 0xFF)
+            {
+                ptr[5] = (*(pData + 2) & 0x0F) + '0';
+                ptr[4] = ((*(pData + 2) >> 4) & 0x0F) + '0';
+            }
+            if (*pData != 0xFF)
+            {
+                ptr[7] = (*(pData + 3) & 0x0F) + '0';
+                ptr[6] = ((*(pData + 3) >> 4) & 0x0F) + '0';
+            }
+            break;
+
+        default:
+            break;  
+
+    }
+
+    /* set station V230 control from CONTROL_BYTE1_EADD bit  VBUS_CRL1  */
+    eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t*)&tmp, 1);
+    tmp = (((uint8_t)tmp & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
+    pCfgData->v230MonFlag = (statusFlag_e)tmp;
+
+    if (pCfgData->channelId < WIFI_AP_MIN_CHANNEL_ID || pCfgData->channelId > WIFI_AP_MAX_CHANNEL_ID)
+        pCfgData->channelId = WIFI_AP_MIN_CHANNEL_ID;
+
+    /* get wifi enable flag  from LCD_TYPE_EADD   */
+    eeprom_param_get(LCD_TYPE_EADD, (uint8_t*)&tmp, 1);
+    /* set the operating mode between WiFi and SBC */
+    if ((tmp & SBC_WIFI_MASK) == SBC_WIFI_ON)
+        setWifiSbcEnv(SBC_WIFI_ON);
+    else
+        setWifiSbcEnv(SBC_WIFI_OFF);
+
+    /*         destination       source */
+    strcpy((char*)pCfgData->firmware, (char*)getFwVer());
+    strcat((char*)pCfgData->firmware, (char*)" ");
+    strcat((char*)pCfgData->firmware, (char*)getScuHWverFromEeprom());
+    /*                                             destination                             source           5 = len("Vw.ya" or "Vw.y\0")   */
+    memcpy((void*)(((fwInfoVersion_u*)pCfgData->firmware)->fwBootVer.bootVer), (void*)BOOT_ADDR_VER, (size_t)BOOT_VER_SIZE + 1);
+
+    /* write updated parameters on EEPROM  (eeprom_param_array & Infostation) */
+    /* Update full infostation structure in EEPROM */
+    WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&pCfgData, sizeof(pCfgData));
+    tPrintf("Infostation data updated!\n\r");
+    EVLOG_Message(EV_INFO, "Infostation data updated!");
+
+    /* Check if a different default value (oxFF) is on productSn, productCode, fakeProductCode 
+       Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
+    SRAM_Check_DEFAULT_of_Code();
+
+    /* Reinit modbus registers according to the new settings */
+    initModbusRegisters();
+
+}
+
+/*************** END OF FILE ******************************************************************************************/
+

@@ -1,0 +1,52 @@
+<!DOCTYPE HTML PUBLIC "-//W3C/DTD HTML 4.0 Transitional//EN">
+<html>
+<link rel="icon" type="image/png" href="graphics/logoSCAME.png">
+<head>
+    <META HTTP-EQUIV = "Pragma" CONTENT="no-cache">
+    <title> SCAME Login Page </title>
+    <script language="JavaScript">
+    function ModuloValido(user, pass){
+      valido = false;
+      if (( user != ""))
+      {
+        valido = true;
+      }
+      if (valido)
+      {
+        modulo.submit();
+      }
+      else
+      {
+        alert("User is undefined!")
+      }
+      return;
+      }
+    function mngPassword() {
+      var x = document.getElementById("myPsw");
+      if (x.type === "password") {
+        x.type = "text";
+      } else {
+        x.type = "password";
+      }
+    }
+    </script>
+</head>
+  <body bgcolor="#FF665E"> 
+    <h2 style="margin-left: 78pt">You must login to access at system management</h2>
+    <FORM METHOD=POST ACTION="/checklog.cgi" autocomplete="off">
+      <p style="margin-left: 78pt">
+        <font size="3"> <strong> Enter user ID and password: </strong></font>
+        <BR> 
+        <BR> 
+        <strong> User ID</strong> <input autofocus type="text" size="20" name="username" value="" autocomplete="off">
+        <input name = "DummyUsr" type="text" style="display:none;" id="myUsr">
+        <strong> Password </strong>  <input type="password" size="20" name="password" value="" autocomplete="new-password" id="myPsw">
+        <BR>
+        <BR>
+        <input style="margin-left: 150pt; height:50px; width:110px" type="submit" name="login" value="Login" onclick="ModuloValido(username.value, password.value)">
+        <input type="checkbox" onclick="mngPassword()" id="myckb">Show Password
+      </p>
+    </form>
+
+  </body>
+</html>

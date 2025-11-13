@@ -1,0 +1,28 @@
+C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\FULL_DEBUG_GD32F4xx\BrowseInfo\FreeRTOS_4809373609813369194.dir\tasks.pbi: \
+  C:\iar\ewarm-9.60.3\arm\inc\c\stdlib.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\ycheck.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\yvals.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\DLib_Defaults.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\DLib_Config_Full.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\DLib_Product.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\ysizet.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\DLib_Product_stdlib.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\string.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\DLib_Product_string.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\include\FreeRTOS.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\stddef.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\stdint.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Inc\FreeRTOSConfig.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\include\projdefs.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\include\portable.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\include\deprecated_definitions.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\portable\IAR\ARM_CM7\r0p1\portmacro.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\aarch32\intrinsics.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\aarch32\iccarm_builtin.h \
+  C:\iar\ewarm-9.60.3\arm\inc\c\aarch32\iar_intrinsics_common.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\include\mpu_wrappers.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\include\task.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\include\list.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\include\timers.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\EWARM\..\Middlewares\Third_Party\FreeRTOS\Source\include\stack_macros.h \
+  C:\Progetti\SVN_Repos\Develop\SCAME_CONTROL_UNIT\trunk\Middlewares\Third_Party\FreeRTOS\Source\tasks.c

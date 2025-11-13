@@ -1,0 +1,565 @@
+ /**
+* @file        main.h
+*
+* @brief       main program for SCU  - Definition -
+*
+* @author      Nick
+*
+* @riskClass   C 
+*
+* @moduleID  
+*
+* @vcsInfo
+*     $Id: main.h 768 2025-06-12 16:36:34Z npiergi $
+*
+*     $Revision: 768 $
+*
+*     $Author: npiergi $
+*
+*     $Date: 2025-06-12 18:36:34 +0200 (gio, 12 giu 2025) $
+*
+*
+* @copyright
+*       Copyright (C) 2020 SCAME S.p.A. All rights reserved.
+*       This file is copyrighted and the property of Aesys S.p.A.. It contains confidential and proprietary
+*       information. Any copies of this file (in whole or in part) made by any method must also include a copy of this
+*       legend.
+*       Developed by:  SCAME S.p.A.
+***********************************************************************************************************************/
+
+
+/* Define to prevent recursive inclusion -------------------------------------*/
+#ifndef __MAIN_H
+#define __MAIN_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Includes ------------------------------------------------------------------*/
+  
+#ifdef GD32F4xx   
+#include "stm32f4xx_periph_init.h"
+#include "stm32f4xx_hal.h"
+#else   
+#include "stm32h5xx_periph_init.h"
+#include "stm32h5xx_hal.h"
+#endif
+  
+#include "ExtFlash.h"
+
+
+#ifdef GD32F4xx  
+#define     ACTIVE_IWDG         1
+  
+#ifdef HW_MP28947  
+#define     EXCLUDE_ETHERNET  // UNCOMMENT TO EXCLUDE ETH FUNCTIONALITY --> 
+#endif  
+  
+#endif  
+  
+#define     ORIGIN_ADDRESS      ((uint32_t)0x08000000)
+#define     OFFSET_INFOFW_ADD   ((uint32_t)0x0000D000)
+
+#define     MICRO_FLASH_SIZE    ((uint32_t)0x00080000) 
+#define     SECTOR_BOOT_SIZE    ((uint32_t)0x00008000)
+#define     FW_OFFSET_ADDRESS   SECTOR_BOOT_SIZE
+#define     FW_INFO_MAX_LEN     ((uint16_t)64)
+#define     FW_MAX_LEN          ((uint32_t)(MICRO_FLASH_SIZE - SECTOR_BOOT_SIZE))
+
+#ifndef GD32F4xx 
+#define     FW_CHECK_STR			  "SCAME_FW" /* IL TAG DEVE ESSERE DI 8 CARATTERI! */
+/**  Numero massimo di settori per il boot del nostro micro STM32F746VE 100pin 512K con settori da 32  +  32+32+32+128+256 */
+/**                                                                                              BOOT  + (  code          )*/
+#define     SECTOR_FOR_BOOT     ((uint32_t)1)
+#else
+#define     FW_CHECK_STR			  "SCAME_GD" /* IL TAG DEVE ESSERE DI 8 CARATTERI! */
+// Numero massimo di settori per il  micro GD32F470VET 100pin 1M con settori da 16+16  +    16+16+64+128+128+128+128+128+128+128 */
+/**                                                                              BOOT  + (  code                                )*/
+#define     SECTOR_FOR_BOOT     ((uint32_t)2)
+#endif
+
+#define     BOOT_CHECK_STR			"BSCU"      /* IL TAG DEVE ESSERE DI 4 CARATTERI! */
+
+typedef __packed struct 
+{  
+  uint32_t            fwCheksum;
+  uint8_t             strCheck[16];         
+  uint8_t             fwVersion[16];         
+  uint32_t            offsetAddress;
+  uint32_t            fwLen;
+}infoNewFw_st;
+
+typedef __packed union
+{
+  uint8_t               fwInfoArray[FW_INFO_MAX_LEN];
+  infoNewFw_st          infoNewFw;
+} infoFw_u;
+
+#define     OFFSET_CK_ADDRESS     	(OFFSET_INFOFW_ADD)  
+#define     CHECKSUM_ADDRESS        ((uint32_t)((uint32_t)ORIGIN_ADDRESS + OFFSET_CK_ADDRESS))
+#define     INFO_FOR_FW_UPDATE_ADDR CHECKSUM_ADDRESS
+#define     FW_VERSION_ADDRESS    	((uint32_t)(CHECKSUM_ADDRESS + (uint32_t)20)) /* 20 = sizeof(infoNewFw_st.fwCheksum) + sizeof(infoNewFw_st.strCheck)*/
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**           LOCAL MACROS, TYPEDEF, STRUCTURE, ENUM                         **
+**                                                                          **
+******************************************************************************
+*/
+#define Set_Bit(y, x)   (y) = (y) | (1 << (x))
+#define SetBit(y, x)    (y) = (y) | (1 << (x))
+#define ResetBit(y, x)  (y) = (y) &~ (1 << (x))
+#define TestBit(y, x)   ((y) & (1 << (x)))
+#define Test_Bit(y, x)  ((y) & (1 << (x)))
+#define LOBYTE(x)       ((x) & 0x00FF)
+#define HIBYTE(x)       (((x) & 0xFF00) >> 8)
+#define LONIBBLE(x)     ((x) & 0x0F)
+#define HINIBBLE(x)     (((x) & 0xF0) >> 4)
+#define VerifyMax       (v, max, def)  (((v) >= (max)) ? (def) : (v))
+#define MAKEWORD(L, H)  ((((u16_t)((u8_t)(H))) << 8) | ((u16_t)((u8_t)(L))))
+#define MAKE_WORD(L, H) ((((u16_t)((u8_t)(H))) << 8) | ((u16_t)((u8_t)(L))))
+//-----------------------------------------------------------------
+
+
+#define FW_VERSION    "V5.0.0h"  
+#define HW_VERSION    "D" /* "V4.5"   */
+ 
+#ifndef TRUE
+#define TRUE            ((uint8_t)1)
+#endif 
+ 
+#ifndef FALSE
+#define FALSE           ((uint8_t)0)
+#endif
+
+typedef enum
+{
+  EMRG_V230KO_VBUSENA  = 0, 
+  EMRG_V230OK_VBUSENA  = 1,
+  EMRG_VBUS_DIS        = 2 
+}emrgCond_e;
+
+typedef enum
+{
+  EMRG_ST_INIT            = 0,
+  EMRG_ST_V230KO_VBUSENA  = 1,
+  EMRG_ST_V230OK_VBUSENA  = 2,
+  EMRG_ST_VBUS_DIS        = 3,
+  EMRG_ST_END_PWR         = 4
+}emrgStCond_e;
+
+typedef enum
+{
+  V230_ABSENT     = 0,
+  V230_PRESENT    = 1,
+  V230_KO_WINDOW  = 2,
+  V230_EVAL       = 0xFE,
+  V230_INIT       = 0xFF
+}v230State_e;
+
+typedef enum
+{
+  TASK_RS485_SBC_OFF  = 0,
+  TASK_RS485_SBC_ON
+}sbcRS485State_e;
+
+typedef struct
+{
+  uint32_t  ch16;
+  uint8_t   tagString[8];
+  uint32_t  fwLen;
+} infoFw_st;
+
+typedef struct
+{
+  uint32_t          tickCurrent;
+  uint32_t          tickStop;
+  uint16_t          edgeCounter;
+  uint32_t          tickWindowCheck;
+  uint32_t          lastMsgV230Sent;
+  v230State_e       statusV230;
+  sbcRS485State_e   statusSBC485;
+  uint32_t          tickV230;
+  uint32_t          V230tickStop;
+  uint32_t          v230FilterOK;
+} infoV230_st;
+
+
+// boot size 
+#define BOOT_SIZE			        ((uint32_t)0x00008000)
+#define BOOT_ADDR_VER			    ((uint32_t)0x08001000)
+#define BOOT_VER_SIZE			    ((uint16_t)0x0005)
+
+// size reserved for info on new FW to upload 
+#define MAX_FW_INFO_SIZE			((uint32_t)0x00000200)
+
+
+/* Defines related to Clock configuration */
+#define RTC_ASYNCH_PREDIV  0x7F   /* LSE as RTC clock */
+#define RTC_SYNCH_PREDIV   0x00FF /* LSE as RTC clock */
+// Struttura che definisce l'interfaccia di rete
+typedef __packed struct
+{
+  unsigned char   IpAddress[4];
+  unsigned char   SubnetMask[4];
+  unsigned char   Gateway[4];
+  unsigned char   MACAddress[6];
+  unsigned int    portHttp;
+  unsigned char   DHCP;
+  unsigned char   cksum;
+} NetworkConfiguration_t;
+
+/* backup register for NVIC reset   */
+#define     BACKUP_NVIC_RESET_DEF_VAL     ((uint32_t)0xB550)
+#define     BACKUP_NVIC_RESET_VAL         ((uint32_t)0xB500)
+/* backup register for qspi data area erased  */
+#define     BACKUP_DATA_QSPI_DEF_VAL      ((uint32_t)0xA550)
+#define     BACKUP_DATA_QSPI_ERASE        ((uint32_t)0xA500)
+#define     BACKUP_DATA_QSPI_STORED       ((uint32_t)0xA501)
+#define     BACKUP_DATA_QSPI_AVAILABLE    ((uint32_t)0xA502)
+#define     BACKUP_DATA_QSPI_FW_CHECKED   ((uint32_t)0xA5A5)
+/* backup register for 230 Vac status      */
+#define     MASK_FOR_V230_BACKUP           ((uint32_t)0x0000FFFF)
+#define     BACKUP_230VAC_TRIGGER_OFF_VAL  ((uint32_t)0x555A)         /*** flag che segnala V230 assente: HAL_TIM_PWM_PulseFinishedCallback ****/
+#define     BACKUP_230VAC_OFF_VAL          ((uint32_t)0x005A)         /*** condizione di emergenza verificata */
+#define     BACKUP_230VAC_ALREADY_OFF_VAL  ((uint32_t)0xA55A)          
+#define     BACKUP_230VAC_ON_VAL           ((uint32_t)0xA500)
+#define     BACKUP_230VAC_ALREADY_ON_VAL   ((uint32_t)0)
+#define     BACKUP_230VAC_SEND_RECHARGE    ((uint32_t)0xA5BC)
+#define     BACKUP_230VAC_OK_FROM_PWDN     ((uint32_t)0xA6BE)
+#define     BACKUP_230VAC_OFF_VAL_ACTIVE   ((uint32_t)0xA5BD)
+#define     BACKUP_230VAC_OFF_V24_LOW      ((uint32_t)0xA4BC)
+#define     BACKUP_WAIT_END_POWER          ((uint32_t)0xA3BA)
+#define     BACKUP_RESTART_WAIT_END_POWER  ((uint32_t)0xA8BB)
+#define     BACKUP_TIMEOUT_RTC             ((uint32_t)0xA6B6)
+#define     BACKUP_FAIL_BOARD              ((uint32_t)0xA7B7)
+#define     MASK_FOR_V230_MSG              ((uint32_t)0xFFFF0000)
+#define     MSG_230VAC_OFF_OPEN_SOCKET     ((uint32_t)0x00010000)
+#define     MSG_230VAC_ON_START_RECHARGE   ((uint32_t)0x00020000)
+#define     MSG_230VAC_SUSPEND_RECHARGE    ((uint32_t)0x00040000)
+/* backup register unix timestamp set RTC     */
+#define     MASK_FOR_EM_INT_MODEL          ((uint32_t)0x0000FFFF)
+#define     MASK_FOR_EM_EXT_MODEL          ((uint32_t)0xFFFF0000)
+/* backup register unix timestamp set RTC     */
+#define     BACKUP_EM_ENRG_ACT             (RTC_BKP_DR8)
+#define     MASK_FOR_EM_ENRG_ACT_KEY       ((uint32_t)0xF0000000)
+#define     EM_ENRG_ACT_KEY                ((uint32_t)0xA0000000)
+
+/* backup register for hardware configuration   */
+#define     MASK_FOR_LCD_MODE              ((uint32_t)0x0000000F)
+#define     KEY_FOR_LCD_MODE               ((uint32_t)0x0000000C)  /* 2 bit for key, 2 bit for info */
+#define     LCD_MODE_OPEN_DRAIN            ((uint32_t)0x00000001)  /* bit 0 = 1 --> open drain HWver < 3.1  */
+#define     LCD_MODE_FULL_BIDIR            ((uint32_t)0x00000002)  /* bit 1 = 1 --> controllo LCD bidirezionale HWver >= 3.1  */
+#define     MASK_FOR_RS485_ADD_SET         ((uint32_t)0x000000F0)
+#define     KEY_FOR_RS485_ADD              ((uint32_t)0x000000C0)  /* 2 bit for key, 2 bit for info */
+#define     RS485_ADD_SET                  ((uint32_t)0x00000010)  /* 2 bit for key, bit 0 =1  */
+#define     BLOCK_POLARITY_VALID           ((uint32_t)0x00000100)  /* 1 bit per polarità del motore  */
+#define     BLOCK_POLARITY_SET             ((uint32_t)0x00000200)  /* 1 bit per polarità del motore  */
+#define     RESET_BY_SW1_VALID             ((uint32_t)0x00000400)  /* 2 bit per attivazione reset eeprom da pressione lunga del pulsante   */
+#define     RESET_BY_SW1_MASK              ((uint32_t)0x00000C00)  /* 2 bit mask per attivazione reset eeprom  */
+#define     RESET_WIFI_ANT_VALID           ((uint32_t)0x00002000)  /* 2 bit per antenna wifi test fatto    */
+#define     RESET_WIFI_ANT_MASK            ((uint32_t)0x00003000)  /* 2 bit mask per antenna wifi test     */
+#define     IRC16M_OSC_VALID_FLAG          ((uint32_t)0x00020000)  /* 1 bit per validità IRC16M oscillator */
+#define     IRC16M_OSC_ENABLE_FLAG         ((uint32_t)0x00010000)  /* 1 bit per abilitazione IRC16M oscillator */
+#define     IRC16M_OSC_MASK                ((uint32_t)0x00030000)  /* 2 bit per configurazione IRC16M oscillator */
+#define     NOTIFY_FW_UPD_FLAG             ((uint32_t)0x00100000)  /* 1 bit per abilitazione invio FW version  */
+#define     NOTIFY_FW_UPD_MASK             ((uint32_t)0x00300000)  /* 2 bit per abilitazione FW version          */
+#define     CNT_TRAP_CHK_EE_DATA_MASK      ((uint32_t)0x0F000000)  /* 4 bit per contatore numero di trappole avvenute per il check di integrità parametri in eeprom */
+#define     CNT_TRAP_CHK_EE_DATA_Pos       (24)       
+
+
+#ifdef GD32F4xx
+
+/* backup register for NVIC reset   */
+#define     BACKUP_NVIC_RESET_REG         (RTC_BKP_DR0)
+/* backup register for qspi data area erased  */
+#define     BACKUP_DATA_QSPI_REG          (RTC_BKP_DR1)
+/* backup register for start address qspi data area    */
+#define     BACKUP_DATA_QSPI_AREA_REG     (RTC_BKP_DR2)
+#define     BACKUP_230VAC_REG             (RTC_BKP_DR3)
+/* backup register unix timestamp set RTC     */
+#define     BACKUP_UNIX_SET_RTC           (RTC_BKP_DR4)
+#define     BACKUP_CALP_RTC               (RTC_BKP_DR5)
+#define     BACKUP_CALM_RTC               (RTC_BKP_DR6)
+/* backup register unix timestamp set RTC     */
+#define     BACKUP_EM_MODEL               (RTC_BKP_DR7) 
+/* backup register unix timestamp set RTC     */
+#define     BACKUP_EM_ENRG_ACT            (RTC_BKP_DR8)
+/* backup register for hardware configuration   */
+#define     BACKUP_HW_INFO                (RTC_BKP_DR9)
+#define     BACKUP_CHARGE_STATUS          (RTC_BKP_DR10)
+#define     BACKUP_CHARGE_TIME            (RTC_BKP_DR11)
+#define     BACKUP_USER_UID_0003          (RTC_BKP_DR12)
+#define     BACKUP_USER_UID_0407          (RTC_BKP_DR13)
+#define     BACKUP_INFO_BLOCK_0003        (RTC_BKP_DR14)
+#define     BACKUP_INFO_BLOCK_0407        (RTC_BKP_DR15)
+#define     BACKUP_USER_CARD_MODE         (RTC_BKP_DR16)
+#define     BACKUP_USER_CARD_TIME         (RTC_BKP_DR17)
+#define     BACKUP_USER_CARD_ENERGY       (RTC_BKP_DR18)
+#define     BACKUP_SCAME_TOTAL_ENRG       (RTC_BKP_DR19)
+#define     LAST_BACKUP_REG               (RTC_BKP_DR19)
+
+#else
+
+/* backup register for NVIC reset   */
+#define     BACKUP_NVIC_RESET_REG         (RTC_BKP_DR0)
+/* backup register for qspi data area erased  */
+#define     BACKUP_DATA_QSPI_REG          (RTC_BKP_DR1)
+/* backup register for start address qspi data area    */
+#define     BACKUP_DATA_QSPI_AREA_REG     (RTC_BKP_DR2)
+#define     BACKUP_230VAC_REG             (RTC_BKP_DR3)
+/* backup register unix timestamp set RTC     */
+#define     BACKUP_UNIX_SET_RTC           (RTC_BKP_DR4)
+#define     BACKUP_CALP_RTC               (RTC_BKP_DR5)
+#define     BACKUP_CALM_RTC               (RTC_BKP_DR6)
+/* backup register unix timestamp set RTC     */
+#define     BACKUP_EM_MODEL               (RTC_BKP_DR7)
+/* backup register unix timestamp set RTC     */
+#define     BACKUP_EM_ENRG_ACT            (RTC_BKP_DR8)
+/* backup register for hardware configuration   */
+#define     BACKUP_HW_INFO                (RTC_BKP_DR9)
+#define     BACKUP_CHARGE_STATUS          (RTC_BKP_DR16)
+#define     BACKUP_CHARGE_TIME            (RTC_BKP_DR17)
+#define     BACKUP_USER_UID_0003          (RTC_BKP_DR18)
+#define     BACKUP_USER_UID_0407          (RTC_BKP_DR19)
+#define     BACKUP_INFO_BLOCK_0003        (RTC_BKP_DR20)
+#define     BACKUP_INFO_BLOCK_0407        (RTC_BKP_DR21)
+#define     BACKUP_USER_CARD_MODE         (RTC_BKP_DR22)
+#define     BACKUP_USER_CARD_TIME         (RTC_BKP_DR23)
+#define     BACKUP_USER_CARD_ENERGY       (RTC_BKP_DR24)
+#define     BACKUP_SCAME_TOTAL_ENRG       (RTC_BKP_DR31)
+#define     LAST_BACKUP_REG               (RTC_BKP_DR31)
+
+#endif
+
+/* Colored Output definition */
+
+#define ANSI_COLOR_RED     "\x1b[31m"
+#define ANSI_COLOR_GREEN   "\x1b[32m"
+#define ANSI_COLOR_YELLOW  "\x1b[33m"
+#define ANSI_COLOR_BLUE    "\x1b[34m"
+#define ANSI_COLOR_MAGENTA "\x1b[35m"
+#define ANSI_COLOR_CYAN    "\x1b[36m"
+#define ANSI_COLOR_RESET   "\x1b[0m"
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            External Variables                            **
+**                                                                          **
+******************************************************************************
+*/
+extern NetworkConfiguration_t	NetworkConfiguration;
+extern RTC_HandleTypeDef hrtc;
+extern I2C_HandleTypeDef hi2c3;
+extern IWDG_HandleTypeDef hiwdg;
+extern uint16_t          minTimeEnVal;
+
+/* USER CODE BEGIN EFP */
+
+/* USER CODE END EFP */
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            External Functions                            **
+**                                                                          **
+******************************************************************************
+*/
+
+extern void SystemClock_Config(void);
+extern void MX_I2C1_Init(void);
+extern void MX_SPI1_Init(void);
+extern void MX_SPI2_Init(void);
+extern void MX_UART5_Init(void);
+extern void MX_DMA_Init(void);
+extern void MX_GPDMA1_Init(void);
+extern void MX_GPDMA2_Init(void);
+extern void MX_ADC1_Init(void);
+extern void MX_I2C1_Init(void);
+extern void MX_TAMP_RTC_Init(void);
+extern void MX_SPI1_Init(void);
+extern void MX_SPI2_Init(void);
+extern void MX_USART3_UART_Init(void);
+extern void MX_USART6_UART_Init(void);
+extern void MX_RTC_Init(void);
+extern void MX_GPIO_Init(void);
+extern void MX_DAC_Init(void);
+extern void MX_QUADSPI_Init(void);
+extern void MX_TIM1_Init(void);
+extern void MX_TIM9_Init(void);
+extern void MX_TIM15_Init(void);
+extern void MX_UART7_Init(void);
+extern void MX_USART1_UART_Init(void);
+extern void MX_USART2_UART_Init(void);
+extern void MX_I2C3_Init(void);
+extern void StopMode_Measure(void);
+extern void TIM6_Config(void);
+extern void MX_IWDG_Init(void);
+extern void DEBUG_Init_GPIO(void);
+extern void BKP_ResetRegisters(void);
+extern void deleteHtsTask (void);
+
+
+/* Private defines -----------------------------------------------------------*/
+
+/*********** BLUETOOTH AREA *****************************************/
+
+/* **************************************************************** */
+
+#define MCO_Pin GPIO_PIN_0
+#define MCO_GPIO_Port GPIOH
+
+#ifdef NUCLEO_F746
+/* for EVB NUCLEO -F746ZG */
+#define ETH_TX_EN_Pin           GPIO_PIN_11
+#define ETH_TX_EN_GPIO_Port     GPIOG
+#define ETH_TXD0_Pin            GPIO_PIN_13
+#define ETH_TXD0_GPIO_Port      GPIOG
+#else
+/* for SCU - F746 */
+#define ETH_TX_EN_Pin           GPIO_PIN_11
+#define ETH_TX_EN_GPIO_Port     GPIOB
+#define ETH_TXD0_Pin            GPIO_PIN_12
+#define ETH_TXD0_GPIO_Port      GPIOB
+#endif
+
+/* Definition for DACx clock resources Voice demo */
+#define DACx                            DAC
+#define DACx_CHANNEL_GPIO_CLK_ENABLE()  __HAL_RCC_GPIOA_CLK_ENABLE()
+#define DMAx_CLK_ENABLE()               __HAL_RCC_DMA1_CLK_ENABLE()
+
+#define DACx_CLK_ENABLE()               __HAL_RCC_DAC_CLK_ENABLE()
+#define DACx_FORCE_RESET()              __HAL_RCC_DAC_FORCE_RESET()
+#define DACx_RELEASE_RESET()            __HAL_RCC_DAC_RELEASE_RESET()
+
+/* Definition for DACx Channel Pin */
+#define DACx_VOICE_PIN                GPIO_PIN_5
+#define DACx_VOICE_GPIO_PORT          GPIOA
+
+/* Definition for DACx's Channel */
+#define DACx_DMA_VOICE                 DMA_CHANNEL_7
+
+#define DACx_VOICE                     DAC_CHANNEL_2
+
+/* Definition for DACx's DMA_STREAM */
+#define DACx_DMA_INSTANCE               DMA1_Stream6
+
+/* Definition for DACx's NVIC */
+#define DACx_DMA_IRQn                   DMA1_Stream6_IRQn
+#define DACx_DMA_IRQHandler             DMA1_Stream6_IRQHandler
+
+/** define for current socket motor management ***/
+#define IM_HIGH_THRSD                   ((uint16_t)1150)
+#define IM_LOW_THRSD                    ((uint16_t)100)
+
+/* Definition for UART1/UART2 GPIO */
+#define UART1_TX_Pin                    GPIO_PIN_9
+#define UART1_TX_GPIO_Port              GPIOA
+#define UART1_RX_Pin                    GPIO_PIN_10
+#define UART1_RX_GPIO_Port              GPIOA
+#define UART1_DE_Pin                    GPIO_PIN_12
+#define UART1_DE_GPIO_Port              GPIOA
+#define UART2_DE_Pin                    GPIO_PIN_4
+#define UART2_DE_GPIO_Port              GPIOD
+#define UART2_TX_Pin                    GPIO_PIN_5
+#define UART2_TX_GPIO_Port              GPIOD
+#define UART2_RX_Pin                    GPIO_PIN_6
+#define UART2_RX_GPIO_Port              GPIOD
+
+
+/***************** definizione timer VAC230    **************************/
+#define TIMxV230                          TIM7
+#define TIM_V230_CLK_ENABLE()             __HAL_RCC_TIM7_CLK_ENABLE();
+ 
+#define TIMxV230_FORCE_RESET()            __HAL_RCC_TIM7_FORCE_RESET()
+#define TIMxV230_RELEASE_RESET()          __HAL_RCC_TIM7_RELEASE_RESET()
+
+#define TIMEOUT_V230_VALUE               ((uint32_t)200)
+
+/* Definition for TIMx's NVIC */
+#define TIMxV230_IRQn                    TIM7_IRQn
+#define TIMxV230_IRQHandler              TIM7_IRQHandler
+
+/* PWM period for CNTCT pin is 20KHz */
+#define TIM9_PWM_PERIOD                  (uint16_t)((1000000 / 20000) - 1)
+
+typedef enum
+{
+  IM_IDLE = 0,
+  IM_TRIGGERED
+}imState_e;
+
+/* Thresholds of Vin used to check if it's time to exit from the low power condition (when in underclock condition)*/
+#define BACKUP_VIn_THRESHOLD_LOW   14000
+#define BACKUP_VIn_THRESHOLD_HIGH  24000
+
+#define BACKUP_SYSCLOCK_VALUE    ((uint32_t)1000000) /*!< SysClock value during backup condition in Hz */
+
+/*----------------------------------------------------------------------------
+ *                               Global variables
+ *----------------------------------------------------------------------------
+ */
+
+#ifndef main_c
+
+#endif
+
+/*----------------------------------------------------------------------------
+ *                               Private section
+ *----------------------------------------------------------------------------
+ */
+
+#ifdef main_c
+
+#endif
+
+/*
+*********************************** SCAME ************************************
+**                                                                          **
+**                            Function prototypes                           **
+**                                                                          **
+******************************************************************************
+*/
+void            HAL_TIM_MspPostInit   (TIM_HandleTypeDef *htim);
+                
+void            Error_Handler               (void);
+void            refreshWD                   (void);
+void            _Error_Handler              (char * file, int line);
+void*           getHandleRtc                (void);
+void            getNetworkParameters        (NetworkConfiguration_t* pNet);
+uint8_t         checkFlagForQspiAreaErased  (void);
+void            resetFlagOnRtcBck           (uint32_t BackupRegister, uint32_t Data);
+void            setFlagOnRtcBck             (uint32_t BackupRegister, uint32_t Data);
+uint8_t         checkFlagForFileInQspiArea  (void);
+uint8_t         checkFlagForFileFromFTP     (void);
+uint32_t        getFlagForQspiArea          (void);
+void            toggleHeartLed              (void);
+void            setNewMac                   (unsigned char* tempMac);
+uint8_t*        getMac                      (void);
+uint32_t        getLastRtcSetTime           (void);
+void            setNewRtcCal                (uint32_t calp, uint32_t calm);
+void            getRtcCalValues             (uint32_t* pCalp, uint32_t* pCalm);
+void            startBlueTooth              (void);
+void            setNewCntDownLP             (uint8_t cndDwn);
+uint8_t         checkV230T20msecFromHwPin   (void);
+void            startV230Mng                (void);
+void            activeImmediateReset        (void);
+uint8_t         getPowerOnResetFlag         (void);
+void            setPowerOnResetFlag         (uint8_t status);
+uint8_t         isV230PresentValid          (void);
+emrgStCond_e    getEmergencyStatus          (void);
+void            checkStartSemSbcUartTask    (void);
+void            bridgeVarInit               (void);
+void            startLcdTask                (void);
+void            activeImmediateResetFromRemove (void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* __MAIN_H */
+
+/************************ (C) COPYRIGHT STMicroelectronics *****END OF FILE****/

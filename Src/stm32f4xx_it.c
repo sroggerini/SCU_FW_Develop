@@ -1,0 +1,827 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file    stm32f4xx_it.c
+  * @brief   Interrupt Service Routines.
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2022 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+
+/* Includes ------------------------------------------------------------------*/
+#include "main.h"
+#include "stm32f4xx_it.h"
+#include "FreeRTOS.h"
+#include "task.h"
+#include "dbg_Task.h"
+#include "Em_Task.h"
+#include "scuMdb.h"
+#include "sbcGsy.h"
+#include "adcTask.h"
+#include "uart_Legacy.h"
+
+uint8_t  newAlgo = 1;
+
+/* Private includes ----------------------------------------------------------*/
+/* USER CODE BEGIN Includes */
+/* USER CODE END Includes */
+
+/* Private typedef -----------------------------------------------------------*/
+/* USER CODE BEGIN TD */
+
+/* USER CODE END TD */
+
+/* Private define ------------------------------------------------------------*/
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private variables ---------------------------------------------------------*/
+/* USER CODE BEGIN PV */
+static  uint16_t lcdRunning = 0;
+static  uint8_t  pOut_r = 0;
+static  uint8_t  pIn_u = 0;
+static  uint8_t  buffBridge[4];
+static  uint8_t  txDir = FALSE;
+
+/* USER CODE END PV */
+
+/* Private function prototypes -----------------------------------------------*/
+/* USER CODE BEGIN PFP */
+
+/* USER CODE END PFP */
+
+/* External function prototypes -----------------------------------------------*/
+/* USER CODE BEGIN EFP */
+extern void xPortSysTickHandler (void);
+extern void ISO15118_systick_callback (void);
+/* USER CODE END EFP */
+
+/* Private user code ---------------------------------------------------------*/
+/* USER CODE BEGIN 0 */
+
+/* USER CODE END 0 */
+
+/* External variables --------------------------------------------------------*/
+extern ETH_HandleTypeDef heth;
+extern ETH_HandleTypeDef EthHandle;
+extern DMA_HandleTypeDef hdma_uart5_tx;
+extern DMA_HandleTypeDef hdma_uart5_rx;
+extern DMA_HandleTypeDef hdma_usart1_rx;
+extern DMA_HandleTypeDef hdma_usart1_tx;
+extern DMA_HandleTypeDef hdma_usart2_rx;
+extern DMA_HandleTypeDef hdma_usart2_tx;
+extern DMA_HandleTypeDef hdma_usart3_tx;
+extern DMA_HandleTypeDef hdma_usart3_rx;
+extern DMA_HandleTypeDef hdma_usart6_rx;
+extern DMA_HandleTypeDef hdma_usart6_tx;
+extern UART_HandleTypeDef huart1;
+extern UART_HandleTypeDef huart2;
+extern UART_HandleTypeDef huart3;
+extern UART_HandleTypeDef huart5;
+extern UART_HandleTypeDef huart6;
+extern ADC_HandleTypeDef  AdcHandle, AdcTAHandle, AdcVINHandle, AdcCPHandle;
+extern RTC_HandleTypeDef  hrtc;
+extern TIM_HandleTypeDef  htimAdc, htimV230;
+extern TIM_HandleTypeDef  htimCPAdc;
+extern TIM_HandleTypeDef  htimTAAdc;
+extern SPI_HandleTypeDef spi_handle1;
+
+extern statusFlag_e       fastBridgeStatus;
+extern uint16_t           packetNum;
+extern frameEm_st         emMsg;
+
+/* USER CODE BEGIN EV */
+
+/* USER CODE END EV */
+
+/* External functions --------------------------------------------------------*/
+
+#ifdef HW_MP28947
+extern void LED_Handler (void);
+#endif
+
+/******************************************************************************/
+/*           Cortex-M4 Processor Interruption and Exception Handlers          */
+/******************************************************************************/
+
+
+/**
+  * @brief set the sysTick flag 
+  */
+void setSysTickStatus(uint16_t status)
+{
+  lcdRunning = status;
+}
+
+/**
+  * @brief This function handles Non maskable interrupt.
+  */
+void NMI_Handler(void)
+{
+  /* USER CODE BEGIN NonMaskableInt_IRQn 0 */
+
+  /* USER CODE END NonMaskableInt_IRQn 0 */
+  /* USER CODE BEGIN NonMaskableInt_IRQn 1 */
+  while (1)
+  {
+  }
+  /* USER CODE END NonMaskableInt_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Hard fault interrupt.
+  */
+void HardFault_Handler(void)
+{
+  /* USER CODE BEGIN HardFault_IRQn 0 */
+  EVLOG_Message (EV_ERROR, "HardFault Error");      
+  /* USER CODE END HardFault_IRQn 0 */
+  while (1)
+  {
+    /* USER CODE BEGIN W1_HardFault_IRQn 0 */
+    /* USER CODE END W1_HardFault_IRQn 0 */
+  }
+}
+
+/**
+  * @brief  This function handles Memory Manage exception.
+  * @param  None
+  * @retval None
+  */
+void MemManage_Handler(void)
+{
+  uint8_t loop;
+
+  loop = 1;
+  /* Go to infinite loop when Memory Manage exception occurs */
+  while (loop)
+  {
+    ;
+  }
+}
+
+
+/**
+  * @brief This function handles Pre-fetch fault, memory access fault.
+  */
+void BusFault_Handler(void)
+{
+  /* USER CODE BEGIN BusFault_IRQn 0 */
+
+  /* USER CODE END BusFault_IRQn 0 */
+  while (1)
+  {
+    /* USER CODE BEGIN W1_BusFault_IRQn 0 */
+    /* USER CODE END W1_BusFault_IRQn 0 */
+  }
+}
+
+/**
+  * @brief This function handles Undefined instruction or illegal state.
+  */
+void UsageFault_Handler(void)
+{
+  /* USER CODE BEGIN UsageFault_IRQn 0 */
+
+  /* USER CODE END UsageFault_IRQn 0 */
+  while (1)
+  {
+    /* USER CODE BEGIN W1_UsageFault_IRQn 0 */
+    /* USER CODE END W1_UsageFault_IRQn 0 */
+  }
+}
+
+/**
+  * @brief This function handles Debug monitor.
+  */
+void DebugMon_Handler(void)
+{
+  /* USER CODE BEGIN DebugMonitor_IRQn 0 */
+
+  /* USER CODE END DebugMonitor_IRQn 0 */
+  /* USER CODE BEGIN DebugMonitor_IRQn 1 */
+
+  /* USER CODE END DebugMonitor_IRQn 1 */
+}
+
+/**
+  * @brief This function handles System tick timer.
+  */
+void SysTick_Handler(void)
+{
+  /* USER CODE END SysTick_IRQn 0 */
+  HAL_IncTick();
+#if (INCLUDE_xTaskGetSchedulerState == 1 )
+  if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED)
+  {
+#endif /* INCLUDE_xTaskGetSchedulerState */
+    
+    if (lcdRunning == FALSE)
+    {
+      xPortSysTickHandler();
+    }
+    
+#if (INCLUDE_xTaskGetSchedulerState == 1 )
+  }
+#endif /* INCLUDE_xTaskGetSchedulerState */
+  /* USER CODE BEGIN SysTick_IRQn 1 */
+#ifndef HW_MP28947  
+  ISO15118_systick_callback();  
+#endif  
+  /* USER CODE END SysTick_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Ethernet global interrupt.
+  */
+void ETH_IRQHandler(void)
+{
+  /* USER CODE BEGIN ETH_IRQn 0 */
+
+  /* USER CODE END ETH_IRQn 0 */
+  HAL_ETH_IRQHandler(&heth);
+  /* USER CODE BEGIN ETH_IRQn 1 */
+
+  /* USER CODE END ETH_IRQn 1 */
+}
+
+/******************************************************************************/
+/* STM32F4xx Peripheral Interrupt Handlers                                    */
+/* Add here the Interrupt Handlers for the used peripherals.                  */
+/* For the available peripheral interrupt handler names,                      */
+/* please refer to the startup file (startup_stm32f4xx.s).                    */
+/******************************************************************************/
+
+/**
+  * @brief This function handles RTC tamper and timestamp interrupts through EXTI line 21.
+  */
+void TAMP_STAMP_IRQHandler(void)
+{
+  /* USER CODE BEGIN TAMP_STAMP_IRQn 0 */
+
+  /* USER CODE END TAMP_STAMP_IRQn 0 */
+  HAL_RTCEx_TamperTimeStampIRQHandler(&hrtc);
+  /* USER CODE BEGIN TAMP_STAMP_IRQn 1 */
+
+  /* USER CODE END TAMP_STAMP_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA1 stream0 global interrupt.
+  */
+void DMA1_Stream0_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream0_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream0_IRQn 0 */
+  // AUTO-GENERATED by CUBE-MX but INTENTIONALLY REMOVED --> HAL_DMA_IRQHandler(&hdma_uart5_rx);
+  /* USER CODE BEGIN DMA1_Stream0_IRQn 1 */
+    UART_SBC_IRQHandler_DMA_IRQHandler();  
+  /* USER CODE END DMA1_Stream0_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA1 stream7 global interrupt.
+  */
+void DMA1_Stream7_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream7_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream7_IRQn 0 */
+  // AUTO-GENERATED by CUBE-MX but INTENTIONALLY REMOVED --> HAL_DMA_IRQHandler(&hdma_uart5_tx);
+  /* USER CODE BEGIN DMA1_Stream7_IRQn 1 */
+  
+  frameScuToSbcTx_st  tmpFrameScuToSbcTx;
+  portBASE_TYPE       xHigherPriorityTaskWoken;
+
+  xHigherPriorityTaskWoken = pdFALSE;
+
+  /* USER CODE END DMA1_Stream7 channel 4: USART5 Tx SBC */
+  /* remember: to SBC the messages must have 5msec distance */
+  HAL_DMA_IRQHandler(UART_SBC_HANDLE.hdmatx);  
+
+  tmpFrameScuToSbcTx.msgEv = SCU_END_TX_MSG;
+  tmpFrameScuToSbcTx.pDataToSend = NULL;
+  tmpFrameScuToSbcTx.totalLen = (uint16_t)0;
+
+  configASSERT(xQueueSendToBackFromISR(getScuToSbcTxQueueHandle(), (void *)&tmpFrameScuToSbcTx, &xHigherPriorityTaskWoken) == pdPASS); // scuTxToSbcTask
+
+  /* USER CODE END DMA1_Stream7_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA1 stream1 global interrupt.
+  */
+void DMA1_Stream1_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream1_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream1_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_usart3_rx);
+  /* USER CODE BEGIN DMA1_Stream1_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA1 stream3 global interrupt.
+  */
+void DMA1_Stream3_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream3_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream3_IRQn 0 */
+  //GPIOD->ODR ^= (uint32_t)0x00000002;   /* only for debug */
+  
+  HAL_DMA_IRQHandler(&hdma_usart3_tx);
+  /* USER CODE BEGIN DMA1_Stream3_IRQn 1 */
+
+  /* USER CODE END DMA1_Stream3_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA1 stream5 global interrupt.
+  */
+void DMA1_Stream5_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA1_Stream5_IRQn 0 */
+
+  /* USER CODE END DMA1_Stream5_IRQn 0 */
+  // AUTO-GENERATED by CUBE-MX but INTENTIONALLY REMOVED --> HAL_DMA_IRQHandler(&hdma_usart2_rx);
+  /* USER CODE BEGIN DMA1_Stream5_IRQn 1 */
+  UART_EM_IRQHandler_DMA_IRQHandler();
+  /* USER CODE END DMA1_Stream5_IRQn 1 */
+}
+
+/**
+  * @brief  This function handles TIM interrupt request.
+  * @param  None
+  * @retval None
+  */
+void TIM2_IRQHandler (void) 
+{
+  HAL_TIM_IRQHandler(&htimAdc); 
+}
+
+/**
+  * @brief  This function handles TIM interrupt request.
+  * @param  None
+  * @retval None
+  */
+void TIM5_IRQHandler (void)
+{
+  HAL_TIM_IRQHandler(&htimTAAdc);   
+}
+
+/**
+  * @brief  This function handles TIM interrupt request.
+  * @param  None
+  * @retval None
+  */
+void TIM8_CC_IRQHandler (void)
+{
+  HAL_TIM_IRQHandler(&htimCPAdc);    
+}
+
+/**
+  * @brief This function handles UART5 global interrupt.
+  */
+void UART5_IRQHandler(void)
+{
+  /* USER CODE BEGIN UART5_IRQn 0 */
+
+  /* USER CODE END UART5_IRQn 0 */
+  // AUTO-GENERATED by CUBE-MX but INTENTIONALLY REMOVED --> HAL_UART_IRQHandler(&huart5);
+  /* USER CODE BEGIN UART5_IRQn 1 */
+  /* USER CODE BEGIN USART2_IRQn 0 */
+  uint32_t sbcRx, isrflags, errorflags;
+
+//  GPIOD->ODR ^= (uint32_t)0x00000002; /* only for debug */
+  /* USER CODE BEGIN USAR12_IRQn 0 */
+  isrflags   = UART_SBC_ISR;
+  if ((fastBridgeStatus == DISABLED) || ((isrflags & USART_FLAG_RXNE) == 0))
+  {
+    sbc_IRQHandler();
+  }
+  else
+  {
+    
+    errorflags = (isrflags & (uint32_t)(USART_FLAG_PE | USART_FLAG_FE | USART_FLAG_ORE | USART_FLAG_NE));
+    
+    __HAL_UART_CLEAR_FEFLAG(&UART_SBC_HANDLE);         /* Clear Framing Error flag */
+    __HAL_UART_CLEAR_PEFLAG(&UART_SBC_HANDLE);         /* Clear Parity Error flag */
+    __HAL_UART_CLEAR_NEFLAG(&UART_SBC_HANDLE);         /* Clear Noise Error flag */
+    __HAL_UART_CLEAR_OREFLAG(&UART_SBC_HANDLE);        /* Clear Overrun Error flag */
+    __HAL_UART_CLEAR_IDLEFLAG(&UART_SBC_HANDLE);       /* Clear Idle flag */
+    
+    if ((isrflags & USART_FLAG_RXNE) != 0U)
+    {
+      if (errorflags == (uint32_t)0)
+      {
+        
+#ifdef GD32F4xx    
+        /* Since it's managed like an RS485, we have to move the DE pin to HIGH level */
+        if (packetNum == BUFFER_FW_PAYLOAD_CKS)
+          GPIOA->ODR |= UART1_DE_Pin;                      
+#endif  
+        
+        sbcRx = UART_SBC_RDR;   /* received byte from SBC */
+        buffBridge[pIn_u] = sbcRx;
+        pIn_u++; pIn_u &= (uint8_t)0x03;  // update pointer module 4
+        if (newAlgo == 0)
+        {
+          UART_SCU->DR = sbcRx;  /* bridge on RS485 UART se la velocità di arrivo è maggiore di quella su RS485 si rischia di perdere un byte verso la fine del pacchetto */
+        }
+        packetNum--;
+        txDir = TRUE; /* flag to active UART1 interrupt as RS485 Tx mode */
+        if (packetNum == 0)
+        {
+          lcdRunning = FALSE;  /* we use the same flag in LCD enviroment to stop/restart calls to FREERTOS */
+          packetNum = BUFFER_FW_PAYLOAD_CKS;
+#if GD32F4xx
+          if (newAlgo == 0)
+          {
+           /* this is done at in the transmission ISR side */
+            __HAL_UART_CLEAR_FLAG(&UART_SCU_HANDLE, UART_FLAG_TC);                  
+            /* Is the last byte transmitted, set the transmit complete interrupt to mode the DE pin low */
+            SET_BIT(UART_SCU->CR1, USART_CR1_TCIE);      
+          }
+#endif          
+        }
+        else
+        {
+          lcdRunning = TRUE;
+        }
+        if (newAlgo == 1)
+        {
+          /* Enable the UART Transmit data register empty Interrupt on UART1 to send same byte over RS485 */
+          __HAL_UART_ENABLE_IT(&UART_SCU_HANDLE, UART_IT_TXE);
+        }
+      }
+      else
+      {
+        /* error: the SBC come back to 19200...  */
+        setFlagForNvic();
+        NVIC_SystemReset();
+      }
+    }
+    else
+    {
+      lcdRunning = FALSE; 
+    }
+  }
+  //  GPIOD->ODR ^= (uint32_t)0x00000002; /* only for debug */
+
+  /* USER CODE END USART2_IRQn 1 */
+
+  /* USER CODE END UART5_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USART1 global interrupt. Used in RS485 SCU bus communication 
+  */
+void USART1_IRQHandler(void)
+{
+
+  if (newAlgo == 0)
+  {
+    scuModbus_IRQHandler();
+  }
+  else
+  {
+    uint32_t isrflags1, errorflags1, i;
+    uint16_t packetNumLocal;
+    /* USER CODE BEGIN USART1_IRQn 0 */
+
+    packetNumLocal = packetNum;
+
+    /* USER CODE END USART1_IRQn 0 */
+    // AUTO-GENERATED by CUBE-MX but INTENTIONALLY REMOVED --> HAL_UART_IRQHandler(&huart1);
+    isrflags1   = UART_SCU_ISR;
+    if ((fastBridgeStatus == DISABLED) || (txDir == FALSE))
+    {
+      scuModbus_IRQHandler();
+    }
+    else
+    {
+      
+      errorflags1 = (isrflags1 & (uint32_t)(USART_FLAG_PE | USART_FLAG_FE | USART_FLAG_ORE | USART_FLAG_NE));
+      
+      __HAL_UART_CLEAR_FEFLAG(&UART_SCU_HANDLE);         /* Clear Framing Error flag */
+      __HAL_UART_CLEAR_PEFLAG(&UART_SCU_HANDLE);         /* Clear Parity Error flag */
+      __HAL_UART_CLEAR_NEFLAG(&UART_SCU_HANDLE);         /* Clear Noise Error flag */
+      __HAL_UART_CLEAR_OREFLAG(&UART_SCU_HANDLE);        /* Clear Overrun Error flag */
+      __HAL_UART_CLEAR_IDLEFLAG(&UART_SCU_HANDLE);       /* Clear Idle flag */
+      
+      if ((isrflags1 & UART_FLAG_TXE) != 0U) 
+      {
+        if (errorflags1 == (uint32_t)0)
+        {
+          if (pOut_r != pIn_u)
+          {
+            /* Always Clear the TC flag in the SR register by writing 0 to it */
+            __HAL_UART_CLEAR_FLAG(&UART_SCU_HANDLE, UART_FLAG_TC);
+            UART_SCU->DR = buffBridge[pOut_r];  /* bridge on RS485 UART */
+            pOut_r++; pOut_r &= (uint8_t)0x03;  // update pointer module 4
+#ifdef SOSPESA
+            if (packetNum != BUFFER_FW_PAYLOAD_CKS)
+            {
+              /* Disable the UART Transmit Data Register Empty Interrupt */
+              __HAL_UART_DISABLE_IT(&UART_SCU_HANDLE, UART_IT_TXE);
+             /* this isn't the last packet: Enable the UART Transmit Complete Interrupt */
+              __HAL_UART_ENABLE_IT(&UART_SCU_HANDLE, UART_IT_TC);
+            }
+            else
+            {
+              /* last packet: stop the bridge */
+              /* Disable the UART Transmit Data Register Empty Interrupt */
+              __HAL_UART_DISABLE_IT(&UART_SCU_HANDLE, UART_IT_TXE);
+            }
+#else
+            /* Disable the UART Transmit Data Register Empty Interrupt */
+            __HAL_UART_DISABLE_IT(&UART_SCU_HANDLE, UART_IT_TXE);
+           /* this isn't the last packet: Enable the UART Transmit Complete Interrupt */
+            __HAL_UART_ENABLE_IT(&UART_SCU_HANDLE, UART_IT_TC);
+#endif
+          }
+          else
+          {
+            if (packetNumLocal == BUFFER_FW_PAYLOAD_CKS)
+            {
+#if GD32F4xx
+              /* In STM32F4xx device, we need to check the Transmit complete flag in order to move the DE pin */
+              if (UART_SCU_ISR & UART_FLAG_TC)
+              {   
+                /* We want TC flag only */
+                /* Move the DE pin in order to manage the RS-485 communication: enable the RX part */
+                /* Since it's managed like an RS485, we have to move the DE pin to LOW level */
+                for (i=0; i < 0x2000; i++)
+                {
+                  ;  // delay to be sure the transmission of last byte is terminated 
+                }
+                GPIOA->ODR &= (~UART1_DE_Pin);                      
+                txDir = FALSE; /* flag to active UART1 interrupt as RS485 Rx mode */
+                pOut_r = pIn_u = 0;
+              }
+#endif          
+            }
+            /* Always Clear the TC flag in the SR register by writing 0 to it */
+            __HAL_UART_CLEAR_FLAG(&UART_SCU_HANDLE, UART_FLAG_TC);
+            /* Disable the UART Transmit Data Register Empty Interrupt */
+            __HAL_UART_DISABLE_IT(&UART_SCU_HANDLE, UART_IT_TXE);
+          }
+        }
+        else
+        {
+          /* error: the SBC come back to 19200...  */
+          setFlagForNvic();
+          NVIC_SystemReset();
+        }
+      }
+    }
+    /* USER CODE BEGIN USART1_IRQn 1 */
+
+    /* USER CODE END USART1_IRQn 1 */
+  }
+}
+
+
+/**
+  * @brief This function init var in bridge UART5 --> UART1-RS485 (SBC --> SCU).
+  */
+void bridgeVarInit (void)
+{
+  pOut_r = pIn_u = 0;
+  packetNum = BUFFER_FW_PAYLOAD_CKS;
+}
+
+
+/**
+* @brief  This function handles DMA interrupt request.
+* @param  None
+* @retval None
+*/
+/* void ADCx_DMA_IRQHandler(void) */
+void DMA2_Stream0_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(AdcHandle.DMA_Handle);
+}
+
+/**
+* @brief  This function handles DMA2 Stream1 CH2 interrupt request used on TA measure
+* @param  None
+* @retval None
+*/
+void ADCxTA_DMA_IRQHandler(void) 
+// void DMA2_Stream1_IRQHandler (void)
+{
+  HAL_DMA_IRQHandler(AdcTAHandle.DMA_Handle);
+}
+
+/**
+* @brief  This function handles DMA2 Stream2 CH1 interrupt request used on CP_ADC measure
+* @param  None
+* @retval None
+*/
+void ADCxCP_DMA_IRQHandler(void) 
+// void DMA2_Stream3_IRQHandler (void)
+{
+  HAL_DMA_IRQHandler(AdcCPHandle.DMA_Handle);
+}
+
+
+/**
+* @brief  This function handles ADC interrupt request 
+* @param  None
+* @retval None
+*/
+void ADC_IRQHandler(void)
+{
+  HAL_ADC_IRQHandler(&AdcVINHandle);
+}
+
+/**
+  * @brief  This function handles RTC Auto wake-up interrupt request.
+  * @param  None
+  * @retval None
+  */
+void RTC_WKUP_IRQHandler(void)
+{
+  HAL_RTCEx_WakeUpTimerIRQHandler(&hrtc);
+}
+
+
+/**
+  * @brief This function handles USART2 global interrupt.
+  */
+void USART2_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART2_IRQn 0 */
+
+  /* USER CODE END USART2_IRQn 0 */
+  // AUTO-GENERATED by CUBE-MX but INTENTIONALLY REMOVED --> HAL_UART_IRQHandler(&huart2);
+  em_IRQHandler();
+  /* USER CODE BEGIN USART2_IRQn 1 */
+
+  /* USER CODE END USART2_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USART3 global interrupt.
+  */
+void USART3_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART3_IRQn 0 */
+
+  /* USER CODE END USART3_IRQn 0 */  
+  HAL_UART_IRQHandler( &huart3 );
+  /* USER CODE BEGIN USART3_IRQn 1 */
+
+  /* USER CODE END USART3_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA2 stream1 global interrupt.
+  */
+void DMA2_Stream2_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream1_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream1_IRQn 0 */
+  // AUTO-GENERATED by CUBE-MX but INTENTIONALLY REMOVED --> HAL_DMA_IRQHandler(&hdma_usart6_rx);
+  UART_DBG_DMA_IRQHandler();  
+
+  /* USER CODE BEGIN DMA2_Stream1_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA2 stream2 global interrupt.
+  */
+void DMA2_Stream5_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream2_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream2_IRQn 0 */
+  // AUTO-GENERATED by CUBE-MX but INTENTIONALLY REMOVED --> HAL_DMA_IRQHandler(&hdma_usart1_rx);
+  UART_SCU_DMA_RX_IRQHandler();
+  /* USER CODE BEGIN DMA2_Stream2_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream2_IRQn 1 */
+}
+
+/**
+  * @brief  This function handles external lines 9 to 5 interrupt request.
+  * @param  None
+  * @retval None
+  */
+void EXTI9_5_IRQHandler(void)
+{
+  HAL_GPIO_EXTI_IRQHandler(V230_WD_PIN);
+  HAL_GPIO_EXTI_IRQHandler(RCDM_Pin);
+}
+
+/**
+  * @brief  This function handles external lines 15 to 10 interrupt request.
+  * @param  None
+  * @retval None
+  */
+void EXTI15_10_IRQHandler(void)
+{
+  /* the interrupt is due to PEN function (INT_INx = PE12 pin) */
+  HAL_GPIO_EXTI_IRQHandler(INT_INx_Pin);
+}
+
+/**
+  * @brief This function handles DMA2 stream6 global interrupt.
+  */
+void DMA2_Stream6_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream6_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream6_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_usart6_tx);
+  /* USER CODE BEGIN DMA2_Stream6_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream6_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DMA2 stream7 global interrupt.
+  */
+void DMA2_Stream7_IRQHandler(void)
+{
+  /* USER CODE BEGIN DMA2_Stream7_IRQn 0 */
+
+  /* USER CODE END DMA2_Stream7_IRQn 0 */
+  HAL_DMA_IRQHandler(&hdma_usart1_tx);  
+  /* USER CODE BEGIN DMA2_Stream7_IRQn 1 */
+
+  /* USER CODE END DMA2_Stream7_IRQn 1 */
+}
+
+#ifndef UART_FOR_DEBUG
+/**
+  * @brief This function handles USART6 global interrupt.
+  */
+void USART6_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART6_IRQn 0 */
+
+  /* USER CODE END USART6_IRQn 0 */
+  // AUTO-GENERATED BY CUBE-MX but INTENTIONALLY REMOVED --> HAL_UART_IRQHandler(&huart6);
+  debug_IRQHandler();
+  
+  /* USER CODE BEGIN USART6_IRQn 1 */
+
+  /* USER CODE END USART6_IRQn 1 */
+}
+#endif
+
+/**
+  * @brief  This function handles TIM7 V230 OFF interrupt request.
+  * @param  None
+  * @retval None
+  */
+void TIMxV230_IRQHandler (void) 
+{
+  HAL_TIM_IRQHandler(&htimV230); 
+}
+
+#ifndef HW_MP28947
+
+/**
+  * @brief This function handles SPI1 global interrupt.
+  */
+void SPI1_IRQHandler(void)
+{
+  /* USER CODE BEGIN SPI1_IRQn 0 */
+
+  /* USER CODE END SPI1_IRQn 0 */
+  HAL_SPI_IRQHandler(&spi_handle1);
+  /* USER CODE BEGIN SPI1_IRQn 1 */
+
+  /* USER CODE END SPI1_IRQn 1 */
+}
+#endif
+
+/* USER CODE BEGIN 1 */
+
+/* USER CODE END 1 */
+
