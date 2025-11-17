@@ -538,6 +538,59 @@ enum _sck_error
 };
 typedef enum _sck_error sck_error_e;
 
+/* Power manager parameters */
+typedef struct
+{
+
+  uint8_t  Mode;	
+  uint8_t  Emeter;	
+  uint16_t Power;	
+  uint16_t Error;	
+  uint16_t Current;
+  uint16_t Multip;	
+  uint16_t Dmax;	
+  uint16_t Trange;	
+  
+} Pmng_t;
+
+/* Time limited charge */
+typedef struct
+{  
+  
+  uint8_t Mode;
+  uint8_t Time;
+  
+} TCharge_t;
+
+typedef struct
+{
+  
+  uint8_t  Enabled;
+  uint8_t  Visible;
+  uint8_t  Pwd;
+  
+} Hidden_Menu_t;
+
+typedef struct
+{
+  
+  uint8_t  TimeZone;
+  uint8_t  dst;
+  uint8_t  TimeDstOffset;
+  uint8_t  DstStatus;
+  
+} Time_Settings_t;
+
+typedef struct 
+{
+  
+  uint8_t  Enabled;
+  uint8_t  Value;
+  uint8_t  Delta;
+  uint8_t  Hysteresis;
+  
+} Temp_Ctrl_t;
+
 /***************** definizione save config EEPROM info  ***********************/
 #define   NUM_BACKUP_SAVE_EEPROM                ((uint16_t)3)
 
@@ -729,7 +782,35 @@ typedef struct
   uint32_t                      startTimeWebCollaudo;                           /* istante di prima attivazione web server al collaudo          */
   uint16_t                      confDataAndPassStatus;                          /* flag = 0xBBAA con tutti i dati di configurazione presenti    */
   uint32_t                      checksum;                                       /* checksum It is  the sum of all structure byte                */
-
+  uint8_t                       socketEnable;
+  uint8_t                       batteryConfig;
+  uint8_t                       defaultLanguage;
+  uint8_t                       rs485Address;
+  uint8_t                       rtcValid;
+  uint8_t                       socketType;
+  uint32_t                      controlByte;
+  uint8_t                       actuators;
+  uint8_t                       blockDir;
+  uint8_t                       persUidNum;
+  uint8_t                       persMaster;
+  uint32_t                      LangConfig;
+  uint32_t                      TotalEnergy;
+  uint8_t                       StripLEdType;
+  uint8_t                       LcdType;
+  uint16_t                      Energy_limit;
+  uint8_t                       Sinapsi_Installed;
+  uint8_t                       EmeterScu_Int;
+  uint8_t                       Operative_mode;
+  uint8_t                       semFlagControl;
+  uint8_t                       StationNominalPower;
+  uint8_t                       connectorNumber;
+  uint8_t                       postSuspensionTime;
+  Pmng_t                        Pmng;
+  TCharge_t                     TCharge;
+  Hidden_Menu_t                 Hidden_Menu;
+  Time_Settings_t               Time_Settings;
+  Temp_Ctrl_t                   Temp_Ctrl;
+  
 }   infoStation_t;
 
 /* Socket */

@@ -186,9 +186,10 @@ static EEpromMngMsg_st        EEpromMngMsg;
 static uint8_t                eeprom_param_array[EEPROM_PARAM_NUM];
 static uint8_t                eeprom_master_uid_array[CARD_UID_DIM];
 static uint8_t                eeprom_user_map_array[USER_MAP_EEDIM];
+#ifdef OLD_EEPROM_MANAGEMENT
 static uint8_t                eeprom_user_uid_array[CARD_UID_DIM];
 
-#ifdef OLD_EEPROM_MANAGEMENT
+
 static uint8_t                eeprom_do_reset;
 static uint8_t                eeprom_uc_reset;
 
@@ -373,6 +374,9 @@ void Eeprom_Master_User_card_Force_Reset (void)           /* Fixed ticket SCU-76
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 void eeprom_param_set(uint16_t eadd, uint8_t *src_ptr, uint8_t num)
 {
+
+#ifdef MODIFICA_EEPROM_MNG
+  
 uint8_t i, *update_array;
 uint16_t j = 0;
 
@@ -411,6 +415,159 @@ if (SRAM_SCU_Check.BKP_Store)
   BKP_SCU_Image_Store();  
 
 // xx send_to_eeprom(EEPROM_UPDATE);
+
+#else
+
+  switch (eadd)
+  {
+    case EDATA_VALID_EADD:
+      
+      break;
+    case EDATA_NUM_EADD:        
+      break;
+    case SERNUM_BYTE0_EADD:     
+    case SERNUM_BYTE1_EADD:     
+    case SERNUM_BYTE2_EADD:     
+    case SERNUM_BYTE3_EADD:     
+      break;
+    case SOCKET_ENABLE_EADD:    
+      break;
+    case BATTERY_CONFIG_EADD:   
+      break;
+    case LANG_DEFAULT_EADD:     
+      break;
+    case RS485_ADD_EADD:        
+      break;
+    case RTC_VALID_EADD:        
+      break;
+    case EVS_MODE_EADD:         
+      break;
+    case M3T_CURRENT_EADD:      
+      break;
+    case M3S_CURRENT_EADD:      
+      break;
+    case SOCKET_TYPE_EADD:      
+      break;
+    case EMETER_INT_EADD:       
+      break;
+    case CONTROL_BYTE0_EADD:    
+    case CONTROL_BYTE1_EADD:    
+    case CONTROL_BYTE2_EADD:    
+    case CONTROL_BYTE3_EADD:    
+      break;
+    case ACTUATORS_EADD:        
+      break;
+    case BLOCK_DIR_EADD:        
+      break;
+    case PERS_UIDNUM_EADD:      
+      break;
+    case PERS_MASTER_EADD:      
+      break;
+    case PMNG_MODE_EADD:        
+      break;
+    case PMNG_EMETER_EADD:      
+      break;
+    case PMNG_PWRLSB_EADD:      
+      break;
+    case PMNG_PWRMSB_EADD:      
+      break;
+    case PMNG_ERROR_EADD:       
+      break;
+    case PMNG_CURRENT_EADD:     
+      break;
+    case PMNG_MULTIP_EADD:      
+      break;
+    case PMNG_DMAX_EADD:        
+      break;
+    case PMNG_TRANGE_EADD:      
+      break;
+    case TCHARGE_MODE_EADD:     
+      break;
+    case TCHARGE_TIME_EADD:     
+      break;
+    case PMNG_PWDB0_EADD:       
+      break;
+    case PMNG_PWDB1_EADD:       
+      break;
+    case PMNG_PWDB2_EADD:       
+      break;
+    case PMNG_UNBAL_EADD:       
+      break;
+    case LANG_CONFIG0_EADD:     
+      break;
+    case LANG_CONFIG1_EADD:     
+      break;
+    case LANG_CONFIG2_EADD:     
+      break;
+    case LANG_CONFIG3_EADD:     
+      break;
+    case TOT_ENERGY0_EADD:      
+      break;
+    case TOT_ENERGY1_EADD:      
+    case TOT_ENERGY2_EADD:      
+    case TOT_ENERGY3_EADD:      
+      break;
+    case STRIP_LED_TYPE_EADD:   
+      break;
+    case TIME_ZONE_EADD:        
+      break;
+    case DST_EADD:              
+      break;
+    case TIME_DST_OFFSET_EADD:  
+      break;
+    case DST_STATUS_EADD:       
+      break;
+    case LCD_TYPE_EADD:         
+      break;
+    case HIDDEN_MENU_VIS_EADD:  
+      break;
+    case HIDDEN_MENU_ENB_EADD:  
+      break;
+    case ENRG_LIMIT_EADD:       
+      break;
+    case SINAPSI_INST_EADD:     
+      break;
+    case EMETER_SCU_INT_EADD:   
+      break;
+    case OPERATIVE_MODE_EADD:   
+      break;
+    case TEMP_CTRL_ENB_EADD:    
+      break;
+    case TEMP_CTRL_VAL_EADD:    
+      break;
+    case TEMP_DELTA_EADD:       
+      break;
+    case TEMP_HYSTERESIS_EADD:  
+      break;
+    case RS485_ADD_ALIAS_EADD:  
+      break;
+    case SEM_FLAGS_CTRL_EADD:   
+      break;
+    case STATION_NOM_PWR_EADD:  
+      break;
+    case CONNECTOR_NUMBER_EADD: 
+      break;
+    case POST_SUSP_TIME_EADD:   
+      break;
+    default:
+      break;
+     
+  }
+
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation));
+  tPrintf("Infostation data updated!\n\r");
+  EVLOG_Message(EV_INFO, "Infostation data updated!");
+
+  /* Check if a different default value (oxFF) is on productSn, productCode, fakeProductCode 
+     Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
+  SRAM_Check_DEFAULT_of_Code();
+
+  /* Reinit modbus registers according to the new settings */
+  initModbusRegisters();
+
+#endif
+
+
 
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //

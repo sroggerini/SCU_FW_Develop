@@ -2233,7 +2233,7 @@ void SRAM_Check_DEFAULT_of_Code (void)
   forceUpdate |= SRAM_Check_DEFAULT_Value (&pInfoStation->routerPass[0], 0, MAX_ROUTER_PASS_LENGTH); 
   forceUpdate |= SRAM_Check_DEFAULT_Value (&pInfoStation->routerSsid[0], 0, MAX_ROUTER_SSID_LENGTH); 
 
-  if (forceUpdate == TRUE)
+  if (forceUpdate == TRUE) 
   {
     /*              destination                source                   len   */
     memCpyInfoSt((uint8_t*)&infoStation, (uint8_t*)pInfoStation, sizeof(infoStation_t));
@@ -5530,6 +5530,8 @@ void setRplOptionByte(uint8_t rdpLevel)
   * @retval none
   */
 
+#ifdef MODIFICA_EEPROM_MNG
+
 void Station_Cfg_Update (uint8_t EEpromAddr, infoStation_t* pCfgData, uint8_t* pData)
 {
     uint8_t tmp;
@@ -5646,6 +5648,8 @@ void Station_Cfg_Update (uint8_t EEpromAddr, infoStation_t* pCfgData, uint8_t* p
     initModbusRegisters();
 
 }
+
+#endif
 
 /*************** END OF FILE ******************************************************************************************/
 
