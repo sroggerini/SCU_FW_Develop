@@ -730,7 +730,7 @@ typedef __packed struct
 #define KEY_FOR_INFO_VALID      ((uint16_t)0xA8A6)
 
 /* Station general parameters  */
-typedef struct 
+typedef __packed struct 
 {
   char                          name[MAX_NAME_LENGTH];
   /* Info */
@@ -782,34 +782,35 @@ typedef struct
   uint32_t                      startTimeWebCollaudo;                           /* istante di prima attivazione web server al collaudo          */
   uint16_t                      confDataAndPassStatus;                          /* flag = 0xBBAA con tutti i dati di configurazione presenti    */
   uint32_t                      checksum;                                       /* checksum It is  the sum of all structure byte                */
-  uint8_t                       socketEnable;
-  uint8_t                       batteryConfig;
-  uint8_t                       defaultLanguage;
-  uint8_t                       rs485Address;
-  uint8_t                       rtcValid;
-  uint8_t                       socketType;
-  uint32_t                      controlByte;
-  uint8_t                       actuators;
-  uint8_t                       blockDir;
-  uint8_t                       persUidNum;
-  uint8_t                       persMaster;
-  uint32_t                      LangConfig;
-  uint32_t                      TotalEnergy;
-  uint8_t                       StripLEdType;
-  uint8_t                       LcdType;
-  uint16_t                      Energy_limit;
-  uint8_t                       Sinapsi_Installed;
-  uint8_t                       EmeterScu_Int;
-  uint8_t                       Operative_mode;
-  uint8_t                       semFlagControl;
-  uint8_t                       StationNominalPower;
-  uint8_t                       connectorNumber;
-  uint8_t                       postSuspensionTime;
-  Pmng_t                        Pmng;
-  TCharge_t                     TCharge;
-  Hidden_Menu_t                 Hidden_Menu;
-  Time_Settings_t               Time_Settings;
-  Temp_Ctrl_t                   Temp_Ctrl;
+  /*                    From there parameters comes from original eeprom_param_array[]                      */
+  uint8_t                       socketEnable;                                   /* ex SOCKET_ENABLE_EADD    */
+  uint8_t                       batteryConfig;                                  /* ex BATTERY_CONFIG_EADD   */
+  uint8_t                       default_Lang;                                   /* ex LANG_DEFAULT_EADD     */
+  uint8_t                       rs485Address;                                   /* ex RS485_ADD_EADD        */
+  uint8_t                       rtcValid;                                       /* ex RTC_VALID_EADD        */
+  uint8_t                       socketType;                                     /* ex SOCKET_TYPE_EADD      */
+  uint32_t                      controlByte;                                    /* ex CONTROL_BYTE0_EADD - CONTROL_BYTE1_EADD - CONTROL_BYTE2_EADD - CONTROL_BYTE3_EADD */
+  uint8_t                       actuators;                                      /* ex ACTUATORS_EADD        */
+  uint8_t                       blockDir;                                       /* ex BLOCK_DIR_EADD        */
+  uint8_t                       persUidNum;                                     /* ex PERS_UIDNUM_EADD      */
+  uint8_t                       persMaster;                                     /* ex PERS_MASTER_EADD      */ 
+  uint32_t                      LangConfig;                                     /* ex LANG_CONFIG0_EADD - LANG_CONFIG1_EADD - LANG_CONFIG2_EADD - LANG_CONFIG3_EADD */
+  uint32_t                      TotalEnergy;                                    /* ex TOT_ENERGY0_EADD      */
+  uint8_t                       StripLedType;                                   /* ex STRIP_LED_TYPE_EADD   */
+  uint8_t                       LcdType;                                        /* ex LCD_TYPE_EADD         */
+  uint16_t                      Energy_limit;                                   /* ex ENRG_LIMIT_EADD       */
+  uint8_t                       Sinapsi_Installed;                              /* ex SINAPSI_INST_EADD     */
+  uint8_t                       EmeterScu_Int;                                  /* ex EMETER_SCU_INT_EADD   */
+  uint8_t                       Operative_mode;                                 /* ex OPERATIVE_MODE_EADD   */
+  uint8_t                       semFlagControl;                                 /* ex SEM_FLAGS_CTRL_EADD   */
+  uint8_t                       StationNominalPower;                            /* ex STATION_NOM_PWR_EADD  */
+  uint8_t                       connectorNumber;                                /* ex CONNECTOR_NUMBER_EADD */
+  uint8_t                       postSuspensionTime;                             /* ex POST_SUSP_TIME_EADD   */
+  Pmng_t                        Pmng;                                           /* ex PMNG_MODE_EADD - PMNG_EMETER_EADD - PMNG_PWRLSB_EADD - PMNG_ERROR_EADD - PMNG_CURRENT_EADD - PMNG_MULTIP_EADD - PMNG_DMAX_EADD - PMNG_TRANGE_EADD */
+  TCharge_t                     TCharge;                                        /* ex TCHARGE_MODE_EADD - TCHARGE_TIME_EADD */
+  Hidden_Menu_t                 Hidden_Menu;                                    /* ex HIDDEN_MENU_VIS_EADD - HIDDEN_MENU_ENB_EADD */
+  Time_Settings_t               Time_Settings;                                  /* ex TIME_ZONE_EADD - DST_EADD - TIME_DST_OFFSET_EADD - DST_STATUS_EADD */
+  Temp_Ctrl_t                   Temp_Ctrl;                                      /* ex TEMP_CTRL_ENB_EADD - TEMP_CTRL_VAL_EADD - TEMP_DELTA_EADD - TEMP_HYSTERESIS_EADD */
   
 }   infoStation_t;
 

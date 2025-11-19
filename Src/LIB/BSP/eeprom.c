@@ -554,16 +554,6 @@ if (SRAM_SCU_Check.BKP_Store)
      
   }
 
-  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation));
-  tPrintf("Infostation data updated!\n\r");
-  EVLOG_Message(EV_INFO, "Infostation data updated!");
-
-  /* Check if a different default value (oxFF) is on productSn, productCode, fakeProductCode 
-     Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
-  SRAM_Check_DEFAULT_of_Code();
-
-  /* Reinit modbus registers according to the new settings */
-  initModbusRegisters();
 
 #endif
 
@@ -2090,11 +2080,36 @@ void EEPROM_Check_Data_Idle (void)
 
 uint8_t EEPROM_Save_Config (unsigned short Address, unsigned char *Buffer, unsigned short Length)
 {
+  
+  uint8_t result;
+  
   /* Save configuration in RAM */
   // xx eeprom_array_set (Address, Buffer, Length);  
   eeprom_param_set (Address, Buffer, Length);  
+  
   /* Save configuration in EEPROM */
-  return (uint8_t) WriteOnEeprom (Address, Buffer, Length);  
+  result = WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation));
+  
+  /* Check writing result */
+  if (result == 0)
+  {
+    tPrintf("Infostation data updated!\n\r");
+    EVLOG_Message(EV_INFO, "Infostation data updated!");
+
+    /* Check if a different default value (0xFF) is on productSn, productCode, fakeProductCode 
+       Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
+    SRAM_Check_DEFAULT_of_Code();
+
+    /* Reinit modbus registers according to the new settings */
+    initModbusRegisters();
+  }
+  else
+  {
+    tPrintf("Error writing in eeprom\n\r");
+    EVLOG_Message(EV_INFO, "Error writing in eeprom");      
+  }
+  
+  return result;  
   
 }
 

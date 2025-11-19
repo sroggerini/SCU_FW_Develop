@@ -6646,7 +6646,7 @@ uint8_t setPmRemoteSemFlag (uint8_t writeImm)
   semFlag |= HIDDEN_MENU_SEM_ENB; 
   /* save PM enable flag (remote) *****/
   // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&semFlag, 1);
-  eeprom_param_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&semFlag, 1);
+  eeprom_param_set (HIDDEN_MENU_ENB_EADD, (uint8_t*)&semFlag, 1);
   if (writeImm != 0)
   {
     /* save new parameter in EEPROM */
