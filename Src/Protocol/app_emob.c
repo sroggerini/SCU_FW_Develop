@@ -1216,7 +1216,8 @@ static void AppEmobTask_initDataAccess( void )
   db->dataAccess.hwChecks1 = db->rw->scuSetRegister.hwChecks1;
   db->dataAccess.hwChecks2 = db->rw->scuSetRegister.hwChecks2;
   db->dataAccess.hwActuators = db->rw->scuSetRegister.hwActuators;
-  eeprom_param_get( EVS_MODE_EADD, (uint8_t*)(&db->stationMode), 1 );
+  // eeprom_param_get( EVS_MODE_EADD, (uint8_t*)(&db->stationMode), 1 );
+  db->stationMode = infoStation.evs_mode;
 }
 
 static int32_t processModbusRequest( ClientCtl * const client )
@@ -1856,7 +1857,7 @@ static void AppEmobTask_executeProcedure( Procedure * const procedure )
           if( ( db->rw->scuSetRegister.evseMod & 0x00FF ) != OP_MODE_NET )
           {
             db->stationMode = db->rw->scuSetRegister.evseMod;
-            EEPROM_Save_Config ( EVS_MODE_EADD, ( uint8_t* )&db->rw->scuSetRegister.evseMod, 1 );
+            SCU_InfoStation_Set (( uint8_t* )&infoStation.evs_mode, ( uint8_t* )&db->rw->scuSetRegister.evseMod, 1 );  /* ex EVS_MODE_EADD */
             send_to_evs( EVS_AUTORIZATION_MODE );
             exception = PROCEDURE_EXCEPTION_NONE;
             res = 0;
@@ -1901,17 +1902,17 @@ static void AppEmobTask_executeProcedure( Procedure * const procedure )
           {
             if( tCurrent < sCurrent )
             {
-              EEPROM_Save_Config (M3S_CURRENT_EADD, &tCurrent, 1);
+              SCU_InfoStation_Set ((uint8_t *)&infoStation.max_currentSemp, &tCurrent, 1);    /* ex M3S_CURRENT_EADD */
               db->rw->scuSetRegister.maxSimplCurr = tCurrent;
             }
           }
           else
           {
             sCurrent = 16;
-            EEPROM_Save_Config (M3S_CURRENT_EADD, &sCurrent, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.max_currentSemp, &sCurrent, 1);   /* ex M3S_CURRENT_EADD */
             db->rw->scuSetRegister.maxSimplCurr = sCurrent;
           }
-          EEPROM_Save_Config (M3T_CURRENT_EADD, &tCurrent, 1);
+          SCU_InfoStation_Set ((uint8_t *)&infoStation.max_currentSemp, &tCurrent, 1);     /* ex M3T_CURRENT_EADD */
           exception = PROCEDURE_EXCEPTION_NONE;
         }
         else
@@ -2170,7 +2171,9 @@ static int32_t AppEmobTask_savePowerManagementFlags( uint16_t flags )
 {
   uint8_t u8;
   
-  eeprom_param_get( HIDDEN_MENU_ENB_EADD, (uint8_t *)&u8, 1 );
+  // xx eeprom_param_get( HIDDEN_MENU_ENB_EADD, (uint8_t *)&u8, 1 );
+  u8 = infoStation.Hidden_Menu.Enabled;
+    
   if( flags & 0x0001 )
   {
     u8 |= HIDDEN_MENU_PMNG_ENB;
@@ -2179,29 +2182,25 @@ static int32_t AppEmobTask_savePowerManagementFlags( uint16_t flags )
   {
     u8 &= ~HIDDEN_MENU_PMNG_ENB;
   }
-  EEPROM_Save_Config ( HIDDEN_MENU_ENB_EADD, &u8, 1 );
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &u8, 1 );   /* ex HIDDEN_MENU_ENB_EADD */
   
   u8 = 0;
   if( flags & 0x0002 )
   {
     u8 = 1;
   }
-  EEPROM_Save_Config ( PMNG_UNBAL_EADD, (uint8_t*)&u8, 1 );
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, (uint8_t*)&u8, 1 );   /* ex PMNG_UNBAL_EADD */
   return 0;
 }
 
 static int32_t AppEmobTask_savePowerManagementPmax( uint16_t power )
 {
   int32_t res;
-  uint8_t u8;
   
   res = -1;
   if( ( power >= 30 ) && ( power <= 999 ) )
   {
-    u8 = power & 0x00FF;
-    EEPROM_Save_Config (PMNG_PWRLSB_EADD, (uint8_t*)&u8, 1);
-    u8 = power >> 8;
-    EEPROM_Save_Config (PMNG_PWRMSB_EADD, (uint8_t*)&u8, 1);
+    SCU_InfoStation_Set ((uint8_t*)&infoStation.Pmng.Power, (uint8_t*)&power, 2);    /* ex PMNG_PWRLSB_EADD */
     res = 0;
   }
   return res;
@@ -2210,20 +2209,15 @@ static int32_t AppEmobTask_savePowerManagementPmax( uint16_t power )
 static int32_t AppEmobTask_savePowerManagementImin( uint16_t current )
 {
   int32_t res;
-  uint8_t u8;
   
   res = -1;
   if( ( current >= 60 ) && ( current <= 630 ) )
   {
     if( current > 254 )
     {
-      u8 = 255;
-    }
-    else
-    {
-      u8 = current;
-    }
-    EEPROM_Save_Config (PMNG_CURRENT_EADD, (uint8_t*)&u8, 1);
+      current = 255;
+    }    
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Current, (uint8_t*)&current, 1);    /* ex PMNG_CURRENT_EADD */
     res = 0;
   }
   return res;
@@ -2238,7 +2232,7 @@ static int32_t AppEmobTask_savePowerManagementHpow( uint16_t percent )
   u8 = percent - 1;
   if( u8 <= 100 )
   {
-    EEPROM_Save_Config (PMNG_MULTIP_EADD, (uint8_t*)&u8, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Multip, (uint8_t*)&u8, 1);   /* ex PMNG_MULTIP_EADD */
     res = 0;
   }
   return res;
@@ -2260,7 +2254,7 @@ static int32_t AppEmobTask_savePowerManagementDset( uint16_t power )
     {
       u8 = power;
     }
-    EEPROM_Save_Config (PMNG_ERROR_EADD, (uint8_t*)&u8, 1);
+    SCU_InfoStation_Set ((uint8_t*)&infoStation.Pmng.Error, (uint8_t*)&u8, 1);  /* ex PMNG_ERROR_EADD */
     res = 0;
   }
   return res;
@@ -2275,7 +2269,7 @@ static int32_t AppEmobTask_savePowerManagementDmax( uint16_t percent )
   if( ( percent >= 1 ) && ( percent <= 100 ) )
   {
     u8 = percent;
-    EEPROM_Save_Config (PMNG_DMAX_EADD, (uint8_t*)&u8, 1);
+    SCU_InfoStation_Set ((uint8_t*)&infoStation.Pmng.Dmax, (uint8_t*)&u8, 1);   /* ex PMNG_DMAX_EADD */
     res = 0;
   }
   return res;
@@ -2290,7 +2284,7 @@ static int32_t AppEmobTask_savePowerManagementMode( uint16_t mode )
   if( mode <= 2 )
   {
     u8 = mode;
-    EEPROM_Save_Config (PMNG_MODE_EADD, &u8, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, &u8, 1); /* ex PMNG_MODE_EADD */
     res = 0;
   }
   return res;
@@ -2300,7 +2294,9 @@ static int32_t AppEmobTask_savePowerManagementEmex( bool enable )
 {
   uint8_t u8;
   
-  eeprom_param_get( CONTROL_BYTE2_EADD, (uint8_t*)&u8, 1 );
+  // xx eeprom_param_get( CONTROL_BYTE2_EADD, (uint8_t*)&u8, 1 );
+  u8 = infoStation.controlByte.Byte.Byte2;
+    
   if( enable )
   {
     u8 |= EMETER_EXT_CRL2;
@@ -2309,7 +2305,7 @@ static int32_t AppEmobTask_savePowerManagementEmex( bool enable )
   {
     u8 &= ~EMETER_EXT_CRL2;
   }
-  EEPROM_Save_Config (CONTROL_BYTE2_EADD, (uint8_t*)&u8, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, (uint8_t*)&u8, 1);  /* ex CONTROL_BYTE2_EADD */
   send_to_evs( EVS_EXTERNAL_EM_UPDATE );
   return 0;
 }

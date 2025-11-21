@@ -1623,7 +1623,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
                   UpdateGlobalDT();
                   cnt = (char)1;
                   // xx eeprom_array_set(RTC_VALID_EADD, (uint8_t*)&cnt, 1);
-                  EEPROM_Save_Config (RTC_VALID_EADD, (uint8_t*)&cnt, 1);
+                  SCU_InfoStation_Set ((uint8_t *)&infoStation.rtcValid, (uint8_t*)&cnt, 1);          /* ex RTC_VALID_EADD */
                 }
               }
 
@@ -1665,15 +1665,15 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
                 pass[0] &= (~MIRROR_CRL0);
                 /* now save in EEPROM check flag and actuator presence */
                 // xx eeprom_array_set(CONTROL_BYTE0_EADD, (uint8_t *)pass, 1);
-                EEPROM_Save_Config (CONTROL_BYTE0_EADD, (uint8_t *)pass, 1);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte0, (uint8_t *)pass, 1);   /* ex CONTROL_BYTE0_EADD */
                 /* the jolly address must be set */
                 pass[5] = SCU_S_REPL_ADDR - 1;
                 // xx eeprom_array_set(RS485_ADD_EADD, (uint8_t*)&pass[5], 1);
-                EEPROM_Save_Config (RS485_ADD_EADD, (uint8_t*)&pass[5], 1);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.rs485Address, (uint8_t*)&pass[5], 1);        /* ex RS485_ADD_EADD */
                 /* set operative mode SEM Slave and fixed addresss */
                 pass[5] = SCU_SEM_S;
                 // xx eeprom_array_set(OPERATIVE_MODE_EADD, (uint8_t*)&pass[5], 1);               
-                EEPROM_Save_Config (OPERATIVE_MODE_EADD, (uint8_t*)&pass[5], 1);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.Operative_mode, (uint8_t*)&pass[5], 1);        /* ex OPERATIVE_MODE_EADD */
                 setAddressType((uint8_t)SCU_FIXED_ADDR, TRUE);
               }
 
@@ -3190,7 +3190,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             }
             /* now save in EEPROM the control high temperature bit */
             // xx eeprom_array_set(TEMP_CTRL_ENB_EADD, (uint8_t *)&pass[11], 1);
-            EEPROM_Save_Config (TEMP_CTRL_ENB_EADD, (uint8_t *)&pass[11], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Temp_Ctrl.Enabled, (uint8_t *)&pass[11], 1);          /* ex TEMP_CTRL_ENB_EADD */
             
             /* spare */
             pass[3] = (char)0;
@@ -3222,7 +3222,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
 
             /* now save in EEPROM check flag and actuator presence */
             // xx eeprom_array_set(CONTROL_BYTE0_EADD, (uint8_t *)pass, 5);
-            EEPROM_Save_Config (CONTROL_BYTE0_EADD, (uint8_t *)pass, 5);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte0, (uint8_t *)pass, 5);       /* ex CONTROL_BYTE0_EADD */
             
             if ((rfid_state_get() == RFID_ERROR) && (pass[1] & MIFARE_CRL1))
                 send_to_rfid(RFID_CONTROL_UPDATE);
@@ -3247,7 +3247,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             /* set socket code     */
             pass[5] = (char)strtoll (pSocket, NULL, 16);
             // xx eeprom_array_set(SOCKET_TYPE_EADD, (uint8_t*)&pass[5], 1);
-            EEPROM_Save_Config (SOCKET_TYPE_EADD, (uint8_t*)&pass[5], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.socketType, (uint8_t*)&pass[5], 1);    /* ex SOCKET_TYPE_EADD */
             
             /* now find energy meter value */
             while (*pEm != '<')
@@ -3264,7 +3264,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             /* set energy meter code      */
             pass[5] = (char)strtoll (pEm, NULL, 16);
             // xx eeprom_array_set(EMETER_SCU_INT_EADD, (uint8_t*)&pass[5], 1);
-            EEPROM_Save_Config (EMETER_SCU_INT_EADD, (uint8_t*)&pass[5], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.EmeterScu_Int, (uint8_t*)&pass[5], 1);    /* ex EMETER_SCU_INT_EADD */
             switch (pass[5])
             {
               case EMETER_MONO_PH_SCAME:
@@ -3284,7 +3284,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
                 break;
             }
             // xx eeprom_array_set(EMETER_INT_EADD, (uint8_t*)&pass[5], 1);
-            EEPROM_Save_Config (EMETER_INT_EADD, (uint8_t*)&pass[5], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.emTypeInt, (uint8_t*)&pass[5], 1);    /* ex EMETER_INT_EADD */
             setEvsePowerMode();
             
             /* now find corrente massima in Modo3 standard */
@@ -3302,10 +3302,10 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             /* set I max Mode 3 standard     */
             pass[5] = (char)atoi (pImin);
             // xx eeprom_array_set(M3T_CURRENT_EADD, (uint8_t*)&pass[5], 1); 
-            EEPROM_Save_Config (M3T_CURRENT_EADD, (uint8_t*)&pass[5], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.max_current, (uint8_t*)&pass[5], 1);    /* ex M3T_CURRENT_EADD */
             pass[5] = (char)setNominalPower((uint16_t)pass[5]);
             // xx eeprom_array_set(STATION_NOM_PWR_EADD, (uint8_t*)&pass[5], 1); 
-            EEPROM_Save_Config (STATION_NOM_PWR_EADD, (uint8_t*)&pass[5], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.StationNominalPower, (uint8_t*)&pass[5], 1);    /* ex STATION_NOM_PWR_EADD */
             
             /* now find corrente massima in Modo3 semplificato */
             while (*pDset != '<')
@@ -3322,7 +3322,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             /* set I max Mode 3 standard     */
             pass[5] = (char)atoi (pDset);
             // xx eeprom_array_set(M3S_CURRENT_EADD, (uint8_t*)&pass[5], 1);
-            EEPROM_Save_Config (M3S_CURRENT_EADD, (uint8_t*)&pass[5], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.max_currentSemp, (uint8_t*)&pass[5], 1);    /* ex M3S_CURRENT_EADD */
               
             /* now find backup flag  */
             while (*pBack != '<')
@@ -3344,7 +3344,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[6] &= (~BBCK_ATT0);  // clear battery backup flag 
             /* save current value for battery backup */
             // xx eeprom_array_set(BATTERY_CONFIG_EADD, (uint8_t*)&pass[5], 1);
-            EEPROM_Save_Config (BATTERY_CONFIG_EADD, (uint8_t*)&pass[5], 1);   
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.batteryConfig, (uint8_t*)&pass[5], 1);    /* ex BATTERY_CONFIG_EADD */  
            
             if (pass[5] != 0)
             {
@@ -3359,7 +3359,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             }
             /* save current value for battery backup */
             // xx eeprom_array_set(ACTUATORS_EADD, (uint8_t*)&pass[6], 1);
-            EEPROM_Save_Config (ACTUATORS_EADD, (uint8_t*)&pass[6], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.actuators, (uint8_t*)&pass[6], 1);    /* ex ACTUATORS_EADD */
             setHwActuators(pass[6]);  // update hw actuators in the modbus map
 
             /* now find the SCU address on RS485 bus  */
@@ -3382,7 +3382,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             {
               /* a new address must be set */
               // xx eeprom_array_set(RS485_ADD_EADD, (uint8_t*)&pass[5], 1);
-              EEPROM_Save_Config (RS485_ADD_EADD, (uint8_t*)&pass[5], 1);
+              SCU_InfoStation_Set ((uint8_t *)&infoStation.rs485Address, (uint8_t*)&pass[5], 1);          /* ex RS485_ADD_EADD */
               send_to_lcd(LCD_CURRENT_UPDATE);
               activeImmediateReset();
             }
@@ -3392,7 +3392,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
               pass[6] = pass[7] % 10;
               /* set index in fake code in the register */
               // xx eeprom_array_set(CONNECTOR_NUMBER_EADD, (uint8_t*)&pass[6], 1);
-              EEPROM_Save_Config (CONNECTOR_NUMBER_EADD, (uint8_t*)&pass[6], 1);
+              SCU_InfoStation_Set ((uint8_t *)&infoStation.connectorNumber, (uint8_t*)&pass[6], 1);          /* ex CONNECTOR_NUMBER_EADD */
             }
 
             /* now find led strip value */
@@ -3410,7 +3410,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             /* set energy meter code     */
             pass[5] = (char)strtoll (pLs, NULL, 16);
             // xx eeprom_array_set(STRIP_LED_TYPE_EADD, (uint8_t*)&pass[5], 1);
-            EEPROM_Save_Config (STRIP_LED_TYPE_EADD, (uint8_t*)&pass[5], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.StripLedType, (uint8_t*)&pass[5], 1);    /* ex STRIP_LED_TYPE_EADD */
             setNewCurrentLed();
 
             /* notify to EVS manager the changes  */
@@ -3467,7 +3467,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
               else
               {
                 // xx eeprom_array_set(OPERATIVE_MODE_EADD, (uint8_t*)&pass[5], 1);
-                EEPROM_Save_Config (OPERATIVE_MODE_EADD, (uint8_t*)&pass[5], 1);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.Operative_mode, (uint8_t*)&pass[5], 1);        /* ex OPERATIVE_MODE_EADD */
               }
               /* the SCU enviroment mode has been changed: a restart it is necessary */
               activeImmediateReset();
@@ -3523,7 +3523,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
                 case SKT_LOW_SX:
                   pass[14] = ((pass[3] & (uint8_t)(~SKT_POS_MASK)) | (uint8_t)i);
                   // xx eeprom_array_set(LCD_TYPE_EADD, (uint8_t*)&pass[14], 1);
-                  EEPROM_Save_Config (LCD_TYPE_EADD, (uint8_t*)&pass[14], 1);
+                  SCU_InfoStation_Set ((uint8_t *)&infoStation.LcdType, (uint8_t*)&pass[14], 1);     /* ex LCD_TYPE_EADD */
                   break;
 
                 default:
@@ -3555,7 +3555,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
                 setAddressType((uint8_t)(pass[5] & SCU_ADDR_MODE_MASK), FALSE);
                 /* save current value for SEM Flags */
                 // xx eeprom_array_set(SEM_FLAGS_CTRL_EADD, (uint8_t*)&pass[2], 1);
-                EEPROM_Save_Config (SEM_FLAGS_CTRL_EADD, (uint8_t*)&pass[2], 1);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.semFlagControl, (uint8_t*)&pass[2], 1);        /* ex SEM_FLAGS_CTRL_EADD */
                 /* upgrade modbus map */
                 upgradeModbusHwConfig();
               
@@ -3568,7 +3568,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
                 setAddressType((uint8_t)(pass[5] & SCU_ADDR_MODE_MASK), FALSE);
                 /* save current value for SEM Flags */
                 // xx eeprom_array_set(SEM_FLAGS_CTRL_EADD, (uint8_t*)&pass[5], 1);
-                EEPROM_Save_Config (SEM_FLAGS_CTRL_EADD, (uint8_t*)&pass[5], 1);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.semFlagControl, (uint8_t*)&pass[5], 1);        /* ex SEM_FLAGS_CTRL_EADD */
               }
 
               while (*pEmx != '<')
@@ -3582,7 +3582,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
                 /* clear energy value This is important for EM Scame */
                 pass[10] = pass[11] = pass[12] = pass[13] = 0;
                 // xx eeprom_array_set(TOT_ENERGY0_EADD, (uint8_t*)&pass[10], 4);
-                EEPROM_Save_Config (TOT_ENERGY0_EADD, (uint8_t*)&pass[10], 4);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.TotalEnergy, (uint8_t*)&pass[10], 4);       /* ex TOT_ENERGY0_EADD */
                 HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_EM_ENRG_ACT, 0L); 
                 HAL_RTCEx_BKUPWrite((RTC_HandleTypeDef*)getHandleRtc(), (uint32_t)BACKUP_SCAME_TOTAL_ENRG, 0L); 
               }
@@ -3693,7 +3693,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             }
             /* save new group language *****/
             // xx eeprom_array_set(LANG_CONFIG0_EADD, (uint8_t *)pass, 4);
-            EEPROM_Save_Config (LANG_CONFIG0_EADD, (uint8_t *)pass, 4);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.LangConfig, (uint8_t *)pass, 4);       /* ex LANG_CONFIG0_EADD */
             /*** now find power management enable flag */
 
             while (*pSocket != '<')
@@ -3730,7 +3730,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
 #endif
             /* save PM enable flag *****/
             // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, (uint8_t*)&pass[0], 1);    /* ex HIDDEN_MENU_ENB_EADD */
             /* get PM visible flag *****/
             eeprom_param_get(HIDDEN_MENU_VIS_EADD, (uint8_t *)&pass[1], 1);
             pass[1] &= (~HIDDEN_MENU_PMNG_VIS);
@@ -3740,7 +3740,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             }
             /* save PM visible flag *****/
             // xx eeprom_array_set(HIDDEN_MENU_VIS_EADD, (uint8_t*)&pass[1], 1);
-            EEPROM_Save_Config (HIDDEN_MENU_VIS_EADD, (uint8_t*)&pass[1], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, (uint8_t*)&pass[1], 1);           /* ex HIDDEN_MENU_VIS_EADD */
             /* get current power management mode */
             eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&pass[0], 1);
             pass[0] &=(~(char)PMNG_MODE_MASK);
@@ -3749,7 +3749,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[0] |= (char)(i);
             /* save received power management mode */
             // xx eeprom_array_set(PMNG_MODE_EADD, (uint8_t *)&pass[0], 1);
-            EEPROM_Save_Config (PMNG_MODE_EADD, (uint8_t *)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, (uint8_t *)&pass[0], 1);           /* ex PMNG_MODE_EADD */
             
             /* Update modbus register */
             setPmMode(pass[0]);
@@ -3778,8 +3778,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             /* save PMAX value as KW * 10 unit measure  *****/
             // xx eeprom_array_set(PMNG_PWRLSB_EADD, (uint8_t*)&pass[0], 1);
             // xx eeprom_array_set(PMNG_PWRMSB_EADD, (uint8_t*)&pass[1], 1);
-            EEPROM_Save_Config (PMNG_PWRLSB_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (PMNG_PWRMSB_EADD, (uint8_t*)&pass[1], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Power, (uint8_t*)&i, 2);    /* ex PMNG_PWRLSB_EADD */
 
             /*** now find Imin value */
             while (*pImin != '<')
@@ -3798,7 +3797,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[0] = (char)i;
             /* save Imin value   *****/
             // xx eeprom_array_set(PMNG_CURRENT_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (PMNG_CURRENT_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Current, (uint8_t*)&pass[0], 1);    /* ex PMNG_CURRENT_EADD */
             
             /*** now find HPOWER value */
             while (*pHpwr != '<')
@@ -3817,7 +3816,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[0] = (char)(i - 1);
             /* save HPOWER value   *****/
             // xx eeprom_array_set(PMNG_MULTIP_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (PMNG_MULTIP_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Multip, (uint8_t*)&pass[0], 1);    /* ex PMNG_MULTIP_EADD */
             
             /*** now find DSET value */
             while (*pDset != '<')
@@ -3836,7 +3835,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[0] = (char)( i / (int32_t)100);
             /* save DSET value as KW * 10 unit measure  *****/
             // xx eeprom_array_set(PMNG_ERROR_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (PMNG_ERROR_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Error, (uint8_t*)&pass[0], 1);     /* ex PMNG_ERROR_EADD */
             
             /*** now find DMAX value */
             while (*pDmax != '<')
@@ -3855,7 +3854,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[0] = (char)i;
             /* save DMAX value as percentile  *****/
             // xx eeprom_array_set(PMNG_DMAX_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (PMNG_DMAX_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Dmax, (uint8_t*)&pass[0], 1);            /* ex PMNG_DMAX_EADD */
             
             /*** now find unbalanced enable flag */
             while (*pUnb != '<')
@@ -3870,7 +3869,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             }
             /* save Unbalance enable flag *****/
             // xx eeprom_array_set(PMNG_UNBAL_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (PMNG_UNBAL_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, (uint8_t*)&pass[0], 1);         /* ex PMNG_UNBAL_EADD */
             
             /* Update modbus map */
             setPowerManagementRegisters (); 
@@ -3914,10 +3913,10 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
 
             /* save EMEX enable flag *****/
             // xx eeprom_array_set(CONTROL_BYTE2_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (CONTROL_BYTE2_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, (uint8_t*)&pass[0], 1);    /* ex CONTROL_BYTE2_EADD */
             /* save SINAPSI enable flag *****/
             // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&pass[3], 1);
-            EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, (uint8_t*)&pass[3], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, (uint8_t*)&pass[3], 1);    /* ex HIDDEN_MENU_ENB_EADD */
 
             /* save SINAPSI error counter  *****/
             if (pass[1] & SIN_RES_ERR_CRL2 )
@@ -3939,7 +3938,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             }
             /* save fasce orarie enable flag *****/
             // xx eeprom_array_set(PMNG_TRANGE_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (PMNG_TRANGE_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Trange, (uint8_t*)&pass[0], 1);            /* ex PMNG_TRANGE_EADD */
 
             /*** now find charge in time enable flag */
             while (*pAbCT != '<')
@@ -3954,7 +3953,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             }
             /* save charge in time enable flag *****/
             // xx eeprom_array_set(TCHARGE_MODE_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (TCHARGE_MODE_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge, (uint8_t*)&pass[0], 1);    /* ex TCHARGE_MODE_EADD */
 
             /* get info for parameter charge time visibility                         */
             eeprom_param_get(HIDDEN_MENU_VIS_EADD, (uint8_t *)&pass[1], 1);
@@ -3966,7 +3965,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             }
             /* save PM visible flag *****/
             // xx eeprom_array_set(HIDDEN_MENU_VIS_EADD, (uint8_t*)&pass[1], 1);
-            EEPROM_Save_Config (HIDDEN_MENU_VIS_EADD, (uint8_t*)&pass[1], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, (uint8_t*)&pass[1], 1);    /* ex HIDDEN_MENU_VIS_EADD */
             
             /* Update modbus MENU_VISIBILITY_RW 0x0040 register */
             setPmMenuVisibility((uint8_t)pass[1]);
@@ -3989,7 +3988,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[0] = (char)( i / (int32_t)30);
             /* save charge in time value as 30 min step unit measure  *****/
             // xx eeprom_array_set(TCHARGE_TIME_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (TCHARGE_TIME_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge, (uint8_t*)&pass[0], 1);    /* ex TCHARGE_TIME_EADD */
             
             /*** now find charge energy max value */
             while (*pMaxEnergy != '<')
@@ -4012,7 +4011,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[0] = (char)(i);
             /* save energy value in KWh unit  *****/
             // xx eeprom_array_set(ENRG_LIMIT_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (ENRG_LIMIT_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Energy_limit, (uint8_t*)&pass[0], 1);    /* ex ENRG_LIMIT_EADD */
             
             /*** now find time zone value */
             while (*pGMT != '<')
@@ -4031,7 +4030,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[0] = (char)(i);
             /* save time zone   *****/
             // xx eeprom_array_set(TIME_ZONE_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (TIME_ZONE_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Time_Settings.TimeZone, (uint8_t*)&pass[0], 1);    /* ex TIME_ZONE_EADD */
             
             /*** now find daylight enable flag  value */
             while (*pDST != '<')
@@ -4050,7 +4049,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             pass[0] = (char)(i);
             /* save DST flag   *****/
             // xx eeprom_array_set(DST_EADD, (uint8_t*)&pass[0], 1);
-            EEPROM_Save_Config (DST_EADD, (uint8_t*)&pass[0], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Time_Settings.dst, (uint8_t*)&pass[0], 1);    /* ex DST_EADD */
             
             /*** now find set date and time Flag  */
             while (*pDeT != '<')
@@ -4077,7 +4076,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
               UpdateGlobalDT();
               cnt = (char)1;
               // xx eeprom_array_set(RTC_VALID_EADD, (uint8_t*)&cnt, 1);
-              EEPROM_Save_Config (RTC_VALID_EADD, (uint8_t*)&cnt, 1);
+              SCU_InfoStation_Set ((uint8_t *)&infoStation.rtcValid, (uint8_t*)&cnt, 1);      /* ex RTC_VALID_EADD */
             }
 
             /*** now find operative mode flag  */
@@ -4100,7 +4099,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             {
               /* set the current operative mode                       */
               // xx eeprom_array_set(EVS_MODE_EADD, (uint8_t*)&pass[0], 1);
-              EEPROM_Save_Config (EVS_MODE_EADD, (uint8_t*)&pass[0], 1);
+              SCU_InfoStation_Set ((uint8_t *)&infoStation.evs_mode, (uint8_t*)&pass[0], 1);          /* ex EVS_MODE_EADD */
               send_to_evs(EVS_AUTORIZATION_MODE);
             }
 
@@ -4210,7 +4209,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
 
             /* set the current LCD type and WiFi Mode                        */
             // xx eeprom_array_set(LCD_TYPE_EADD, (uint8_t*)&pass[1], 1);
-            EEPROM_Save_Config (LCD_TYPE_EADD, (uint8_t*)&pass[1], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.LcdType, (uint8_t*)&pass[1], 1);    /* ex LCD_TYPE_EADD */
             
             /* update status */
             send_to_evs(EVS_EXTERNAL_EM_UPDATE);
@@ -5730,6 +5729,7 @@ static void scuGsyDwldTask (void * pvParameters)
                     if (codeError == 0)
                     {
                       codeError = (uint16_t)WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&pConfPar->blockConfPar[0].confInfoStation, sizeof (infoStation_t));
+                      
                     }
                     if (codeError == 0)
                     {
@@ -6834,6 +6834,8 @@ void getIdModelFromStringAndParConfig (char* pIdModel)
 void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAddr)
 {
 
+  uint16_t tmp16;
+  
   /* id model product */
   pass[0] = (char)currModel;
   /* scu address RS485 */
@@ -6844,7 +6846,7 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
 
   /* now save in EEPROM check flag and actuator presence */
   // xx eeprom_array_set(CONTROL_BYTE0_EADD, (uint8_t *)&prodConfVal[pass[0]][0], 5);
-  EEPROM_Save_Config (CONTROL_BYTE0_EADD, (uint8_t *)&prodConfVal[pass[0]][0], 5);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte0, (uint8_t *)&prodConfVal[pass[0]][0], 5);     /* ex CONTROL_BYTE0_EADD */
 
   /* Set in modbus map */
   setHwChecks((prodConfVal[pass[0]][1] << 8) | prodConfVal[pass[0]][0], (prodConfVal[pass[0]][3] << 8) | prodConfVal[pass[0]][2]);
@@ -6888,8 +6890,8 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
         /* reset info for energy meter   */
         setEmModelReg(EMETER_TAMP_3, INTERNAL_EM);
         // xx eeprom_array_set(EMETER_SCU_INT_EADD, (uint8_t*)&pass[5], 1);
-        EEPROM_Save_Config (EMETER_SCU_INT_EADD, (uint8_t*)&pass[5], 1);
-        EEPROM_Save_Config (EMETER_INT_EADD, (uint8_t*)&pass[5], 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.EmeterScu_Int, (uint8_t*)&pass[5], 1);    /* ex EMETER_SCU_INT_EADD */
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.emTypeInt, (uint8_t*)&pass[5], 1);        /* ex EMETER_INT_EADD */
       }
     }
     else
@@ -6901,22 +6903,22 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
         /* reset info for energy meter   */
         setEmModelReg(EMETER_TAMP, INTERNAL_EM);
         // xx eeprom_array_set(EMETER_SCU_INT_EADD, (uint8_t*)&pass[5], 1);
-        EEPROM_Save_Config (EMETER_SCU_INT_EADD, (uint8_t*)&pass[5], 1);
-        EEPROM_Save_Config (EMETER_INT_EADD, (uint8_t*)&pass[5], 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.EmeterScu_Int, (uint8_t*)&pass[5], 1);     /* ex EMETER_SCU_INT_EADD */
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.emTypeInt, (uint8_t*)&pass[5], 1);         /* ex EMETER_INT_EADD */
       }
     }
   }
   /* save PM visible flag *****/
   // xx eeprom_array_set(HIDDEN_MENU_VIS_EADD, (uint8_t*)&pass[10], 1);
-  EEPROM_Save_Config (HIDDEN_MENU_VIS_EADD, (uint8_t*)&pass[10], 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, (uint8_t*)&pass[10], 1);     /* ex HIDDEN_MENU_VIS_EADD */
   /* save PM enable flag *****/
   // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&pass[11], 1);
-  EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, (uint8_t*)&pass[11], 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, (uint8_t*)&pass[11], 1);     /* ex HIDDEN_MENU_ENB_EADD */
   /* save PMAX value as KW * 10 unit measure  *****/
   // xx eeprom_array_set(PMNG_PWRLSB_EADD, (uint8_t*)&pass[2], 1);
   // xx eeprom_array_set(PMNG_PWRMSB_EADD, (uint8_t*)&pass[3], 1);
-  EEPROM_Save_Config (PMNG_PWRLSB_EADD, (uint8_t*)&pass[2], 1);
-  EEPROM_Save_Config (PMNG_PWRMSB_EADD, (uint8_t*)&pass[3], 1);
+  tmp16 = pass[2] | (pass[3] << 8);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Power, (uint8_t*)&tmp16, 2);        /* ex PMNG_PWRLSB_EADD - PMNG_PWRMSB_EADD */
 
   pass[1] = (char)SOCKET_T2_NO_LID; /* 2B */
   pass[6] = (char)0;                /* battery backup OFF */
@@ -6964,10 +6966,10 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
     pass[6] = (char)1;                  /* battery backup ON */                                 
   }
   // xx eeprom_array_set(SOCKET_TYPE_EADD, (uint8_t*)&pass[1], 1);                                    
-  EEPROM_Save_Config (SOCKET_TYPE_EADD, (uint8_t*)&pass[1], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.socketType, (uint8_t*)&pass[1], 1);        /* ex SOCKET_TYPE_EADD */
   /* set backup flag: 1 = active      */                                                        
   // xx eeprom_array_set(BATTERY_CONFIG_EADD, (uint8_t*)&pass[6], 1);                                 
-  EEPROM_Save_Config (BATTERY_CONFIG_EADD, (uint8_t*)&pass[6], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.batteryConfig, (uint8_t*)&pass[6], 1);      /* ex BATTERY_CONFIG_EADD */
                                                                                                 
   pass[6] = (char)LED_STRIP_06;                                                                 
   if((pass[0] == (uint8_t)ID_204_CA21B_T2T2) || (pass[0] == (uint8_t)ID_204_CA21B_T2xT2x) || (pass[0] == (uint8_t)ID_204_CA21B_UNUN) ||
@@ -6994,7 +6996,7 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
     }
   }
   // xx eeprom_array_set(STRIP_LED_TYPE_EADD, (uint8_t*)&pass[6], 1);
-  EEPROM_Save_Config (STRIP_LED_TYPE_EADD, (uint8_t*)&pass[6], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.StripLedType, (uint8_t*)&pass[6], 1);    /* ex STRIP_LED_TYPE_EADD */
   setNewCurrentLed();
 
   /* set variable for sinapsi   *****/
@@ -7056,7 +7058,7 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
   }
                                                                                            
   // xx eeprom_array_set(LCD_TYPE_EADD, (uint8_t*)&pass[1], 1);                                       
-  EEPROM_Save_Config (LCD_TYPE_EADD, (uint8_t*)&pass[1], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.LcdType, (uint8_t*)&pass[1], 1);         /* ex LCD_TYPE_EADD */
 
   /* get current status for sinapsi and visibility */
   eeprom_param_get(CONTROL_BYTE2_EADD, (uint8_t*)&pass[11], 1);
@@ -7077,14 +7079,14 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
 
   /* save EMEX enable flag *****/
   // xx eeprom_array_set(CONTROL_BYTE2_EADD, (uint8_t*)&pass[11], 1);
-  EEPROM_Save_Config (CONTROL_BYTE2_EADD, (uint8_t*)&pass[11], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.controlByte.Byte.Byte2, (uint8_t*)&pass[11], 1);     /* ex CONTROL_BYTE2_EADD */
   /* save SINAPSI enable flag *****/
   // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&pass[3], 1);
-  EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, (uint8_t*)&pass[3], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.Hidden_Menu.Enabled, (uint8_t*)&pass[3], 1);         /* ex HIDDEN_MENU_ENB_EADD */
 
   /* save PM visible flag *****/
   // xx eeprom_array_set(HIDDEN_MENU_VIS_EADD, (uint8_t*)&pass[8], 1);
-  EEPROM_Save_Config (HIDDEN_MENU_VIS_EADD, (uint8_t*)&pass[8], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.Hidden_Menu.Visible, (uint8_t*)&pass[8], 1);         /* ex HIDDEN_MENU_VIS_EADD */
     
   /* now find corrente massima in Modo3 standard */
   /* default typical current is 32A  */
@@ -7097,16 +7099,16 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
   }
 
   // xx eeprom_array_set(M3T_CURRENT_EADD, (uint8_t*)&pass[13], 1); 
-  EEPROM_Save_Config (M3T_CURRENT_EADD, (uint8_t*)&pass[13], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.max_current, (uint8_t*)&pass[13], 1);       /* ex M3T_CURRENT_EADD */
   
   pass[13] = (char)setNominalPower((uint16_t)pass[13]);
   // xx eeprom_array_set(STATION_NOM_PWR_EADD, (uint8_t*)&pass[13], 1); 
-  EEPROM_Save_Config (STATION_NOM_PWR_EADD, (uint8_t*)&pass[13], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.StationNominalPower, (uint8_t*)&pass[13], 1);    /* ex STATION_NOM_PWR_EADD */
     
   /* corrente massima in Modo3 semplificato is 16A for all products */
   pass[13] = 16; 
   // xx eeprom_array_set(M3S_CURRENT_EADD, (uint8_t*)&pass[13], 1);
-  EEPROM_Save_Config (M3S_CURRENT_EADD, (uint8_t*)&pass[13], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.max_currentSemp, (uint8_t*)&pass[13], 1);     /* ex M3S_CURRENT_EADD */
 
   pass[14] = SKT_HIHG_SX; // set as default the socket position HIGH on the Left 
   /*** a default address 16 (logical 15) must be set if the current address in undefined ***/
@@ -7120,14 +7122,14 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
       pass[1] = 0; pass[17] = 1; pass[12] = (char)SCU_SEM_M;
     }
     // xx eeprom_array_set(RS485_ADD_EADD, (uint8_t*)&pass[1], 1);
-    EEPROM_Save_Config (RS485_ADD_EADD, (uint8_t*)&pass[1], 1);
+    SCU_InfoStation_Set ((uint8_t*)&infoStation.rs485Address, (uint8_t*)&pass[1], 1);    /* ex RS485_ADD_EADD */
   }
   else
   {
     pass[12] = (char)SCU_SEM_S;
     pass[1] = pass[17] - 1;
     // xx eeprom_array_set(RS485_ADD_EADD, (uint8_t*)&pass[1], 1);
-    EEPROM_Save_Config (RS485_ADD_EADD, (uint8_t*)&pass[1], 1);
+    SCU_InfoStation_Set ((uint8_t*)&infoStation.rs485Address, (uint8_t*)&pass[1], 1);    /* ex RS485_ADD_EADD */
   }
 
   if (pass[0] < ID_204_CA21B_T2T2)
@@ -7151,7 +7153,7 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
   }
   /* in this context the addres is the index for fake code */
   // xx eeprom_array_set(CONNECTOR_NUMBER_EADD, (uint8_t*)&pass[6], 1);
-  EEPROM_Save_Config (CONNECTOR_NUMBER_EADD, (uint8_t*)&pass[6], 1);
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.connectorNumber, (uint8_t*)&pass[6], 1);      /* ex CONNECTOR_NUMBER_EADD */
 
   /* set all parameter in according with SEM enviroment */
   if (pass[17] == SCU_M_P_ADDR)
@@ -7184,7 +7186,7 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
         setPmRemoteSemFlag(0);
       }
       // xx eeprom_array_set(SEM_FLAGS_CTRL_EADD, (uint8_t*)&pass[1], 1);
-      EEPROM_Save_Config (SEM_FLAGS_CTRL_EADD, (uint8_t*)&pass[1], 1);
+      SCU_InfoStation_Set ((uint8_t*)&infoStation.semFlagControl, (uint8_t*)&pass[1], 1);          /* ex SEM_FLAGS_CTRL_EADD */
       setAddressType((uint8_t)pass[8], TRUE);
     }
   }
@@ -7197,7 +7199,7 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
     ResetPmRemoteSemFlag (0);
   }
   // xx eeprom_array_set(OPERATIVE_MODE_EADD, (uint8_t*)&pass[2], 1);
-  EEPROM_Save_Config (OPERATIVE_MODE_EADD, (uint8_t*)&pass[2], 1);  
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.Operative_mode, (uint8_t*)&pass[2], 1);      /* ex OPERATIVE_MODE_EADD */
   
   /* set SCU socket position. Read current status on pass[3]       */
   eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&pass[3], 1);
@@ -7210,7 +7212,7 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
     case SKT_LOW_SX:
       pass[4] = ((pass[3] & (uint8_t)(~SKT_POS_MASK)) | (uint8_t)pass[14]);
       // xx eeprom_array_set(LCD_TYPE_EADD, (uint8_t*)&pass[4], 1);
-      EEPROM_Save_Config (LCD_TYPE_EADD, (uint8_t*)&pass[4], 1);
+      SCU_InfoStation_Set ((uint8_t*)&infoStation.LcdType, (uint8_t*)&pass[4], 1);          /* ex LCD_TYPE_EADD */
       break;
 
     default:

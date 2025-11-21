@@ -661,8 +661,9 @@ uint8_t checkVbusFlag(void)
   statusFlag_e   flagVbus; 
 
   /* set station V230 control from   CONTROL_BYTE1_EADD bit  VBUS_CRL1  */
-  eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
-  flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
+  // xx eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
+  
+  flagVbus = (((uint8_t)infoStation.controlByte.Byte.Byte1 & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
   
   if ((flagVbus == ENABLED) && ((infoV230.statusV230 == V230_ABSENT) || (infoV230.statusV230 == V230_KO_WINDOW)))
   {
@@ -718,9 +719,9 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     {
       if (getCollaudoRunning() == FALSE) 
       {
-        eeprom_param_get(CONTROL_BYTE0_EADD, &rcdm_enable, 1);
+        // xx eeprom_param_get(CONTROL_BYTE0_EADD, &rcdm_enable, 1);
         
-        if ((GPIO_Pin == RCDM_Pin) && ((rcdm_enable & RCDM_CRL0) != 0))
+        if ((GPIO_Pin == RCDM_Pin) && ((infoStation.controlByte.Byte.Byte0 & RCDM_CRL0) != 0))
         {
            if (getCollaudoRunning() == FALSE) 
            {
@@ -1530,8 +1531,9 @@ void stopNewTransaction( uint32_t activeEnergy )
   
   /* if a schedulation is enabled send REMOTE SUSPENDING event, otherwise give the REMOTE RELEASE */
   /* Do it only when the wifi is enabled  */
-  eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&lcdEepromFlags, 1);
-  if ((lcdEepromFlags & WIFI_MASK) == WIFI_ON)
+  // xx eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&lcdEepromFlags, 1);
+  
+  if ((infoStation.LcdType & WIFI_MASK) == WIFI_ON)
   {
     if(Scheduler_isDisabled())
     {
@@ -2455,8 +2457,7 @@ void setGeneralStationParameters(uint8_t Type)
 void initModbusRegisters(void)
 {
     
-  uint8_t checks1[2] = {0,0};
-  uint8_t checks2[2] = {0,0};
+  uint8_t check1_tmp;
   uint8_t actuators = 0;
   uint16_t checks1Mod = 0;
   uint16_t checks2Mod = 0;
@@ -2466,60 +2467,61 @@ void initModbusRegisters(void)
   uint8_t langAvail[4];
   uint8_t timeZone = 0;
   uint32_t languages = 0;
-  uint8_t  connNum, tmp;
+  uint8_t  tmp;
   uint16_t current;
   
   /* if in Master Iso mode, the informations in modbus map aren't important */  
-  eeprom_param_get(OPERATIVE_MODE_EADD, (uint8_t *)&tmp, 1);
+  // xx eeprom_param_get(OPERATIVE_MODE_EADD, (uint8_t *)&tmp, 1);
+  
   /* So, if the SCU is in master stand alone mode, exit */
-  if (tmp == SCU_SEM_STAND_ALONE)
+  if (infoStation.Operative_mode == SCU_SEM_STAND_ALONE)
     return;
   
   /* Dalla versione modbus V24 le due cifre del display non necessariamente esprimono il modbus address: questo ? solo il default  */          
-  setDevAlias();
+  setDevAlias();                                                                                /* RS485_ADD_EADD  */
   
   /* Capire se questa funzione andrà bene e completare i flag */
-  setHwFlags();
+  setHwFlags();                                                                                 /* LCD_TYPE_EADD */
   
   /* Set current power Outage  */
-  powerOutageUodate();
+  powerOutageUodate();   /* GENERIC ???? */
 
   /* Set current number of leds  */
-  setNumberOfLeds();
+  setNumberOfLeds();                                                                            /* STRIP_LED_TYPE_EADD */
 
   /* Set current modbus version  */
-  setModbusVersion(CURR_MODBUS_VERSION);
+  setModbusVersion(CURR_MODBUS_VERSION);                                                        /* GENERIC ??? */
    
   /* Set internal and external energy meter in modbus map */
-  setEnergyMetersType();
+  setEnergyMetersType();                                                                        /* infoStation.emTypeInt - infoStationemTypeExt */
   
   /* Set station operation mode in modbus (free, personal or net) */
-  setStationOperationMode();
+  setStationOperationMode();                                                                    /* infoStation.evs_mode */
   
   /* Set register BOARD_FW_VERSION_RO and BOOT VERSION */
-  setFwVersion((char*)&infoStation.firmware);
+  setFwVersion((char*)&infoStation.firmware);                                                   /* GENERIC ??? */
   
   /* Init product serial number 100xxxxxx */
-  iniProductSerialNumber((char*)getProductSerialNumberEeprom(), PRODUCT_SN_LENGTH);
+  iniProductSerialNumber((char*)getProductSerialNumberEeprom(), PRODUCT_SN_LENGTH);             /* PRODUCT SERIAL NUMBER */
 
   /* Set board serial number Ex: 00013440 */
-  iniBoardSerialNumber((char*)getStationSerialNumber(), BOARD_SN_LENGTH);
+  iniBoardSerialNumber((char*)getStationSerialNumber(), BOARD_SN_LENGTH);                       /* infoStation.serial */
 
   /* Set product code string Ex: 204.CA23B-T2T2W1 */
-  iniProductCodeString((char*)getStationProductCodeString(), PRODUCT_CODE_LENGTH);
+  iniProductCodeString((char*)getStationProductCodeString(), PRODUCT_CODE_LENGTH);              /* infoStation.productCode */
 
   /* Set fake code string Ex: 204CA51FF */
-  iniProductFakeString((char*)getStationFakeCodeCodeString(), FAKE_CODE_LENGTH);
+  iniProductFakeString((char*)getStationFakeCodeCodeString(), FAKE_CODE_LENGTH);                /* infoStation.fakeProductCode */
 
   /* Set register HW_REVISION_RO */
-  setHwVersion(getScuHWverFromEeprom());
+  setHwVersion(getScuHWverFromEeprom());                                                        /* GENERIC ??? */
   
   /* Set MIFARE fw version: null as default Initialization in RfidMng.c  */
   //setMifareFwVersion("");
   
   /* Set Connector number in the EVSE 1 = alto sx; 2 = Alto dx; 3 = basso sx; 4 = basso dx */
-  eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&connNum, 1);
-  switch(connNum & SKT_POS_MASK)
+  // xx eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&connNum, 1);                                      /* LCD_TYPE_EADD */  
+  switch(infoStation.LcdType & SKT_POS_MASK)
   {
     case SKT_HIHG_DX:
       tmp = (uint16_t)SKT_HIHG_DX_MB;
@@ -2534,93 +2536,95 @@ void initModbusRegisters(void)
       tmp = (uint16_t)SKT_HIHG_SX_MB;
       break;
   }
-	eeprom_param_get(CONNECTOR_NUMBER_EADD, (uint8_t *)&connNum, 1);
-	setConnectorNumber(tmp, connNum);
+  
+  // xx eeprom_param_get(CONNECTOR_NUMBER_EADD, (uint8_t *)&connNum, 1);                              /* CONNECTOR_NUMBER_EADD */ 
+  setConnectorNumber(tmp, infoStation.connectorNumber);
   
   /* Set Connector type in the EVSE  */
-  setConnectorType();
+  setConnectorType();                                                                           /* SOCKET_TYPE_EADD */
 
   /* Set maximum typical current */
-  current = setMaxTypicalCurrent();
+  current = setMaxTypicalCurrent();                                                             /* M3T_CURRENT_EADD */
   
   /* Set maximum simplified current */
-  setMaxSimplifiedCurrent();
+  setMaxSimplifiedCurrent();                                                                    /* M3S_CURRENT_EADD */
 
   /* Set nominal power for this product  */
-  setNominalPower(current);
+  setNominalPower(current);                                                                     /* infoStation.emTypeInt */
 
   /* Set the current UTC time for the SCU */
   // setUtcDateTimeRegister();   spostato in dbg_task.c 
   
   /* Set schedulation saved in Eeprom */
-  setSchedulationInModbusTable(getSchedulationFromMemory());
+  setSchedulationInModbusTable(getSchedulationFromMemory());                                    /* GENERIC ??? */
   
   /* Set esito update fw in modbus Map */
-  setUpdateFirmwareByAppResult();
+  setUpdateFirmwareByAppResult();                                                               /* GENERIC ??? */
   
   /* Set parametri power management */
-  setPowerManagementRegisters();
+  setPowerManagementRegisters();                                                                /* PMNG_UNBAL_EADD - PMNG_TRANGE_EADD - PMNG_PWRLSB_EADD ... */
   
   /* Set men? PM non visibile */
-  eeprom_param_get(HIDDEN_MENU_VIS_EADD, &menuVisibility, 1);
-  setPmMenuVisibility(menuVisibility);
+  // xx eeprom_param_get(HIDDEN_MENU_VIS_EADD, &menuVisibility, 1);                                   /* HIDDEN_MENU_VIS_EADD */
+  setPmMenuVisibility(infoStation.Hidden_Menu.Visible);
   
   /* Set men? visibile o meno della ricarica a tempo / a energia*/
-  setChargeTimeVisibility(menuVisibility);
+  setChargeTimeVisibility(infoStation.Hidden_Menu.Visible);                                                      /* HIDDEN_MENU_VIS_EADD */
   
   /* Set EVSE power mode for app information */
-  setEvsePowerMode();
+  setEvsePowerMode();                                                                           /* set at the same time of 'setEnergyMetersType' */
   
   /* Set checks and actuators saved in eeprom in the modbus map */
-  eeprom_param_get(CONTROL_BYTE0_EADD, checks1, 2);
-  checks1[0] &= (uint8_t)(~(REMOTE_CRL0 | PULS_CRL0));  // i bit 4 e 5 hanno un altro significato ovvero BLE e WiFi
-  eeprom_param_get(CONTROL_BYTE2_EADD, checks2, 2);
-  eeprom_param_get(ACTUATORS_EADD, &actuators, 1);
+  // xx eeprom_param_get(CONTROL_BYTE0_EADD, checks1, 2);                                             /* CONTROL_BYTE0_EADD - CONTROL_BYTE2_EADD - ACTUATORS_EADD - TEMP_CTRL_ENB_EADD */
+  check1_tmp = infoStation.controlByte.Byte.Byte0;
+  check1_tmp &= (uint8_t)(~(REMOTE_CRL0 | PULS_CRL0));  // i bit 4 e 5 hanno un altro significato ovvero BLE e WiFi
+  // xx eeprom_param_get(CONTROL_BYTE2_EADD, checks2, 2); 
+  // xx eeprom_param_get(ACTUATORS_EADD, &actuators, 1);
      
-  checks1Mod = (checks1[1] << 8) | checks1[0]; 
-  checks2Mod = (checks2[1] << 8) | checks2[0];
+  checks1Mod = (infoStation.controlByte.Byte.Byte1 << 8) | infoStation.controlByte.Byte.Byte0; 
+  checks2Mod = (infoStation.controlByte.Byte.Byte3 << 8) | infoStation.controlByte.Byte.Byte2;
   /* recovery HGTP bit */
-  eeprom_param_get(TEMP_CTRL_ENB_EADD, &tmp, 1);
+  // xx eeprom_param_get(TEMP_CTRL_ENB_EADD, &tmp, 1);
   checks2Mod &= (uint16_t)(~ERROR2_HGTP); //  
-  if ((tmp & CTRL_HGTP_BIT) != 0)
+  if ((infoStation.Temp_Ctrl.Enabled & CTRL_HGTP_BIT) != 0)
   {
     checks2Mod |= (uint16_t)(ERROR2_HGTP); // set high temperature control bit  
   }
   
-  if (actuators & PAUT_ATT0)
+  if (infoStation.actuators & PAUT_ATT0)
   {
     checks2Mod |= (uint16_t)(PAUT_CRL2); // set PAUT 
   }  
   
   setHwChecks(checks1Mod, checks2Mod);
-  setHwActuators(actuators);
+  setHwActuators(infoStation.actuators);
   
   /* get CHARGE IN TIME         */
   /* Time here is saved as step of 30min */
-  eeprom_param_get(TCHARGE_TIME_EADD, (uint8_t *)&pmMode, 1);
-  setChargeByTime(pmMode); 
+  // xx eeprom_param_get(TCHARGE_TIME_EADD, (uint8_t *)&pmMode, 1);                                   /* TCHARGE_TIME_EADD */  
+  setChargeByTime(infoStation.TCharge.Time); 
   
   /* get ENERGY CHARGING         */
-  eeprom_param_get(ENRG_LIMIT_EADD, (uint8_t *)&pmMode, 1);
-  setChargeByEnergy((uint16_t)pmMode);
+  // xx eeprom_param_get(ENRG_LIMIT_EADD, (uint8_t *)&pmMode, 1);                                     /* ENRG_LIMIT_EADD */
+  setChargeByEnergy((uint16_t)infoStation.Energy_limit);
 
   /* set current power management mode */
-  eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&pmMode, 1);
-  setPmMode(pmMode);
+  // xx eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&pmMode, 1);                                      /* PMNG_MODE_EADD */
+  setPmMode(infoStation.Pmng.Mode);
 
   /* Set default languages in modbus*/
-  eeprom_param_get(LANG_DEFAULT_EADD, (uint8_t*)&langDef, 1);
-  setDefaultLanguage(langDef);
+  // xx eeprom_param_get(LANG_DEFAULT_EADD, (uint8_t*)&langDef, 1);                                   /* LANG_DEFAULT_EADD */
+  setDefaultLanguage(infoStation.default_Lang);
   
   /* Set available languages in modbus */
-  eeprom_param_get(LANG_CONFIG0_EADD, (uint8_t *)langAvail, 4);
-  languages = langAvail[0] | (langAvail[1] << 8) | (langAvail[2] << 16) | (langAvail[3] << 24);
-  setAvailableLanguages(languages);
+  // xx eeprom_param_get(LANG_CONFIG0_EADD, (uint8_t *)langAvail, 4);                                 /* LANG_CONFIG0_EADD */
+  // languages = langAvail[0] | (langAvail[1] << 8) | (langAvail[2] << 16) | (langAvail[3] << 24);
+  setAvailableLanguages(infoStation.LangConfig.Word);
   
   /* Get TIMEZONE_RW */
-  eeprom_param_get(TIME_ZONE_EADD, (uint8_t*)&timeZone, 1);
+  // xx eeprom_param_get(TIME_ZONE_EADD, (uint8_t*)&timeZone, 1);                                     /* TIME_ZONE_EADD */
   /* Update modbus register */
-  setTimeZone(timeZone);
+  setTimeZone(infoStation.Time_Settings.TimeZone);
 }
 
 
@@ -2651,11 +2655,11 @@ unsigned char  setStationName(char* strName, int length)
     length = WIFI_CONN_NAME_LEN;
   
   configASSERT(length <= sizeof(infoStation.name));   
-  /*                               destination                   source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.name[0], (uint8_t*)strName, sizeof(infoStation.name)));
 
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set((uint8_t*)&infoStation.name[0], (uint8_t*)strName, sizeof(infoStation.name));
+  
 }
 
 /**
@@ -2667,10 +2671,11 @@ unsigned char  setStationName(char* strName, int length)
   */
 uint8_t getStationId(void)
 {
-  uint8_t pass = 0;
+  // uint8_t pass = 0;
 
-  eeprom_param_get(RS485_ADD_EADD, &pass, 1);
-  return pass + 1;
+  // xx eeprom_param_get(RS485_ADD_EADD, &pass, 1);
+  
+  return infoStation.rs485Address + 1;
 }
  
 /**
@@ -2682,12 +2687,12 @@ uint8_t getStationId(void)
   */
 statusFlag_e getSinapsiEepromEn(void)
 {
-  uint8_t result;
+  // uint8_t result;
 
   /* get abilitazione SINAPSI       */
-  eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t *)&result, 1);
+  // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t *)&result, 1);
 //  result &= (uint8_t)SINAPSI_CRL2;
-  if ((result & HIDDEN_MENU_SINAPSI) == (uint8_t)0)
+  if ((infoStation.Hidden_Menu.Enabled & HIDDEN_MENU_SINAPSI) == (uint8_t)0)
     return(DISABLED);
   else
     return(ENABLED);
@@ -2743,9 +2748,9 @@ sck_wiring_e  getStationSocketType(void)
   sck_wiring_e tmp;
 
   /* set socket type  from SOCKET_TYPE_EADD   */
-  eeprom_param_get(SOCKET_TYPE_EADD, (uint8_t *)&tmp, 1); 
+  // xx eeprom_param_get(SOCKET_TYPE_EADD, (uint8_t *)&tmp, 1); 
   
-  switch (tmp)
+  switch (infoStation.socketType)
   {
     case SOCKET_T2_NO_LID    :     
     case SOCKET_T2_CLOSE_LID :
@@ -2880,11 +2885,10 @@ void incStationSinapsiRS485Error(void)
   uint8_t errorNum; 
   
   errorNum = infoStation.sinapsiRS485Errors + 1;
-  /*                                             destination                   source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.sinapsiRS485Errors, (uint8_t*)&errorNum, sizeof(infoStation.sinapsiRS485Errors)));
   
   /* save new parameter in EEPROM */
-  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.sinapsiRS485Errors, (uint8_t*)&errorNum, sizeof(infoStation.sinapsiRS485Errors));
 }
 
 /**
@@ -2899,11 +2903,10 @@ void resetStationSinapsiRS485Error(void)
   uint8_t errorNum; 
   
   errorNum = 0;
-  /*                                             destination                   source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.sinapsiRS485Errors, (uint8_t*)&errorNum, sizeof(infoStation.sinapsiRS485Errors)));
   
   /* save new parameter in EEPROM */
-  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.sinapsiRS485Errors, (uint8_t*)&errorNum, sizeof(infoStation.sinapsiRS485Errors));
 }
 
 
@@ -2918,7 +2921,7 @@ void resetStationSinapsiRS485Error(void)
   */
 void  setStationEmType(energy_meter_e emType,  emEnum_e pos, EmeterType_en gsyEmType, EmeterType_en webEmType)
 {
-uint16_t         address;
+  
   EmeterType_en  localWebEmType, localGsyEmType;
   uint8_t        tmp, emTypeInt, emTypeExt, modePwr;
 
@@ -2926,15 +2929,15 @@ uint16_t         address;
   if ((pos == INTERNAL_EM) && (webEmType != EMETER_TYPE_NULL))
   {
     emTypeInt = emType;
-    eeprom_param_get(EMETER_SCU_INT_EADD, &tmp, 1);
-    if (tmp != (uint8_t)localWebEmType) 
+    // xx eeprom_param_get(EMETER_SCU_INT_EADD, &tmp, 1);
+    if (infoStation.EmeterScu_Int != (uint8_t)localWebEmType) 
     {
-      EEPROM_Save_Config (EMETER_SCU_INT_EADD, (uint8_t*)&localWebEmType, 1);
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.EmeterScu_Int, (uint8_t*)&localWebEmType, 1);  /* ex EMETER_SCU_INT_EADD */
     }
-    eeprom_param_get(EMETER_INT_EADD, &tmp, 1);
-    if (tmp != (uint8_t)localGsyEmType) 
+    // xx eeprom_param_get(EMETER_INT_EADD, &tmp, 1);
+    if (infoStation.emTypeInt != (uint8_t)localGsyEmType) 
     {
-      EEPROM_Save_Config (EMETER_INT_EADD, (uint8_t*)&localGsyEmType, 1);
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.emTypeInt, (uint8_t*)&localGsyEmType, 1);  /* ex EMETER_INT_EADD */
     }
   }
   else
@@ -3000,23 +3003,26 @@ uint16_t         address;
   if ((infoStation.emTypeInt != emTypeInt) && (pos == INTERNAL_EM))
   {
     /*                                             destination                   source                   len   */
-    configASSERT(memCpyInfoSt((uint8_t*)&infoStation.emTypeInt, (uint8_t*)&emTypeInt, sizeof(infoStation.emTypeInt)));
-    address = (uint16_t)SCU_GENERAL_INFO_EE_ADDRES + (uint16_t)(((uint32_t)&infoStation.emTypeInt - (uint32_t)&infoStation));
-    WriteOnEeprom(address, (uint8_t*)&emTypeInt, 1); 
+    // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.emTypeInt, (uint8_t*)&emTypeInt, sizeof(infoStation.emTypeInt)));
+    // address = (uint16_t)SCU_GENERAL_INFO_EE_ADDRES + (uint16_t)(((uint32_t)&infoStation.emTypeInt - (uint32_t)&infoStation));
+    // WriteOnEeprom(address, (uint8_t*)&emTypeInt, 1); 
+    SCU_InfoStation_Set ((uint8_t*)&infoStation.emTypeInt, (uint8_t*)&emTypeInt, sizeof(infoStation.emTypeInt));
   }
   if ((infoStation.emTypeExt != emTypeExt) && (pos == EXTERNAL_EM))
   {
     /*                                             destination              source                   len   */
-    configASSERT(memCpyInfoSt((uint8_t*)&infoStation.emTypeExt, (uint8_t*)&emTypeExt, sizeof(infoStation.emTypeExt)));
-    address = (uint16_t)SCU_GENERAL_INFO_EE_ADDRES + (uint16_t)(((uint32_t)&infoStation.emTypeExt - (uint32_t)&infoStation));
-    WriteOnEeprom(address, (uint8_t*)&emTypeExt, 1); 
+    // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.emTypeExt, (uint8_t*)&emTypeExt, sizeof(infoStation.emTypeExt)));
+    // address = (uint16_t)SCU_GENERAL_INFO_EE_ADDRES + (uint16_t)(((uint32_t)&infoStation.emTypeExt - (uint32_t)&infoStation));
+    // WriteOnEeprom(address, (uint8_t*)&emTypeExt, 1); 
+    SCU_InfoStation_Set ((uint8_t*)&infoStation.emTypeExt, (uint8_t*)&emTypeExt, sizeof(infoStation.emTypeExt));
   }
   if (infoStation.modePwr != modePwr)
   {
     /*                                             destination          source                   len   */
-    configASSERT(memCpyInfoSt((uint8_t*)&infoStation.modePwr, (uint8_t*)&modePwr, sizeof(infoStation.modePwr)));
-    address = (uint16_t)SCU_GENERAL_INFO_EE_ADDRES + (uint16_t)(((uint32_t)&infoStation.modePwr - (uint32_t)&infoStation));
-    WriteOnEeprom(address, (uint8_t*)&modePwr, 1); 
+    // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.modePwr, (uint8_t*)&modePwr, sizeof(infoStation.modePwr)));
+    // address = (uint16_t)SCU_GENERAL_INFO_EE_ADDRES + (uint16_t)(((uint32_t)&infoStation.modePwr - (uint32_t)&infoStation));
+    // WriteOnEeprom(address, (uint8_t*)&modePwr, 1); 
+    SCU_InfoStation_Set ((uint8_t*)&infoStation.modePwr, (uint8_t*)&modePwr, sizeof(infoStation.modePwr));
   }
   //parserEmModbusToWeb(emType);
   //WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t)); 
@@ -3320,7 +3326,8 @@ uint8_t saveWifiAccessPointChannelId( uint8_t id )
   currentId = id;
   /*                                             destination          source                   len   */
   configASSERT(memCpyInfoSt((uint8_t*)&infoStation.channelId, (uint8_t*)&currentId, sizeof(infoStation.channelId)));
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.channelId, (uint8_t*)&currentId, sizeof(infoStation.channelId));
 }
 
 uint8_t getWifiAccessPointChannelId(void)
@@ -3440,11 +3447,12 @@ void saveAuthorization(char *user, char *pass)
   memcpy ((void*)pLocAuth->user, (void*)user, sizeof(infoStation.auth.user));
   memcpy ((void*)pLocAuth->pass, (void*)pass, sizeof(infoStation.auth.pass));
   /*                                             destination     source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.auth, (uint8_t*)pLocAuth, sizeof(infoStation.auth)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.auth, (uint8_t*)pLocAuth, sizeof(infoStation.auth)));
   
   free(pLocAuth);
   /* save on EEPROM */
-  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.auth, (uint8_t*)pLocAuth, sizeof(infoStation.auth));
 }
 
 /**
@@ -3490,7 +3498,8 @@ void saveSchedulation(sck_schedule_t *schedulation)
   free(pInfoStation);
   
   /* save on EEPROM */
-  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));  
+
 }
 
 
@@ -3664,8 +3673,8 @@ void setDateTimeWithTimeZone (struct DataAndTime_t* pLocDateTime)
   struct tm             structUnixTime = {0} ;
   struct DataAndTime_t  LocDateTime;
   uint32_t              currentUnixTime;
-  char                  timeZone;
-  uint8_t               dstRunning;
+  // char                  timeZone;
+  // uint8_t               dstRunning;
   time_t                unixT;
   
 
@@ -3679,17 +3688,17 @@ void setDateTimeWithTimeZone (struct DataAndTime_t* pLocDateTime)
   currentUnixTime = (uint32_t)mktime((struct tm *)&structUnixTime); 
 
   /* get time zone         */
-  eeprom_param_get(TIME_ZONE_EADD, (uint8_t *)&timeZone, 1);
+  // xx eeprom_param_get(TIME_ZONE_EADD, (uint8_t *)&timeZone, 1);
   /* get abilitazione ora legale      */
-  eeprom_param_get(DST_EADD, (uint8_t *)&pLocDateTime->dstFlag, 1);
+  // xx eeprom_param_get(DST_EADD, (uint8_t *)&pLocDateTime->dstFlag, 1);
 
-  currentUnixTime = (uint32_t)((int32_t)currentUnixTime - (int32_t)timeZone * (int32_t)3600);
+  currentUnixTime = (uint32_t)((int32_t)currentUnixTime - (int32_t)infoStation.Time_Settings.TimeZone * (int32_t)3600);
 
   checkLegalPeriod((uint32_t)currentUnixTime);
 
-  eeprom_param_get(DST_STATUS_EADD, (uint8_t*)&dstRunning, 1);   // read if DST is running 
+  // xx eeprom_param_get(DST_STATUS_EADD, (uint8_t*)&dstRunning, 1);   // read if DST is running 
 
-  if ((pLocDateTime->dstFlag != (char)0) && (dstRunning > (int)0))
+  if ((infoStation.Time_Settings.dst != (char)0) && (infoStation.Time_Settings.DstStatus > (int)0))
   {
     /* ora legale abilitata ed attiva */
     currentUnixTime -= (uint32_t)3600;
@@ -3918,10 +3927,11 @@ unsigned char setUserPin(char* pin, uint8_t length)
     pinStr[length] = '\0';
   }
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.userPin[0], (uint8_t*)&pinStr[0], sizeof(infoStation.userPin)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.userPin[0], (uint8_t*)&pinStr[0], sizeof(infoStation.userPin)));
   
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.userPin[0], (uint8_t*)&pinStr[0], sizeof(infoStation.userPin));
 }
 
 
@@ -3966,10 +3976,11 @@ unsigned char  setRouterSsid(char* ssid, uint8_t length)
   } 
    
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerSsid[0], (uint8_t*)locStr, sizeof(infoStation.routerSsid)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerSsid[0], (uint8_t*)locStr, sizeof(infoStation.routerSsid)));
   
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.routerSsid[0], (uint8_t*)locStr, sizeof(infoStation.routerSsid));
 }
 
 /**
@@ -3988,10 +3999,11 @@ uint8_t  resetRouterSsid(void)
   memset(pAppRwRegs->RoutSSID, 0, sizeof(infoStation.routerSsid));        /* Fixed ticket SCU-79 */
 
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerSsid[0], (uint8_t*)locStr, sizeof(infoStation.routerSsid)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerSsid[0], (uint8_t*)locStr, sizeof(infoStation.routerSsid)));
 
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.routerSsid[0], (uint8_t*)locStr, sizeof(infoStation.routerSsid));
 }
 
 /**
@@ -4013,9 +4025,10 @@ uint8_t resetRouterPass(void)
   memset(&locStr[0], 0, sizeof(infoStation.routerPass));
   memset(pAppRwRegs->RoutPass, 0, sizeof(infoStation.routerPass));
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerPass[0], (uint8_t*)locStr, sizeof(infoStation.routerPass)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerPass[0], (uint8_t*)locStr, sizeof(infoStation.routerPass)));
 
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.routerPass[0], (uint8_t*)locStr, sizeof(infoStation.routerPass));
 }
 
 
@@ -4058,10 +4071,11 @@ unsigned char  setRouterPass(char* pass, uint8_t length)
   }
   
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerPass[0], (uint8_t*)locStr, sizeof(infoStation.routerPass)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.routerPass[0], (uint8_t*)locStr, sizeof(infoStation.routerPass)));
   
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.routerPass[0], (uint8_t*)locStr, sizeof(infoStation.routerPass));
 }
 
 
@@ -4103,10 +4117,11 @@ unsigned char setInstallerPin(char* pin, uint8_t length)
     locStr[length] = '\0';
   }
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.installerPin[0], (uint8_t*)locStr, sizeof(infoStation.installerPin)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.installerPin[0], (uint8_t*)locStr, sizeof(infoStation.installerPin)));
   
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.installerPin[0], (uint8_t*)locStr, sizeof(infoStation.installerPin));
 }
 
 
@@ -4137,10 +4152,11 @@ unsigned char setActivationFlag(uint8_t flag)
   actFlag = flag;
 
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.socketActivatedFlag, (uint8_t*)&actFlag, sizeof(infoStation.socketActivatedFlag)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.socketActivatedFlag, (uint8_t*)&actFlag, sizeof(infoStation.socketActivatedFlag)));
   
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.socketActivatedFlag, (uint8_t*)&actFlag, sizeof(infoStation.socketActivatedFlag));
 }
 
 
@@ -4184,10 +4200,11 @@ unsigned char setBootEvent(bootReg_e boot)
   locFlag = boot;
 
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.bootEvent, (uint8_t*)&locFlag, sizeof(infoStation.bootEvent)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.bootEvent, (uint8_t*)&locFlag, sizeof(infoStation.bootEvent)));
   
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.bootEvent, (uint8_t*)&locFlag, sizeof(infoStation.bootEvent));
 }
 
 
@@ -4217,7 +4234,7 @@ unsigned char  setProductSerialNumberEeprom(char* key, uint8_t length, uint8_t s
     locStr[length] = '\0';
   }
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.productSn[0], (uint8_t*)locStr, sizeof(infoStation.productSn)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.productSn[0], (uint8_t*)locStr, sizeof(infoStation.productSn)));
 
   if (setAll)
   {
@@ -4227,7 +4244,8 @@ unsigned char  setProductSerialNumberEeprom(char* key, uint8_t length, uint8_t s
     /* save on key  SN */
     result |= WriteOnEeprom(SN_KEY_EE_ADDRES, (uint8_t*)&keySN, 1);
     /* save on EEPROM */
-    result |= WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+    // result |= WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+    result |= SCU_InfoStation_Set ((uint8_t*)&infoStation.productSn[0], (uint8_t*)locStr, sizeof(infoStation.productSn));
 
     if (result == osOK)
     {
@@ -4492,10 +4510,11 @@ unsigned char  setSerialNumberEeprom(char* key, uint8_t length)
   }
 
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.serial[0], (uint8_t*)locStr, sizeof(infoStation.serial)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.serial[0], (uint8_t*)locStr, sizeof(infoStation.serial)));
 
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.serial[0], (uint8_t*)locStr, sizeof(infoStation.serial));
 }
 
 
@@ -4526,10 +4545,11 @@ unsigned char setMaxRandomDelay(uint16_t delay)
   locFlag = delay;
 
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.maxRandomDelay, (uint8_t*)&locFlag, sizeof(infoStation.maxRandomDelay)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.maxRandomDelay, (uint8_t*)&locFlag, sizeof(infoStation.maxRandomDelay)));
  
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.maxRandomDelay, (uint8_t*)&locFlag, sizeof(infoStation.maxRandomDelay));
 }
 
 
@@ -4565,10 +4585,11 @@ unsigned char  setEsitoUpdateFw(uint8_t esito)
   if (infoStation.esitoUpdateFw != esito)
   {
     /*                               destination                         source                   len   */
-    configASSERT(memCpyInfoSt((uint8_t*)&infoStation.esitoUpdateFw, (uint8_t*)&locFlag, sizeof(infoStation.esitoUpdateFw)));
+    // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.esitoUpdateFw, (uint8_t*)&locFlag, sizeof(infoStation.esitoUpdateFw)));
   
     /* save new parameter in EEPROM */
-    return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+    // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+    return SCU_InfoStation_Set ((uint8_t*)&infoStation.esitoUpdateFw, (uint8_t*)&locFlag, sizeof(infoStation.esitoUpdateFw));
   }
   else
   {
@@ -4599,10 +4620,11 @@ unsigned char  setStationFakeProductCode(char* pCode, uint8_t length)
   }
 
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.fakeProductCode[0], (uint8_t*)locStr, sizeof(infoStation.fakeProductCode)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.fakeProductCode[0], (uint8_t*)locStr, sizeof(infoStation.fakeProductCode)));
  
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom (SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.fakeProductCode[0], (uint8_t*)locStr, sizeof(infoStation.fakeProductCode));
 }
 
 /**
@@ -4637,12 +4659,13 @@ unsigned char  setStationProductCode(char* pCode, uint8_t length)
     strncpy((char*)locStr, pCode , length);
   }
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.productCode[0], (uint8_t*)locStr, sizeof(infoStation.productCode)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.productCode[0], (uint8_t*)locStr, sizeof(infoStation.productCode)));
 
   /* save in EEPROM also  */
   (void) (WriteOnEeprom(PRD_CODE_EE_ADDRES, (uint8_t*)infoStation.productCode, PRODUCT_CODE_LENGTH));
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.productCode[0], (uint8_t*)locStr, sizeof(infoStation.productCode));
 }
 
   /**
@@ -4795,24 +4818,24 @@ void setCurrentTimestamp()
   BKP_SRAM_UnixTimestamp_Save(currentUnixTime);    /* Ticket SCU-100 */
   
   /* get time zone         */
-  eeprom_param_get(TIME_ZONE_EADD, (uint8_t *)&timezoneRam, 1);
+  // xx eeprom_param_get(TIME_ZONE_EADD, (uint8_t *)&timezoneRam, 1);
   /* get abilitazione ora legale      */
-  eeprom_param_get(DST_EADD, (uint8_t *)&DSTram, 1);
+  // xx eeprom_param_get(DST_EADD, (uint8_t *)&DSTram, 1);
 
   /* Set timezone in Eeprom se diverso */
   timezone = pRwRegs->scuSetRegister.rtcTimeZone;
   timezone = timezone / 60;
   timezoneEeprom = (uint8_t)(timezone);
-  if (timezoneRam != timezoneEeprom)
+  if (infoStation.Time_Settings.TimeZone != timezoneEeprom)
   {
-    EEPROM_Save_Config (TIME_ZONE_EADD, (uint8_t*)&timezoneEeprom, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Time_Settings.TimeZone, (uint8_t*)&timezoneEeprom, 1);  /* ex TIME_ZONE_EADD */
   }
   
   /* Set DST in Eeprom */
   DSTcurr = pRwRegs->scuSetRegister.rtcInf[16];
-  if (DSTcurr != DSTram)
+  if (DSTcurr != infoStation.Time_Settings.dst)
   {
-    EEPROM_Save_Config (DST_EADD, (uint8_t*)&DSTcurr, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Time_Settings.dst, (uint8_t*)&DSTcurr, 1);   /* ex DST_EADD */
   }
   
   /* Set new UTC time and update RTC */
@@ -5083,9 +5106,10 @@ void saveSessionId (uint32_t sessId)
   locFlag = sessId;
 
   /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.sessionIdNum, (uint8_t*)&locFlag, sizeof(infoStation.sessionIdNum)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.sessionIdNum, (uint8_t*)&locFlag, sizeof(infoStation.sessionIdNum)));
 
-  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.sessionIdNum, (uint8_t*)&locFlag, sizeof(infoStation.sessionIdNum));
 }
    
 /**
@@ -5127,13 +5151,14 @@ unsigned char setNumSocketFromFakeCode(uint8_t num)
   uint8_t semFlag;
 
   /* read current value for SEM Flags */
-  eeprom_param_get(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);
+  // xx eeprom_param_get(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);
+  semFlag = infoStation.semFlagControl;
   semFlag &= (~SCU_SKT_NUM_MASK);
 
   semFlag |= ((num & (((uint8_t)SCU_SKT_NUM_MASK) >> 1)) << 1);
   /* read current value for SEM Flags */
   // xx eeprom_array_set(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);    
-  return EEPROM_Save_Config(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);
+  return SCU_InfoStation_Set((uint8_t *)&infoStation.semFlagControl, (uint8_t*)&semFlag, 1);  /* ex SEM_FLAGS_CTRL_EADD */
 }
 
 /**
@@ -5212,9 +5237,10 @@ void saveTimeoutRange1 (uint16_t toVal)
   locToRange1.keyValue = KEY_FOR_INFO_VALID;
 
   /*                               destination                         source                       len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.toRange1, (uint8_t*)&locToRange1, sizeof(infoStation.toRange1)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.toRange1, (uint8_t*)&locToRange1, sizeof(infoStation.toRange1)));
 
-  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.toRange1, (uint8_t*)&locToRange1, sizeof(infoStation.toRange1));
 }
 
 /**
@@ -5228,61 +5254,12 @@ void saveTimeoutRange1 (uint16_t toVal)
   */
 uint8_t memCpyInfoSt(uint8_t* pInfoSt, uint8_t* pData, uint16_t lenField)
 {
-  uint16_t        lenExpected, lenName;
   uint32_t        currCks;
   uint8_t         resultOk;
   infoStation_t*  pLocInfoStation;
-
-  resultOk = TRUE; lenName = lenExpected = (uint16_t)0xFFFF;
-  pLocInfoStation = (infoStation_t*)&infoStation;
   
-  if ((void*)&infoStation == (void*)pInfoSt) {lenExpected = sizeof(infoStation_t); lenName = sizeof(infoStation.name);}
-  else if ((void*)&infoStation.serial[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.serial);
-  else if ((void*)&infoStation.firmware[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.firmware);
-  else if ((void*)&infoStation.wiring == (void*)pInfoSt) lenExpected = sizeof(infoStation.wiring);
-  else if ((void*)&infoStation.max_current == (void*)pInfoSt) lenExpected = sizeof(infoStation.max_current);
-  else if ((void*)&infoStation.max_currentSemp == (void*)pInfoSt) lenExpected = sizeof(infoStation.max_currentSemp);
-  else if ((void*)&infoStation.emTypeInt == (void*)pInfoSt) lenExpected = sizeof(infoStation.emTypeInt);
-  else if ((void*)&infoStation.emTypeExt == (void*)pInfoSt) lenExpected = sizeof(infoStation.emTypeExt);
-  else if ((void*)&infoStation.evs_mode == (void*)pInfoSt) lenExpected = sizeof(infoStation.evs_mode);
-  else if ((void*)&infoStation.modePwr == (void*)pInfoSt) lenExpected = sizeof(infoStation.modePwr);
-  else if ((void*)&infoStation.pmModeEn == (void*)pInfoSt) lenExpected = sizeof(infoStation.pmModeEn);
-  else if ((void*)&infoStation.pmUnbalEn == (void*)pInfoSt) lenExpected = sizeof(infoStation.pmUnbalEn);
-  else if ((void*)&infoStation.batteryBackup == (void*)pInfoSt) lenExpected = sizeof(infoStation.batteryBackup);
-  else if ((void*)&infoStation.v230MonFlag == (void*)pInfoSt) lenExpected = sizeof(infoStation.v230MonFlag);
-  else if ((void*)&infoStation.auth.user == (void*)pInfoSt) {
-    if (lenField == sizeof(infoStation.auth.user)) lenExpected = sizeof(infoStation.auth.user);
-    else if (lenField == sizeof(infoStation.auth)) lenExpected = sizeof(infoStation.auth);
-  } else if ((void*)&infoStation.auth.pass == (void*)pInfoSt) lenExpected = sizeof(infoStation.auth.pass);
-  else if ((void*)&infoStation.auth.auth_state == (void*)pInfoSt) lenExpected = sizeof(infoStation.auth.auth_state);
-  else if ((void*)&infoStation.scheds[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.scheds);
-  else if ((void*)&infoStation.key == (void*)pInfoSt) lenExpected = sizeof(infoStation.key);
-  else if ((void*)&infoStation.reserved[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.reserved);
-  else if ((void*)&infoStation.userPin[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.userPin);
-  else if ((void*)&infoStation.routerSsid[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.routerSsid);
-  else if ((void*)&infoStation.routerPass[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.routerPass);
-  else if ((void*)&infoStation.installerPin[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.installerPin);
-  else if ((void*)&infoStation.socketActivatedFlag == (void*)pInfoSt) lenExpected = sizeof(infoStation.socketActivatedFlag);
-  else if ((void*)&infoStation.bootEvent == (void*)pInfoSt) lenExpected = sizeof(infoStation.bootEvent);
-  else if ((void*)&infoStation.productSn[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.productSn);
-  else if ((void*)&infoStation.maxRandomDelay == (void*)pInfoSt) lenExpected = sizeof(infoStation.maxRandomDelay);
-  else if ((void*)&infoStation.esitoUpdateFw == (void*)pInfoSt) lenExpected = sizeof(infoStation.esitoUpdateFw);
-  else if ((void*)&infoStation.antennaPresence == (void*)pInfoSt) lenExpected = sizeof(infoStation.antennaPresence);
-  else if ((void*)&infoStation.sinapsiRS485Errors == (void*)pInfoSt) lenExpected = sizeof(infoStation.sinapsiRS485Errors);
-  else if ((void*)&infoStation.keyForRestoreModule == (void*)pInfoSt) lenExpected = sizeof(infoStation.keyForRestoreModule);
-  else if ((void*)&infoStation.restoreModule == (void*)pInfoSt) lenExpected = sizeof(infoStation.restoreModule);
-  else if ((void*)&infoStation.productCode[0] == (void*)pInfoSt) lenExpected = sizeof(infoStation.productCode);
-  else if ((void*)&infoStation.fakeProductCode[0] ==(void*)pInfoSt) lenExpected = sizeof(infoStation.fakeProductCode);
-  else if ((void*)&infoStation.sessionIdNum == (void*)pInfoSt) lenExpected = sizeof(infoStation.sessionIdNum);
-  else if ((void*)&infoStation.channelId == (void*)pInfoSt) lenExpected = sizeof(infoStation.channelId);
-  else if ((void*)&infoStation.toRange1 == (void*)pInfoSt) lenExpected = sizeof(infoStation.toRange1);
-  else if ((void*)&infoStation.passWebServiceHash == (void*)pInfoSt) lenExpected = sizeof(infoStation.passWebServiceHash);
-  else if ((void*)&infoStation.passWebWiFiHash == (void*)pInfoSt) lenExpected = sizeof(infoStation.passWebWiFiHash);
-  else if ((void*)&infoStation.startTimeWebCollaudo == (void*)pInfoSt) lenExpected = sizeof(infoStation.startTimeWebCollaudo);
-  else if ((void*)&infoStation.confDataAndPassStatus == (void*)pInfoSt) lenExpected = sizeof(infoStation.confDataAndPassStatus);
-  else if ((void*)&infoStation.checksum == (void*)pInfoSt) lenExpected = sizeof(infoStation.checksum);
-  
-  if ((lenExpected == (uint16_t)0xFFFF) || ((lenExpected != lenField) && (lenField != lenName)))
+  /* Check if typical sizeof has been passed */
+  if ((lenField != sizeof(uint8_t)) || (lenField != sizeof(uint16_t)) || (lenField != sizeof(uint32_t)))
   {
     /* an error occurred  */
     resultOk = FALSE;
@@ -5377,9 +5354,10 @@ void saveStartTimeWebCollaudo (uint32_t unixTimeSession)
   locFlag = unixTimeSession;
 
   /*                               destination                               source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.startTimeWebCollaudo, (uint8_t*)&locFlag, sizeof(infoStation.startTimeWebCollaudo)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.startTimeWebCollaudo, (uint8_t*)&locFlag, sizeof(infoStation.startTimeWebCollaudo)));
 
-  WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  SCU_InfoStation_Set ((uint8_t*)&infoStation.startTimeWebCollaudo, (uint8_t*)&locFlag, sizeof(infoStation.startTimeWebCollaudo));
 }
    
 /**
@@ -5466,10 +5444,11 @@ uint8_t  setSerialReceivedFlag(void)
 
   locConfDataAndPassStatus = ((infoStation.confDataAndPassStatus & (~CONF_DATA_OK_MASK)) | CONF_DATA_OK);
   /*                               destination                            source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.confDataAndPassStatus, (uint8_t*)&locConfDataAndPassStatus, sizeof(infoStation.confDataAndPassStatus)));
+  // configASSERT(memCpyInfoSt((uint8_t*)&infoStation.confDataAndPassStatus, (uint8_t*)&locConfDataAndPassStatus, sizeof(infoStation.confDataAndPassStatus)));
 
   /* save new parameter in EEPROM */
-  return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  // return WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+  return SCU_InfoStation_Set ((uint8_t*)&infoStation.confDataAndPassStatus, (uint8_t*)&locConfDataAndPassStatus, sizeof(infoStation.confDataAndPassStatus));
 }
 
 /**
@@ -5518,6 +5497,51 @@ void setRplOptionByte(uint8_t rdpLevel)
   /* Get Option Byte Configuration  */
   HAL_FLASHEx_OBGetConfig(&OBInit);
 
+}
+
+/**
+  * @brief   BCD_to_PackedBCD
+  *         
+  *   Convert a BCD array (1 cipher for byte) 
+  *   to a packed BCD array (2 cipher in a byte)
+  *         
+  * @param  ptr to PackedBCD[] - ptr to BCD[] - nbr of BCD ciphers
+  * 
+  * @retval none
+  */
+
+void BCD_to_PackedBCD (uint8_t *pPackedBCD, uint8_t *pBCD, uint8_t nBCD)
+{
+  uint8_t i;
+  uint16_t *ptr16 = (uint16_t *)pBCD;
+  
+  for (i = 0; i < (nBCD >> 1); i++)
+  {
+    *pPackedBCD = *ptr16++;
+  }
+  
+}
+
+/**
+  * @brief   PackedBCD_to_BCD
+  *         
+  *   Convert a Packed BCD array (2 cipher for byte) 
+  *   to a BCD array (1 cipher in a byte)
+  *         
+  * @param  ptr to PackedBCD[] - ptr to BCD[] - nbr of BCD ciphers
+  * 
+  * @retval none
+  */
+
+void PackedBCD_to_BCD (uint8_t *pBCD, uint8_t *pPackedBCD, uint8_t nBCD)
+{
+  
+  for (i = 0; i < MAX_SERIAL_LENGTH; i <<= 1)
+  {
+    temp[i] = data8u_array[i];
+    temp[i + 1] = (data8u_array[i] & 0xF0) >> 4;
+  }
+  
 }
 
 /**

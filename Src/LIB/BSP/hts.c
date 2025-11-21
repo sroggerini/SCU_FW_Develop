@@ -486,21 +486,23 @@ uint8_t     dData, dDec, pmng_enable;
 int32_t     hts_charging_current;
 int8_t      delta_sign, hts_correction = 0;
 
-eeprom_param_get(EMETER_INT_EADD, &dData, 1);               // tipo di energy meter interno
+// xx eeprom_param_get(EMETER_INT_EADD, &dData, 1);               // tipo di energy meter interno
 
-if (dData & EMETER_THREE_PH)            // **** SISTEMA TRIFASE
+// xx if (dData & EMETER_THREE_PH)            // **** SISTEMA TRIFASE
+if (infoStation.emTypeInt & EMETER_THREE_PH)            // **** SISTEMA TRIFASE
     energy_param_get(EM_CURRENT_L1, &hts_charging_current, 1); 
 else                                    // **** SISTEMA MONOFASE
     energy_param_get(EM_CURRENT_L, &hts_charging_current, 1);
 
-if (dData == EMETER_TYPE_NULL)
+if (infoStation.emTypeInt == (uint8_t)EMETER_TYPE_NULL)
     {
 	uint8_t data_array[2];
     pwm_currents_byte_get(data_array);
     hts_charging_current = (((int32_t)(data_array[0])) * 10);
     }
 
-eeprom_param_get(TEMP_DELTA_EADD, &dData, 1);
+// xx eeprom_param_get(TEMP_DELTA_EADD, &dData, 1);
+dData = infoStation.Temp_Ctrl.Delta;
 
 if ((dData & 0x80) == 0)
     delta_sign = 1;
@@ -568,9 +570,9 @@ if ((htsPrintFr) || ((htsPrintEn) && (hts_temp_idx == 0)))  // con newTimeTick =
     htsPrintFr = 0;
     }
 
-eeprom_param_get(TEMP_CTRL_ENB_EADD, &dData, 1);
+// xx eeprom_param_get(TEMP_CTRL_ENB_EADD, &dData, 1);
 
-if (dData == 0)     // hts disabilitato
+if (infoStation.Temp_Ctrl.Enabled == 0)     // hts disabilitato
     {
     if (hts_suspending == 1)
         send_to_evs(EVS_HTS_RELEASE);
@@ -581,20 +583,18 @@ if (dData == 0)     // hts disabilitato
     }
 else
     {
-    eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);
+    // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);    
+    // xx eeprom_param_get(TEMP_CTRL_VAL_EADD, &dData, 1);    
+    temp_threshold = ((uint16_t)(infoStation.Temp_Ctrl.Value) * 10);
+    // xx eeprom_param_get(TEMP_HYSTERESIS_EADD, &dData, 1);
+    temp_hysteresis = ((uint16_t)(infoStation.Temp_Ctrl.Hysteresis) * 10);
 
-    eeprom_param_get(TEMP_CTRL_VAL_EADD, &dData, 1);
-    temp_threshold = ((uint16_t)(dData) * 10);
-
-    eeprom_param_get(TEMP_HYSTERESIS_EADD, &dData, 1);
-    temp_hysteresis = ((uint16_t)(dData) * 10);
-
-	if (pmng_enable == 0)                                   // power management disabilitato
+	if (infoStation.Hidden_Menu.Enabled == 0)           // power management disabilitato
         hts_min_current = EVS_CURRENT_MIN;
     else
         {
-        eeprom_param_get(PMNG_CURRENT_EADD, &dData, 1);     // corrente minima di ricarica in power management
-        hts_min_current = (((uint16_t)(dData)) * 10);
+        // xx eeprom_param_get(PMNG_CURRENT_EADD, &dData, 1);     // corrente minima di ricarica in power management
+        hts_min_current = (((uint16_t)(infoStation.Pmng.Current)) * 10);
         }
     
     if (new_hts_temp >= (old_hts_temp + 10))                                 // TEMPERATURA IN AUMENTO [differenza > 0,5°C]

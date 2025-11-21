@@ -473,13 +473,13 @@ void setLedSoft (ledIdx_e led, ledEvents_e ledEvent, uint16_t blinkTime, uint8_t
 ***********************************************************************************************************************/
 static void setLedStripCurrent (void)
 {
-  uint8_t   ix;
+  // xx uint8_t   ix;
 
   if (ledCurrentSet[LED_C_RED] == 0)
   {
     /* the current led must be set in according to led strip size */
-    eeprom_param_get(STRIP_LED_TYPE_EADD, (uint8_t *)&ix, 1);
-    switch (ix)
+    // xx eeprom_param_get(STRIP_LED_TYPE_EADD, (uint8_t *)&ix, 1);
+    switch (infoStation.StripLedType)
     {
       case LED_STRIP_18:
         ledCurrentSet[LED_C_RED] = PWMLED_C_18_DC;

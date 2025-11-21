@@ -314,7 +314,7 @@ extern osSemaphoreId                 EEprom_semaphore;
 extern void EEpromManager_init(void);
 extern void BKP_SCU_Image_Store (void);
 extern void EEPROM_Check_Data_Before_Write (unsigned short Address);
-extern uint8_t EEPROM_Save_Config (unsigned short Address, unsigned char *Buffer, unsigned short Length);
+extern uint8_t SCU_InfoStation_Set (uint8_t *pDst, uint8_t *pSrc, uint16_t nByte);
 
 #endif
 

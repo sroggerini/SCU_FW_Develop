@@ -354,9 +354,11 @@ void Eeprom_Master_User_card_Force_Reset (void)           /* Fixed ticket SCU-76
 {
   uint8_t   Master_card_reg;          
   
-  eeprom_param_get(PERS_MASTER_EADD, &Master_card_reg, 1);  
+  // xx eeprom_param_get(PERS_MASTER_EADD, &Master_card_reg, 1);  
+  Master_card_reg = infoStation.persMaster;
   Master_card_reg &=~ (0x10 | 0x01);
-  eeprom_param_array[PERS_MASTER_EADD] = Master_card_reg;
+  // eeprom_param_array[PERS_MASTER_EADD] = Master_card_reg;
+  infoStation.persMaster = Master_card_reg;
   WriteOnEeprom((EDATA_DEFAULT_EADD + PERS_MASTER_EADD), &Master_card_reg, 1);   
     
 }
@@ -415,145 +417,6 @@ if (SRAM_SCU_Check.BKP_Store)
   BKP_SCU_Image_Store();  
 
 // xx send_to_eeprom(EEPROM_UPDATE);
-
-#else
-
-  switch (eadd)
-  {
-    case EDATA_VALID_EADD:
-      
-      break;
-    case EDATA_NUM_EADD:        
-      break;
-    case SERNUM_BYTE0_EADD:     
-    case SERNUM_BYTE1_EADD:     
-    case SERNUM_BYTE2_EADD:     
-    case SERNUM_BYTE3_EADD:     
-      break;
-    case SOCKET_ENABLE_EADD:    
-      break;
-    case BATTERY_CONFIG_EADD:   
-      break;
-    case LANG_DEFAULT_EADD:     
-      break;
-    case RS485_ADD_EADD:        
-      break;
-    case RTC_VALID_EADD:        
-      break;
-    case EVS_MODE_EADD:         
-      break;
-    case M3T_CURRENT_EADD:      
-      break;
-    case M3S_CURRENT_EADD:      
-      break;
-    case SOCKET_TYPE_EADD:      
-      break;
-    case EMETER_INT_EADD:       
-      break;
-    case CONTROL_BYTE0_EADD:    
-    case CONTROL_BYTE1_EADD:    
-    case CONTROL_BYTE2_EADD:    
-    case CONTROL_BYTE3_EADD:    
-      break;
-    case ACTUATORS_EADD:        
-      break;
-    case BLOCK_DIR_EADD:        
-      break;
-    case PERS_UIDNUM_EADD:      
-      break;
-    case PERS_MASTER_EADD:      
-      break;
-    case PMNG_MODE_EADD:        
-      break;
-    case PMNG_EMETER_EADD:      
-      break;
-    case PMNG_PWRLSB_EADD:      
-      break;
-    case PMNG_PWRMSB_EADD:      
-      break;
-    case PMNG_ERROR_EADD:       
-      break;
-    case PMNG_CURRENT_EADD:     
-      break;
-    case PMNG_MULTIP_EADD:      
-      break;
-    case PMNG_DMAX_EADD:        
-      break;
-    case PMNG_TRANGE_EADD:      
-      break;
-    case TCHARGE_MODE_EADD:     
-      break;
-    case TCHARGE_TIME_EADD:     
-      break;
-    case PMNG_PWDB0_EADD:       
-      break;
-    case PMNG_PWDB1_EADD:       
-      break;
-    case PMNG_PWDB2_EADD:       
-      break;
-    case PMNG_UNBAL_EADD:       
-      break;
-    case LANG_CONFIG0_EADD:     
-      break;
-    case LANG_CONFIG1_EADD:     
-      break;
-    case LANG_CONFIG2_EADD:     
-      break;
-    case LANG_CONFIG3_EADD:     
-      break;
-    case TOT_ENERGY0_EADD:      
-      break;
-    case TOT_ENERGY1_EADD:      
-    case TOT_ENERGY2_EADD:      
-    case TOT_ENERGY3_EADD:      
-      break;
-    case STRIP_LED_TYPE_EADD:   
-      break;
-    case TIME_ZONE_EADD:        
-      break;
-    case DST_EADD:              
-      break;
-    case TIME_DST_OFFSET_EADD:  
-      break;
-    case DST_STATUS_EADD:       
-      break;
-    case LCD_TYPE_EADD:         
-      break;
-    case HIDDEN_MENU_VIS_EADD:  
-      break;
-    case HIDDEN_MENU_ENB_EADD:  
-      break;
-    case ENRG_LIMIT_EADD:       
-      break;
-    case SINAPSI_INST_EADD:     
-      break;
-    case EMETER_SCU_INT_EADD:   
-      break;
-    case OPERATIVE_MODE_EADD:   
-      break;
-    case TEMP_CTRL_ENB_EADD:    
-      break;
-    case TEMP_CTRL_VAL_EADD:    
-      break;
-    case TEMP_DELTA_EADD:       
-      break;
-    case TEMP_HYSTERESIS_EADD:  
-      break;
-    case RS485_ADD_ALIAS_EADD:  
-      break;
-    case SEM_FLAGS_CTRL_EADD:   
-      break;
-    case STATION_NOM_PWR_EADD:  
-      break;
-    case CONNECTOR_NUMBER_EADD: 
-      break;
-    case POST_SUSP_TIME_EADD:   
-      break;
-    default:
-      break;
-     
-  }
-
 
 #endif
 
@@ -929,7 +792,7 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
   
       /* clear energy value This is important for EM Scame */
       // xx eeprom_array_set(TOT_ENERGY0_EADD, (uint8_t*)&eeprom_param_board_val[TOT_ENERGY0_EADD], 4);
-      EEPROM_Save_Config (TOT_ENERGY0_EADD, (uint8_t*)&eeprom_param_board_val[TOT_ENERGY0_EADD], 4);
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.TotalEnergy, (uint8_t*)&eeprom_param_board_val[TOT_ENERGY0_EADD], 4);   /* ex TOT_ENERGY0_EADD */
       /* Store data in eeprom */
       WriteOnEeprom(EDATA_VALID_EADD, eeprom_param_array, EEPROM_PARAM_NUM);
   
@@ -1382,14 +1245,15 @@ uint8_t*  getEepromArray(void)
 ****************************************************************/
 void  setEepromArrayIsolatedMode(void) 
 {
-  uint8_t   i, SerNum[4];
+  uint8_t   i, SerNum[8];
 
-  eeprom_param_get(SERNUM_BYTE0_EADD, SerNum, 4);
+  // xx eeprom_param_get(SERNUM_BYTE0_EADD, SerNum, 4);
+  memcpy (&SerNum, &infoStation.serial, sizeof (infoStation.serial));
 
   for (i=0; i<EEPROM_PARAM_NUM; i++)
       eeprom_param_array[i] = eeprom_param_master_Iso[i];                /* Fill the structure with DEFAULT data for isolated mode */
 
-  EEPROM_Save_Config (SERNUM_BYTE0_EADD, SerNum, 4);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, SerNum, 4);         /* ex SERNUM_BYTE0_EADD */
 }
 
 /**
@@ -1954,7 +1818,7 @@ void EEPROM_Default_Write (void)
       memset (BCD_Data, 0xFF, sizeof (BCD_Data));
       memset (Data, 'F', sizeof (Data));
       /* Write SCU serial number */
-      EEPROM_Save_Config (SERNUM_BYTE0_EADD, BCD_Data, sizeof (BCD_Data));
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, BCD_Data, sizeof (BCD_Data));    /* ex SERNUM_BYTE0_EADD */
       setScuSerialNumberEeprom((char*)BCD_Data, (char*)Data);      
       break;
     case ProductSN:
@@ -1971,13 +1835,13 @@ void EEPROM_Default_Write (void)
     case SimplCurr:
       /* Write simplified current */
       Data[0] = infoStation.max_currentSemp / 1000;
-      EEPROM_Save_Config (M3S_CURRENT_EADD, &Data[0], 1);
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.max_currentSemp, &Data[0], 1);     /* ex M3S_CURRENT_EADD */
       break;      
       
     case TypCurr: 
       /* Write typical current */
       Data[0] = infoStation.max_current / 1000;
-      EEPROM_Save_Config (M3T_CURRENT_EADD, &Data[0], 1);
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.max_current, &Data[0], 1);     /* ex M3T_CURRENT_EADD */
       break;      
       
     default:
@@ -2066,44 +1930,48 @@ void EEPROM_Check_Data_Idle (void)
 
 /**
 *
-* @brief       EEPROM_Save_Config
+* @brief       SCU_InfoStation_Set
 *               
-*              Save parameter directliy in eeprom and in eeprom_array (RAM)
+*              Save parameter directly in eeprom and in infoStation (RAM)
 *
-* @param [in]  Address: address in eeprom where data must be saved
-*              Buffer: data in RAM to be saved              
-*              Lenght: number of bytes to be saved
+* @param [in]  pDst: address in infoStation struct
+*              pSrc: adress of data to load in infoStation struct             
+*              nByte: number of bytes to save
 *  
 * @retval      OK / NOT_OK 
 *  
 ****************************************************************/
 
-uint8_t EEPROM_Save_Config (unsigned short Address, unsigned char *Buffer, unsigned short Length)
+uint8_t SCU_InfoStation_Set (uint8_t *pDst, uint8_t *pSrc, uint16_t nByte)
 {
   
-  uint8_t result;
+  uint8_t  result;
+  uint16_t Address;
   
   /* Save configuration in RAM */
-  // xx eeprom_array_set (Address, Buffer, Length);  
-  eeprom_param_set (Address, Buffer, Length);  
+  memCpyInfoSt (pDst, pSrc, nByte);
   
+  // xx eeprom_array_set (Address, Buffer, Length);   
+  Address = SCU_GENERAL_INFO_EE_ADDRES + ((uint32_t )pDst - (uint32_t)&infoStation);
+    
   /* Save configuration in EEPROM */
-  result = WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation));
+  result = WriteOnEeprom(Address, (uint8_t*)pDst, nByte);
   
   /* Check writing result */
   if (result == 0)
   {
     tPrintf("Infostation data updated!\n\r");
     EVLOG_Message(EV_INFO, "Infostation data updated!");
-
+    
     /* Check if a different default value (0xFF) is on productSn, productCode, fakeProductCode 
-       Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
+      Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
     SRAM_Check_DEFAULT_of_Code();
-
+    
     /* Reinit modbus registers according to the new settings */
     initModbusRegisters();
   }
-  else
+  
+  if (result == 1)
   {
     tPrintf("Error writing in eeprom\n\r");
     EVLOG_Message(EV_INFO, "Error writing in eeprom");      

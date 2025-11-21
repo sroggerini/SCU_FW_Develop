@@ -776,7 +776,7 @@ if ((isSemMode() == TRUE) && (rfid_mode == EVS_PERS_MODE) && (getCollaudoRunning
     if ((evs_state_get() == EVSTATE_DISABLED) || (evs_state_get() == EVSTATE_AUTH_WAIT) || (evs_state_get() == EVSTATE_SOCKET_AVAILABLE))
         {
         rfid_mode = EVS_FREE_MODE;
-        EEPROM_Save_Config (EVS_MODE_EADD, (uint8_t*)(&rfid_mode), 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.evs_mode, (uint8_t*)(&rfid_mode), 1);  /* ex EVS_MODE_EADD */
         send_to_evs(SEM_AUTORIZATION_MODE);
         send_to_pers(PERS_AUTORIZATION_MODE);
         }

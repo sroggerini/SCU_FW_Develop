@@ -261,9 +261,9 @@ static void sinapsiManager (sinapsiMngMsg_st* pMsg)
           /*      destination      source                  length */
           memcpy((void*)&pSrc->rseSetRegRAM, (void*)&rseDefaultInfo, sizeof(rseSetReg_st));
           /* from EEPROM get the "available" power */
-          eeprom_param_get(PMNG_PWRLSB_EADD, (uint8_t *)&tmp, 2);
+          // xx eeprom_param_get(PMNG_PWRLSB_EADD, (uint8_t *)&tmp, 2);          
           sinapsiMng.activeModule = ((uint16_t)IOM2G_ACTIVE_MASK | (uint16_t)PM_ACTIVE_MASK);
-          sinapsiMng.sinapsiSetReg.m1Pd = (tmp * (uint16_t)100); 
+          sinapsiMng.sinapsiSetReg.m1Pd = (infoStation.Pmng.Power * (uint16_t)100); 
           sinapsiMng.stato = SINAPSI_STATE_FULL_CONN;          
           break;
 

@@ -691,7 +691,7 @@ else if ((card_operation == 0x7007)                             // aggiorna data
             setDateTimeWithTimeZone((struct DataAndTime_t*)&locDateTime);
 
             data08u[0] = 1;
-            EEPROM_Save_Config (RTC_VALID_EADD, data08u, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.rtcValid, data08u, 1);       /* ex RTC_VALID_EADD */
             }
 
         if (card_operation == 0x7008)
@@ -708,21 +708,21 @@ else if ((card_operation == 0x7007)                             // aggiorna data
                 data08u[0] |= HIDDEN_MENU_PMNG_ENB;
                 data08u[1] |= HIDDEN_MENU_PMNG_VIS;
                 data08u[2] = PMNG_FULL;
-                EEPROM_Save_Config (PMNG_MODE_EADD, &data08u[2], 1);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, &data08u[2], 1);       /* ex PMNG_MODE_EADD */
                 }
             else
                 data08u[0] &=~ HIDDEN_MENU_PMNG_ENB;
 
-            EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, &data08u[0], 1);
-            EEPROM_Save_Config (HIDDEN_MENU_VIS_EADD, &data08u[1], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &data08u[0], 1);           /* ex HIDDEN_MENU_ENB_EADD */
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[1], 1);           /* ex HIDDEN_MENU_VIS_EADD */
 
             if (*(block_ptr + 5) & 0x02)
                 data08u[0] = PMNG_UNBAL_ON;
             else
                 data08u[0] = PMNG_UNBAL_OFF;
 
-            EEPROM_Save_Config (PMNG_UNBAL_EADD, data08u, 1);
-            EEPROM_Save_Config (CONTROL_BYTE2_EADD, data08u, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, data08u, 1);       /* ex PMNG_UNBAL_EADD */
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, data08u, 1);       /* ex CONTROL_BYTE2_EADD */
 
             if (*(block_ptr + 5) & 0x10)
                 data08u[0] |= (EMETER_EXT_CRL2 | SINAPSI_CHN2_CRL2);
@@ -730,22 +730,22 @@ else if ((card_operation == 0x7007)                             // aggiorna data
                 data08u[0] &=~ (EMETER_EXT_CRL2 | SINAPSI_CHN2_CRL2);
 
             //eeprom_param_get(PMNG_MODE_EADD, &data08u[1], 1);
-            EEPROM_Save_Config (HIDDEN_MENU_VIS_EADD, &data08u[2], 1);
-            EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, &data08u[1], 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[2], 1);   /* ex HIDDEN_MENU_VIS_EADD */
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &data08u[1], 1);   /* ex HIDDEN_MENU_ENB_EADD */
             
             if (data08u[1] == 1)
                 {
                 data08u[1] |= HIDDEN_MENU_PMNG_ENB;
                 data08u[2] |= HIDDEN_MENU_PMNG_VIS;
                 data08u[3] = PMNG_FULL;
-                EEPROM_Save_Config (PMNG_MODE_EADD, &data08u[3], 1);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, &data08u[3], 1);       /* ex PMNG_MODE_EADD */
                 }
             else
                 data08u[1] &=~ HIDDEN_MENU_PMNG_ENB;
             
-            EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, &data08u[1], 1);
-            EEPROM_Save_Config (HIDDEN_MENU_VIS_EADD, &data08u[2], 1);
-            EEPROM_Save_Config (CONTROL_BYTE2_EADD, data08u, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &data08u[1], 1);   /* ex HIDDEN_MENU_ENB_EADD */
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[2], 1);   /* ex HIDDEN_MENU_VIS_EADD */
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, data08u, 1);    /* ex CONTROL_BYTE2_EADD */
             setPmEmexInModbus(data08u[0]);
 
             if (*(block_ptr + 5) & 0x20)
@@ -765,7 +765,7 @@ else if ((card_operation == 0x7007)                             // aggiorna data
               WriteOnEeprom (HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
             }
 
-            EEPROM_Save_Config (TCHARGE_MODE_EADD, data08u, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge.Mode, data08u, 1);       /* ex TCHARGE_MODE_EADD */
             
             if (*(block_ptr + 5) & 0x40)
             {
@@ -776,34 +776,32 @@ else if ((card_operation == 0x7007)                             // aggiorna data
                 data08u[0] = 0;
             }
 
-            EEPROM_Save_Config (PMNG_TRANGE_EADD, data08u, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Trange, data08u, 1);       /* ex PMNG_TRANGE_EADD */
             
             data16u = ((((uint16_t)(*(block_ptr + 8)) << 8) + *(block_ptr + 7) + 50) / 100);
-            data08u[0] = (uint8_t)(data16u & 0x00FF);
-            data08u[1] = (uint8_t)(data16u >> 8);
-            EEPROM_Save_Config (PMNG_PWRLSB_EADD, data08u, 2);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Power, (uint8_t *)&data16u, 2);       /* ex PMNG_PWRLSB_EADD */
               
 //            data08u[0] = ((*(block_ptr + 9) + 5) / 10);
             data08u[0] = *(block_ptr + 9);
-            EEPROM_Save_Config (PMNG_CURRENT_EADD, data08u, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Current, data08u, 1);       /* ex PMNG_CURRENT_EADD */
             
             data08u[0] = *(block_ptr + 10) - 1;
-            EEPROM_Save_Config (PMNG_MULTIP_EADD, data08u, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Multip, data08u, 1);       /* ex PMNG_MULTIP_EADD */
 
             if (*(block_ptr + 11) <= 20)
                 data08u[0] = *(block_ptr + 11);
             else
                 data08u[0] = 20;
 
-            EEPROM_Save_Config (PMNG_ERROR_EADD, data08u, 1);
-            EEPROM_Save_Config (PMNG_DMAX_EADD, (block_ptr + 12), 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Error, data08u, 1);       /* ex PMNG_ERROR_EADD */
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Dmax, (block_ptr + 12), 1);      /* ex PMNG_DMAX_EADD */
 
             if ((*(block_ptr + 13) > 0) && (*(block_ptr + 13) < 36))
                 data08u[0] = *(block_ptr + 13);
             else
                 data08u[0] = 2;
 
-            EEPROM_Save_Config (TCHARGE_TIME_EADD, data08u, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge, data08u, 1);       /* ex TCHARGE_TIME_EADD */
 #ifdef CH_TIME_AUTO
             /* excluded by Nick 19/03/2023 */
             if (data08u[0] != 0)
@@ -1053,9 +1051,9 @@ else    // if (white_list_operation == UID_DELETE)
 // l'indirizzo eeprom si ricava dalla posizione del uid_map_bit-esimo bit nel uid_map_byte-esimo byte
 eadd = USER_UID_EEOFFSET + ((uint16_t)(uid_map_byte) * 8 * CARD_UID_DIM) + (uid_map_bit * CARD_UID_DIM);
 
-EEPROM_Save_Config (PERS_UIDNUM_EADD, &uid_map_num, 1);
-EEPROM_Save_Config (USER_MAP00_EADD, uid_map_array, USER_MAP_EEDIM);
-EEPROM_Save_Config (eadd, uid_ptr, CARD_UID_DIM);
+SCU_InfoStation_Set ((uint8_t *)&infoStation.persUidNum, &uid_map_num, 1);      /* ex PERS_UIDNUM_EADD */
+WriteOnEeprom(USER_MAP00_EADD, uid_map_array, USER_MAP_EEDIM);  /*  VERIFICARE SE CORRETTO oppure manca qlcs */
+WriteOnEeprom (eadd, uid_ptr, CARD_UID_DIM); /*  VERIFICARE SE CORRETTO oppure manca qlcs */
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
@@ -1077,8 +1075,8 @@ uid_map_num = 0;;
 for (i=0; i<USER_MAP_EEDIM; i++)
     uid_map_array[i] = 0x00;
 
-EEPROM_Save_Config (PERS_UIDNUM_EADD, &uid_map_num, 1);
-EEPROM_Save_Config (USER_MAP00_EADD, uid_map_array, USER_MAP_EEDIM);
+WriteOnEeprom (PERS_UIDNUM_EADD, &uid_map_num, 1);
+WriteOnEeprom (USER_MAP00_EADD, uid_map_array, USER_MAP_EEDIM);
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
@@ -1172,7 +1170,7 @@ static void pers_mode_set(evs_mode_en mode)
 {
 evs_mode_en pers_mode = mode;
 
-EEPROM_Save_Config (EVS_MODE_EADD, (uint8_t*)(&pers_mode), 1);
+SCU_InfoStation_Set ((uint8_t*)&infoStation.evs_mode, (uint8_t*)(&pers_mode), 1);    /* ex EVS_MODE_EADD */
 send_to_evs(EVS_AUTORIZATION_MODE);
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //

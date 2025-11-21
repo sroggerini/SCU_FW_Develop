@@ -1677,14 +1677,14 @@ static void funzioneDataOra (uint8_t* msgRcv)
             locDateTime.Minute = (msgRcv[15] -'0') * 10 + (msgRcv[16] -'0');
             locDateTime.Second = (msgRcv[17] -'0') * 10 + (msgRcv[18] -'0');
             /* save DST flag   *****/
-            EEPROM_Save_Config (DST_EADD, (uint8_t*)&locDateTime.dstFlag, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Time_Settings.dst, (uint8_t*)&locDateTime.dstFlag, 1);        /* ex DST_EADD */
             timeZone = (msgRcv[21] - '0');
             if (msgRcv[20] == '-')
             {
               timeZone *= (char)-1;
             }
             /* save time zone   *****/
-            EEPROM_Save_Config (TIME_ZONE_EADD, (uint8_t*)&timeZone, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Time_Settings.TimeZone, (uint8_t*)&timeZone, 1);   /* ex TIME_ZONE_EADD */
             /* set new date and time */
             struct tm structUnixTime = {0} ;
             structUnixTime.tm_sec  = (int)locDateTime.Second;
@@ -1735,7 +1735,7 @@ static void funzioneSetSn (uint8_t* msgRcv)
   {
     case 'r':
       sn[0] = sn[1] = sn[2] = sn[3] = (uint8_t)0xFF;     
-      EEPROM_Save_Config (SERNUM_BYTE0_EADD, sn, 4);
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, sn, 4);          /* ex SERNUM_BYTE0_EADD */
       tPrintf("All 'FF' to SN!!\n\r");
       break;
 
@@ -1760,7 +1760,7 @@ static void funzioneSetSn (uint8_t* msgRcv)
           sn[2] = 0; sn[2] = (msgRcv[7] - '0'); sn[2] |= ((msgRcv[6] - '0') << 4);  
           sn[1] = 0; sn[1] = (msgRcv[5] - '0'); sn[1] |= ((msgRcv[4] - '0') << 4);  
           sn[0] = 0; sn[0] = (msgRcv[3] - '0'); sn[0] |= ((msgRcv[2] - '0') << 4);  /* BCD, first two MSB digit  */
-          EEPROM_Save_Config (SERNUM_BYTE0_EADD, sn, 4);
+          SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, sn, 4);      /* ex SERNUM_BYTE0_EADD */
           tPrintf("SN stored!!\n\r");
         }
         else
@@ -1791,7 +1791,7 @@ static void funzioneSetProductSn (uint8_t* msgRcv)
   {
     case 'r':
       PrdSn[0] = PrdSn[1] = PrdSn[2] = PrdSn[3] = PrdSn[4] = (uint8_t)0xFF;     
-      EEPROM_Save_Config (PRD_SN_EE_ADDRES, PrdSn, 5);
+      WriteOnEeprom (PRD_SN_EE_ADDRES, PrdSn, 5);
       tPrintf("All 'FF' to SN!!\n\r");
       break;
 
@@ -1859,7 +1859,7 @@ static void funzioneSetHts (uint8_t* msgRcv)
       if ((msgRcv[1] == ' ') && ((msgRcv[2] == '0') || (msgRcv[2] == '1')))
       {
         msgRcv[2] -= '0';
-        EEPROM_Save_Config (TEMP_CTRL_ENB_EADD, &msgRcv[2], 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Temp_Ctrl.Enabled, &msgRcv[2], 1);        /* ex TEMP_CTRL_ENB_EADD */
         tPrintf("Temperature control enable %d \n\r", msgRcv[2]);
       }
       else
@@ -1876,7 +1876,7 @@ static void funzioneSetHts (uint8_t* msgRcv)
         else
           dData = ((msgRcv[2] - '0') * 10) + (msgRcv[3] - '0');
 
-        EEPROM_Save_Config (TEMP_CTRL_VAL_EADD, &dData, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Temp_Ctrl.Enabled, &dData, 1);    /* ex TEMP_CTRL_VAL_EADD */
         tPrintf("Temperature control value %d [deg]\n\r", dData);
       }
       else
@@ -1903,7 +1903,7 @@ static void funzioneSetHts (uint8_t* msgRcv)
         if ((msgRcv[2] == '-') && (dData != 0))
             dData |= 0x80;
           
-        EEPROM_Save_Config (TEMP_DELTA_EADD, &dData, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Temp_Ctrl.Delta, &dData, 1);    /* ex TEMP_DELTA_EADD */
         tPrintf("Temperature control delta ");
 
         if (dData & 0x80)
@@ -1928,7 +1928,7 @@ static void funzioneSetHts (uint8_t* msgRcv)
         else
           dData = ((msgRcv[2] - '0') * 10) + (msgRcv[3] - '0');
 
-        EEPROM_Save_Config (TEMP_HYSTERESIS_EADD, &dData, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Temp_Ctrl.Hysteresis, &dData, 1);    /* ex TEMP_HYSTERESIS_EADD */
         tPrintf("Temperature control hyster %d [deg]\n\r", dData);
       }
       else
@@ -3036,7 +3036,7 @@ static void funzioniStation (uint8_t* msgRcv)
         {
         edata = msgRcv[2] - '0';
         //xx eeprom_array_set(POST_SUSP_TIME_EADD, (uint8_t *)&edata, 1);
-        EEPROM_Save_Config (POST_SUSP_TIME_EADD, (uint8_t *)&edata, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.postSuspensionTime, (uint8_t *)&edata, 1);         /* ex POST_SUSP_TIME_EADD */
         if (msgRcv[2] > '0')
             tPrintf("post suspension ACTIVE!\n\r");
         else
@@ -3256,7 +3256,7 @@ static void funzioniEEPROM (uint8_t* msgRcv)
             {
               setFlagHwInfo((RS485_ADD_SET | KEY_FOR_RS485_ADD), MASK_FOR_RS485_ADD_SET);
               /* a new address must be set */
-              EEPROM_Save_Config (RS485_ADD_EADD, (uint8_t*)&hexAdd[0], 1);
+              SCU_InfoStation_Set ((uint8_t *)&infoStation.rs485Address, (uint8_t*)&hexAdd[0], 1);        /* ex RS485_ADD_EADD */
               send_to_lcd(LCD_CURRENT_UPDATE);
             }
           }

@@ -421,6 +421,7 @@ typedef enum
 }statusFlag_e;
 
 #define MAX_NAME_LENGTH 14
+#define MAX_SERIAL_LENGTH 8
 
 typedef enum 
 {
@@ -539,22 +540,23 @@ enum _sck_error
 typedef enum _sck_error sck_error_e;
 
 /* Power manager parameters */
-typedef struct
+typedef __packed struct
 {
 
   uint8_t  Mode;	
-  uint8_t  Emeter;	
+  uint8_t  Emeter;
+  uint8_t  Unbal;
+  uint8_t  Current;
+  uint8_t  Error;	
+  uint8_t  Multip;	
+  uint8_t  Trange;	
+  uint8_t  Dmax;	
   uint16_t Power;	
-  uint16_t Error;	
-  uint16_t Current;
-  uint16_t Multip;	
-  uint16_t Dmax;	
-  uint16_t Trange;	
   
 } Pmng_t;
 
 /* Time limited charge */
-typedef struct
+typedef  __packed struct
 {  
   
   uint8_t Mode;
@@ -562,7 +564,7 @@ typedef struct
   
 } TCharge_t;
 
-typedef struct
+typedef  __packed struct
 {
   
   uint8_t  Enabled;
@@ -571,7 +573,7 @@ typedef struct
   
 } Hidden_Menu_t;
 
-typedef struct
+typedef  __packed struct
 {
   
   uint8_t  TimeZone;
@@ -581,7 +583,7 @@ typedef struct
   
 } Time_Settings_t;
 
-typedef struct 
+typedef  __packed struct 
 {
   
   uint8_t  Enabled;
@@ -590,6 +592,18 @@ typedef struct
   uint8_t  Hysteresis;
   
 } Temp_Ctrl_t;
+
+typedef __packed union
+{
+  struct
+  {
+  uint8_t Byte0;
+  uint8_t Byte1;
+  uint8_t Byte2;
+  uint8_t Byte3;
+  } Byte;                                /*!< Structure used for byte  access */
+  uint32_t Word;                         /*!< Type      used for word access */
+} controlByte_u;
 
 /***************** definizione save config EEPROM info  ***********************/
 #define   NUM_BACKUP_SAVE_EEPROM                ((uint16_t)3)
@@ -734,7 +748,7 @@ typedef __packed struct
 {
   char                          name[MAX_NAME_LENGTH];
   /* Info */
-  char                          serial[8];
+  char                          serial[MAX_SERIAL_LENGTH];
   char                          firmware[24];
   sck_wiring_e                  wiring;
   int32_t                       max_current;
@@ -789,12 +803,12 @@ typedef __packed struct
   uint8_t                       rs485Address;                                   /* ex RS485_ADD_EADD        */
   uint8_t                       rtcValid;                                       /* ex RTC_VALID_EADD        */
   uint8_t                       socketType;                                     /* ex SOCKET_TYPE_EADD      */
-  uint32_t                      controlByte;                                    /* ex CONTROL_BYTE0_EADD - CONTROL_BYTE1_EADD - CONTROL_BYTE2_EADD - CONTROL_BYTE3_EADD */
+  controlByte_u                 controlByte;                                    /* ex CONTROL_BYTE0_EADD - CONTROL_BYTE1_EADD - CONTROL_BYTE2_EADD - CONTROL_BYTE3_EADD */
   uint8_t                       actuators;                                      /* ex ACTUATORS_EADD        */
   uint8_t                       blockDir;                                       /* ex BLOCK_DIR_EADD        */
   uint8_t                       persUidNum;                                     /* ex PERS_UIDNUM_EADD      */
   uint8_t                       persMaster;                                     /* ex PERS_MASTER_EADD      */ 
-  uint32_t                      LangConfig;                                     /* ex LANG_CONFIG0_EADD - LANG_CONFIG1_EADD - LANG_CONFIG2_EADD - LANG_CONFIG3_EADD */
+  controlByte_u                 LangConfig;                                     /* ex LANG_CONFIG0_EADD - LANG_CONFIG1_EADD - LANG_CONFIG2_EADD - LANG_CONFIG3_EADD */
   uint32_t                      TotalEnergy;                                    /* ex TOT_ENERGY0_EADD      */
   uint8_t                       StripLedType;                                   /* ex STRIP_LED_TYPE_EADD   */
   uint8_t                       LcdType;                                        /* ex LCD_TYPE_EADD         */
@@ -1201,7 +1215,8 @@ uint8_t         allConfDataAndPassword        (void);
 uint8_t         setSerialReceivedFlag         (void);
 void            setFlagForNvic                (void);
 void            setRplOptionByte              (uint8_t rdpLevel);
-void            Station_Cfg_Update            (uint8_t EEpromAddr, infoStation_t* pCfgData, uint8_t* pData);
+void            BCD_to_PackedBCD              (uint8_t *pPackedBCD, uint8_t *pBCD, uint8_t nBCD);
+void            PackedBCD_to_BCD              (uint8_t *pBCD, uint8_t *pPackedBCD, uint8_t nBCD);
 
 #ifdef SIMULATORE_CARICHI
 /* gestione per debug "carico elettronico"  */

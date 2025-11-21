@@ -1861,7 +1861,8 @@ void Lcd2x20Init(uint8_t fullInit, LcdInitState State)
 
   minTimeEnVal = MIN_TIME_EN_INI_VAL;
   /* get lcd type  from LCD_TYPE_EADD   */
-  eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&lcdType, 1);
+  // xx eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&lcdType, 1);
+  lcdType = infoStation.LcdType;
   lcdType &= (LCD_TYPE_MASK);
 
   lcdPresent = LCD_NOT_PRESENT;

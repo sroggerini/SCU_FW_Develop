@@ -338,13 +338,16 @@ static void BlockManager(BlockMngMsg_st *pMsg)
 uint8_t     control_enable, actuator_enable, block_polarity_assigned;
 uint32_t	rtc_reg;
 
-eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
+// xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
+control_enable = infoStation.controlByte.Byte.Byte0;
 control_enable &= BLOCK_CRL0;
 
-eeprom_param_get(ACTUATORS_EADD, &actuator_enable, 1);
-actuator_enable &= BLOCK_ATT0;
+// xx eeprom_param_get(ACTUATORS_EADD, &actuator_enable, 1);
 
-eeprom_param_get(BLOCK_DIR_EADD, &block_polarity_assigned, 1);
+actuator_enable &= BLOCK_ATT0;
+actuator_enable = infoStation.actuators;
+// xx eeprom_param_get(BLOCK_DIR_EADD, &block_polarity_assigned, 1);
+block_polarity_assigned = infoStation.blockDir;
 block_polarity_assigned >>= 7;
 
 if (control_enable == 0)
@@ -504,7 +507,7 @@ switch (block_state)
                         {
                         block_polarity ^= 1;                                                // si inverte la polarità del motore
                         block_polarity_assigned = (BLOCK_ASSIGNMENT_DONE | block_polarity); // si salva in eeprom la configurazione dei blocchi
-                        EEPROM_Save_Config (BLOCK_DIR_EADD, &block_polarity_assigned, 1);
+                        SCU_InfoStation_Set ((uint8_t *)&infoStation.blockDir, &block_polarity_assigned, 1);   /* ex BLOCK_DIR_EADD */
                         block_rtc_backup_set(1, block_polarity);                            // si salva anche nei registri rtc la configurazione dei blocchi
                         
                         block_state = BLOCK_IDLE_STATE;                                     // si riparte dall'inizio per verificare comunque il movimento
@@ -530,7 +533,7 @@ switch (block_state)
                 if (block_polarity_assigned == 0)           // la polarità dei blocchi tentata ha funzionato correttamente
                     {
                     block_polarity_assigned = (BLOCK_ASSIGNMENT_DONE | block_polarity); // si salva in eeprom la configurazione dei blocchi
-                    EEPROM_Save_Config (BLOCK_DIR_EADD, &block_polarity_assigned, 1);
+                    SCU_InfoStation_Set ((uint8_t *)&infoStation.blockDir, &block_polarity_assigned, 1);   /* ex BLOCK_DIR_EADD */
                     block_rtc_backup_set(1, block_polarity);                            // si salva anche nei registri rtc la configurazione dei blocchi
                     }
 
@@ -708,7 +711,8 @@ for (i=0;i<BLOCK_NUM_TIMER; i++)
 #endif
     
     /* get lcd type  from LCD_TYPE_EADD   */
-    eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&i, 1);
+    // xx eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&i, 1);
+    i = infoStation.LcdType;
     
 #ifdef GD32F4xx    
     /* set the operating mode between WiFi and SBC */

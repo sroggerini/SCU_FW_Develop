@@ -339,12 +339,13 @@ return contact_state;
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 static void ContactManager(ContactMngMsg_st *pMsg)
 {
-uint8_t     control_enable, actuator_enable;
+uint8_t     control_enable/*, actuator_enable*/;
 
-eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
+// xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
+control_enable = infoStation.controlByte.Byte.Byte0;
 control_enable &= MIRROR_CRL0;
 
-eeprom_param_get(ACTUATORS_EADD, &actuator_enable, 1);
+// xx eeprom_param_get(ACTUATORS_EADD, &actuator_enable, 1);
 
 if (pMsg->ContactMngEvent == RCBO_STATE_TIM_EXPIRED)
     setOutputState(SGCBOB, GPIO_PIN_RESET);                         // diseccita la bobina del magnetotermico allo scadere del timer
@@ -358,7 +359,7 @@ switch (contact_state)
         {
         if (pMsg->ContactMngEvent == CONTACT_CONTROL_START)
             {
-            if ((actuator_enable & CONTACT_ATT0) == 0)
+            if ((infoStation.actuators & CONTACT_ATT0) == 0)
                 {
                 contact_state_check = 1;
                 contact_state = CONTACT_STATE_OPEN;
@@ -394,7 +395,7 @@ switch (contact_state)
             {
             gsy_quick_polling_update(POWERED_OUTLET, 1);
 
-            if ((actuator_enable & CONTACT_ATT0) == 0)
+            if ((infoStation.actuators & CONTACT_ATT0) == 0)
                 contact_state = CONTACT_STATE_CLOSE;
             else
                 {
@@ -419,7 +420,7 @@ switch (contact_state)
                     {
                     if (contact_error == 0)
                         {
-                        if ((actuator_enable & RCBO_ATT0) == RCBO_ATT0)
+                        if ((infoStation.actuators & RCBO_ATT0) == RCBO_ATT0)
                             {
                             setOutputState(SGCBOB, GPIO_PIN_SET);                   // eccito bobina magnetotermico
                             sendDiffRiarmMsg(DIFF_RIARM_EV_SET_OFF);

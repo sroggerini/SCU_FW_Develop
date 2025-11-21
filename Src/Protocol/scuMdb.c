@@ -463,15 +463,15 @@ void scuGestTask (void * pvParameters)
     osDelay(100); /* wait 100msec for setup time 3V3 for SBC 20msec is the time from DC/DC to give 3V3 to SBC */
     /***** the RS485 autoaddres has been moved to rs485AutoAddress() in eeprom.c *****/
     /* set SCU operative type GSY / SEM */
-    eeprom_param_get(SEM_FLAGS_CTRL_EADD, (uint8_t *)&tmpVal, 1);
-    scuAddressMode = (scuAddModeSktNum_e)(tmpVal & SCU_ADDR_MODE_MASK);
-    numPrdSocket = ((tmpVal & SCU_SKT_NUM_MASK) >> 1);
+    // xx eeprom_param_get(SEM_FLAGS_CTRL_EADD, (uint8_t *)&tmpVal, 1);    
+    scuAddressMode = (scuAddModeSktNum_e)(infoStation.semFlagControl & SCU_ADDR_MODE_MASK);
+    numPrdSocket = ((infoStation.semFlagControl & SCU_SKT_NUM_MASK) >> 1);
     if (scuTypeModes == SCU_TYPE_UNDEF)
     {
       /* this is the case when upload FW from 4.2.x to 4.3.x In this location 0xFF is present */
       scuTypeModes = SCU_GSY;
       // xx eeprom_array_set(OPERATIVE_MODE_EADD, (uint8_t*)&scuTypeModes, 1);
-      EEPROM_Save_Config (OPERATIVE_MODE_EADD, (uint8_t*)&scuTypeModes, 1);
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.Operative_mode, (uint8_t*)&scuTypeModes, 1);   /* ex OPERATIVE_MODE_EADD */
       /* Write configurations in eeprom array */
       eeprom_ProductConfig_Param_Set();
     }
@@ -1122,7 +1122,7 @@ void scuDataLinkTask (void * pvParameters)
               {
                 scuTypeModes = SCU_SEM_S;
                 // xx eeprom_array_set(OPERATIVE_MODE_EADD, (uint8_t*)&scuTypeModes, 1);
-                EEPROM_Save_Config (OPERATIVE_MODE_EADD, (uint8_t*)&scuTypeModes, 1);
+                SCU_InfoStation_Set ((uint8_t *)&infoStation.Operative_mode, (uint8_t*)&scuTypeModes, 1);   /* ex OPERATIVE_MODE_EADD */
                 /* Write configurations in eeprom array */
                 eeprom_ProductConfig_Param_Set();
                 if (getPhysicalMdbAddr() == SCU_S_S_COLLAUDO_ADDR)
@@ -1258,7 +1258,7 @@ static uint32_t scuDlProcess(frameScuRx_st* pMsg)
           /* the automatic test is ended. It is necessary to come back in EMUMAX0 mode  */
           function  = (uint8_t)SCU_GSY;
           // xx eeprom_array_set(OPERATIVE_MODE_EADD, (uint8_t*)&function, 1);
-          EEPROM_Save_Config (OPERATIVE_MODE_EADD, (uint8_t*)&function, 1);
+          SCU_InfoStation_Set ((uint8_t *)&infoStation.Operative_mode, (uint8_t*)&function, 1);  /* ex OPERATIVE_MODE_EADD */
           /* Write configurations in eeprom array */
           eeprom_ProductConfig_Param_Set();
           /** restart the system by NVIC reset */
@@ -2060,7 +2060,7 @@ static uint16_t setScuRegister (uint16_t regAddr, uint16_t size, uint8_t lpoAddr
         {
           idx = EVS_FREE_MODE;
           /* set free as  operative mode                       */
-          EEPROM_Save_Config (EVS_MODE_EADD, (uint8_t*)&idx, 1);
+          SCU_InfoStation_Set ((uint8_t *)&infoStation.evs_mode, (uint8_t*)&idx, 1);  /* ex EVS_MODE_EADD */
           send_to_evs(EVS_AUTORIZATION_MODE);
           /* the change mode has been executed: a restart it is necessary */
           activeImmediateReset();
@@ -2298,11 +2298,11 @@ static uint16_t setScuRegister (uint16_t regAddr, uint16_t size, uint8_t lpoAddr
           {
             uint16_t tmp = *((uint16_t*)pSrc);
             uint8_t idx;
-            eeprom_param_get(LCD_TYPE_EADD, &idx, 1);
-            if (tmp & 0x08) idx |= WIFI_ON;
+            // xx eeprom_param_get(LCD_TYPE_EADD, &idx, 1);            
+            if (infoStation.LcdType & 0x08) idx |= WIFI_ON;
             if (tmp & 0x02) idx |= LCD_2X20;           
             /*** SAVE ON EEPROM ***/
-            EEPROM_Save_Config (LCD_TYPE_EADD, &idx, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.LcdType, &idx, 1);  /* ex LCD_TYPE_EADD */
           }
           else
           {
@@ -3272,10 +3272,10 @@ void setScuTypeMode (scuTypeModes_e typeMode)
 ****************************************************************/
 void setScuTypeModeFromEeprom (void)
 {
-  uint8_t tmpVal;
+  // uint8_t tmpVal;
 
-  eeprom_param_get(OPERATIVE_MODE_EADD, (uint8_t *)&tmpVal, 1);
-  scuTypeModes = (scuTypeModes_e)tmpVal;
+  // xx eeprom_param_get(OPERATIVE_MODE_EADD, (uint8_t *)&tmpVal, 1);
+  scuTypeModes = (scuTypeModes_e)infoStation.Operative_mode;
 }
 
 /**
@@ -3318,13 +3318,13 @@ uint8_t setScuAddressTypeMode(scuAddModeSktNum_e addrType)
   scuAddressMode = addrType;
 
   /* read current value for SEM Flags */
-  eeprom_param_get(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);
- 
+  // xx eeprom_param_get(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);
+  semFlag = infoStation.semFlagControl;
   semFlag &= (~SCU_ADDR_MODE_MASK);
   semFlag |= addrType;
   /* read current value for SEM Flags */
   // xx eeprom_array_set(SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);  
-  result = EEPROM_Save_Config (SEM_FLAGS_CTRL_EADD, (uint8_t*)&semFlag, 1);
+  result = SCU_InfoStation_Set ((uint8_t *)&infoStation.semFlagControl, (uint8_t*)&semFlag, 1);  /* ex SEM_FLAGS_CTRL_EADD */
 
   if (result == (uint8_t)osOK)
   {
@@ -4010,8 +4010,8 @@ void  setHwFlags ()
   uint16_t              hwFlag = HW_FLAGS_UNDEFINED;
   uint8_t               httpFlags = 0;
   
-   eeprom_param_get(LCD_TYPE_EADD, &httpFlags, 1);
-  
+   // xx eeprom_param_get(LCD_TYPE_EADD, &httpFlags, 1);
+   httpFlags = infoStation.LcdType;
    /* Bit 0 differenziabile riarmabile abilitato */
    if((httpFlags & DIRI_ON) == DIRI_ON)
    {
@@ -4054,8 +4054,8 @@ void  setNumberOfLeds (void)
   uint8_t               mdbAddr, ledNum, ledCode;
 
   /* set energy meter type  from STRIP_LED_TYPE_EADD   */
-  eeprom_param_get(STRIP_LED_TYPE_EADD, (uint8_t *)&ledNum, 1);
-  switch (ledNum)
+  // xx eeprom_param_get(STRIP_LED_TYPE_EADD, (uint8_t *)&ledNum, 1);  
+  switch (infoStation.StripLedType)
   {
     case LED_STRIP_18:
       ledCode = 6;  
@@ -4304,7 +4304,7 @@ void setBoardSnHwVerString(char* pBoardStr, uint8_t length)
   SerNum[2] = 0; SerNum[2] = (pBoardStr[7] - '0'); SerNum[2] |= ((pBoardStr[6] - '0') << 4);  
   SerNum[1] = 0; SerNum[1] = (pBoardStr[5] - '0'); SerNum[1] |= ((pBoardStr[4] - '0') << 4);  
   SerNum[0] = 0; SerNum[0] = (pBoardStr[3] - '0'); SerNum[0] |= ((pBoardStr[2] - '0') << 4);  /* BCD, first two MSB digit  */
-  EEPROM_Save_Config (SERNUM_BYTE0_EADD, SerNum, 4);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, SerNum, 4);  /* ex SERNUM_BYTE0_EADD */
   /* save SCU SN also in reserved area in EEPROM */
   if (setScuSerialNumberEeprom((char*)SerNum, (char*)&pBoardStr[2]) != 0)
   {
@@ -4755,15 +4755,16 @@ uint16_t  setMaxTypicalCurrent (void)
 {
   scuRwMapRegister_st*  pRwRegs;
   uint8_t               mdbAddr;
-  uint8_t               current;
+  // uint8_t               current;
 
   mdbAddr = getLogicalMdbAddrSem();
   pRwRegs = getRwMdbRegs(mdbAddr);
-  eeprom_param_get(M3T_CURRENT_EADD, (uint8_t *)&current, 1);  
+  // xx eeprom_param_get(M3T_CURRENT_EADD, (uint8_t *)&current, 1);  
   
-  pRwRegs->scuSetRegister.maxTypCurr = current;
   
-  return(current);
+  pRwRegs->scuSetRegister.maxTypCurr = infoStation.max_current;
+  
+  return(infoStation.max_current);
 }
 
 /**
@@ -4777,7 +4778,7 @@ uint16_t  setMaxTypicalCurrent (void)
 ****************************************************************/
 void  saveMaxTypicalCurrentEeprom (uint8_t current) 
 {
-  EEPROM_Save_Config (M3T_CURRENT_EADD, &current, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.max_current, &current, 1);  /* ex M3T_CURRENT_EADD */
 }
 
 /**
@@ -4791,7 +4792,7 @@ void  saveMaxTypicalCurrentEeprom (uint8_t current)
 ****************************************************************/
 void  saveMaxSimplifiedCurrentEeprom (uint8_t current) 
 {
-  EEPROM_Save_Config (M3S_CURRENT_EADD, &current, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.max_currentSemp, &current, 1);  /* ex M3S_CURRENT_EADD */
 }
 
 
@@ -4806,7 +4807,7 @@ void  saveMaxSimplifiedCurrentEeprom (uint8_t current)
 ****************************************************************/
 void  savePmModeEeprom (uint8_t pmMode) 
 {
-  EEPROM_Save_Config (PMNG_MODE_EADD, &pmMode, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, &pmMode, 1);  /* ex PMNG_MODE_EADD */
 }
 
                   
@@ -4820,16 +4821,10 @@ void  savePmModeEeprom (uint8_t pmMode)
 *  
 ****************************************************************/
 void  savePmPmaxEeprom (uint8_t* pMax) 
-{
-  
-  uint8_t pMaxLsb = pMax[0];
-  uint8_t pMaxMsb = pMax[1];
-  
+{ 
   /* save PMAX value as KW * 10 unit measure  *****/
   // xx eeprom_array_set(PMNG_PWRLSB_EADD, &pMaxLsb, 1);
-  EEPROM_Save_Config (PMNG_PWRLSB_EADD, &pMaxLsb, 1);
-  // xx eeprom_array_set(PMNG_PWRMSB_EADD, &pMaxMsb, 1);
-  EEPROM_Save_Config (PMNG_PWRMSB_EADD, &pMaxMsb, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Power, pMax, 2);    /* ex PMNG_PWRLSB_EADD */
   // xx send_to_eeprom(EEPROM_UPDATE);
 }
 
@@ -4844,7 +4839,7 @@ void  savePmPmaxEeprom (uint8_t* pMax)
 ****************************************************************/
 void  savePmIminEeprom (uint8_t iMin) 
 {
-  EEPROM_Save_Config (PMNG_CURRENT_EADD, &iMin, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Current, &iMin, 1);   /* ex PMNG_CURRENT_EADD */
 }
 
 
@@ -4860,7 +4855,7 @@ void  savePmIminEeprom (uint8_t iMin)
 void  savePmHpowerEeprom (uint8_t hPower) 
 {
   uint8_t hPowerSave = hPower - 1;
-  EEPROM_Save_Config (PMNG_MULTIP_EADD, &hPowerSave, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Multip, &hPowerSave, 1);  /* ex PMNG_MULTIP_EADD */
 }
 
 
@@ -4878,7 +4873,7 @@ void  savePmDsetEeprom (uint8_t* dset)
   uint16_t dsetTotal = dset[1] << 8 | dset[0];
   uint8_t dsetSave = dsetTotal / 100;
   
-  EEPROM_Save_Config (PMNG_ERROR_EADD, &dsetSave, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Error, &dsetSave, 1);     /* ex PMNG_ERROR_EADD */
 }
 
 
@@ -4893,7 +4888,7 @@ void  savePmDsetEeprom (uint8_t* dset)
 ****************************************************************/
 void  savePmDmaxEeprom (uint8_t dMax) 
 {
-  EEPROM_Save_Config (PMNG_DMAX_EADD, &dMax, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Dmax, &dMax, 1);  /* ex PMNG_DMAX_EADD */
 }
 
 
@@ -4909,7 +4904,7 @@ void  savePmDmaxEeprom (uint8_t dMax)
 void  saveDefaultDisplayLanguageEeprom (uint8_t lang) 
 {
   //xx eeprom_array_set(LANG_DEFAULT_EADD, &lang, 1);
-  EEPROM_Save_Config (LANG_DEFAULT_EADD, &lang, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.default_Lang, &lang, 1);  /* ex LANG_DEFAULT_EADD */
   lcd_language_set(lang);
   lcd_language_def_update();
 }
@@ -4927,7 +4922,7 @@ void  saveDefaultDisplayLanguageEeprom (uint8_t lang)
 void  saveDisplayLanguagesEeprom (uint8_t* langs) 
 {
   // xx eeprom_array_set(LANG_CONFIG0_EADD, (uint8_t *)langs, 4);
-  EEPROM_Save_Config (LANG_CONFIG0_EADD, (uint8_t *)langs, 4);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.LangConfig, (uint8_t *)langs, 4);   /* ex LANG_CONFIG0_EADD */
   // xx send_to_eeprom(EEPROM_UPDATE);
 }
 
@@ -4947,7 +4942,7 @@ void  saveConnectorAliasEeprom (uint8_t alias)
   if (alias != scuAddr)
     return;
   // xx eeprom_array_set(RS485_ADD_EADD, &alias, 1);
-  EEPROM_Save_Config (RS485_ADD_EADD, &alias, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.rs485Address, &alias, 1);     /* ex RS485_ADD_EADD */
   // xx send_to_eeprom(EEPROM_UPDATE);
 }
 
@@ -4964,7 +4959,7 @@ void  saveConnectorTypeEeprom (uint8_t conn)
 {
   uint8_t connSave = modbusToHttpSocketConverter(conn);
   // xx eeprom_array_set(SOCKET_TYPE_EADD, &connSave, 1);
-  EEPROM_Save_Config (SOCKET_TYPE_EADD, &connSave, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.socketType, &connSave, 1);   /* ex SOCKET_TYPE_EADD */
   // xx send_to_eeprom(EEPROM_UPDATE);
 }
 
@@ -5026,8 +5021,8 @@ void  saveEnergyMetersTypeEeprom (uint8_t* em)
   
   // xx eeprom_array_set(EMETER_INT_EADD, &intEm, 1);
   // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, &extEm, 1);
-  EEPROM_Save_Config (EMETER_INT_EADD, &intEm, 1);
-  EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, &extEm, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.emTypeInt, &intEm, 1);   /* ex EMETER_INT_EADD */
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &extEm, 1);   /* ex HIDDEN_MENU_ENB_EADD */
   
   // xx send_to_eeprom(EEPROM_UPDATE);
 }
@@ -5107,7 +5102,7 @@ uint8_t  modbusToHttpEnergyMeterConverter (uint8_t em)
 void  saveVisibleFlagsEeprom (uint8_t flags) 
 {
   // xx eeprom_array_set(HIDDEN_MENU_VIS_EADD, &flags, 1);
-  EEPROM_Save_Config (HIDDEN_MENU_VIS_EADD, &flags, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, &flags, 1);   /* ex HIDDEN_MENU_VIS_EADD */
   // xx send_to_eeprom(EEPROM_UPDATE);
 }
 
@@ -5124,7 +5119,7 @@ void  saveVisibleFlagsEeprom (uint8_t flags)
 void  saveChargeTimeEeprom (uint8_t timeEnum) 
 {
   // xx eeprom_array_set(TCHARGE_TIME_EADD, &timeEnum, 1);
-  EEPROM_Save_Config (TCHARGE_TIME_EADD, &timeEnum, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge.Time, &timeEnum, 1);   /* ex TCHARGE_TIME_EADD */
   // xx send_to_eeprom(EEPROM_UPDATE);
 }
 
@@ -5146,28 +5141,28 @@ void  savePowerManagementFlagsEeprom (uint8_t pmFlags)
   {
     valueToSave |= 0x01;
     // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, &valueToSave, 1);
-    EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, &valueToSave, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &valueToSave, 1);    /* ex HIDDEN_MENU_ENB_EADD */
   }
   // Sbilanciamento carico su L1 bit n. 1
   if((pmFlags & 0x02) == 0x02)
   {
     valueToSave = 0x01;
     // xx eeprom_array_set(PMNG_UNBAL_EADD, &valueToSave, 1);
-    EEPROM_Save_Config (PMNG_UNBAL_EADD, &valueToSave, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, &valueToSave, 1);   /* ex PMNG_UNBAL_EADD */
   }
   // Attivazione PM remoto bit n. 2
   if((pmFlags & 0x04) == 0x04)
   {
     valueToSave |= 0x08;
     // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, &valueToSave, 1);
-    EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, &valueToSave, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &valueToSave, 1);    /* ex HIDDEN_MENU_ENB_EADD */
   }
   // Funzionalità Time Range bit n. 15
   if((pmFlags & 0x80) == 0x80)
   {
     valueToSave = 0x01;
     // xx eeprom_array_set(PMNG_TRANGE_EADD, &valueToSave, 1);
-    EEPROM_Save_Config (PMNG_TRANGE_EADD, &valueToSave, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Trange, &valueToSave, 1);            /* ex PMNG_TRANGE_EADD */
   }
   // xx send_to_eeprom(EEPROM_UPDATE);
 }
@@ -5185,7 +5180,7 @@ void  savePowerManagementFlagsEeprom (uint8_t pmFlags)
 void  saveChargeEnergyEeprom (uint8_t enrgEnum) 
 {
   // xx eeprom_array_set(ENRG_LIMIT_EADD, &enrgEnum, 1);
-  EEPROM_Save_Config (ENRG_LIMIT_EADD, &enrgEnum, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.Energy_limit, &enrgEnum, 1);     /* ex ENRG_LIMIT_EADD */
   // xx send_to_eeprom(EEPROM_UPDATE);
 }
 
@@ -5282,13 +5277,13 @@ void  setMaxSimplifiedCurrent ()
 {
   scuRwMapRegister_st*  pRwRegs;
   uint8_t               mdbAddr;
-  uint8_t               current;
+  // uint8_t               current;
 
   mdbAddr = getLogicalMdbAddrSem();
   pRwRegs = getRwMdbRegs(mdbAddr);
-  eeprom_param_get(M3S_CURRENT_EADD, (uint8_t *)&current, 1);  
+  // xx eeprom_param_get(M3S_CURRENT_EADD, (uint8_t *)&current, 1);    
+  pRwRegs->scuSetRegister.maxSimplCurr = infoStation.max_currentSemp;
   
-  pRwRegs->scuSetRegister.maxSimplCurr = current;
 }
 
 /**
@@ -5354,10 +5349,11 @@ void  setUtcDateTimeRegister ()
   DateTimeGet(&utcTimeScu);
   
   /* Get timezone saved in eeprom */
-  eeprom_param_get(TIME_ZONE_EADD, (uint8_t*)&timezone, 1);
+  // xx eeprom_param_get(TIME_ZONE_EADD, (uint8_t*)&timezone, 1);
     
   /* Get dst flag saved in eeprom */
-  eeprom_param_get(DST_EADD, (uint8_t*)&dst, 1);
+  // xx eeprom_param_get(DST_EADD, (uint8_t*)&dst, 1);
+  
   
   pRwRegs->scuSetRegister.rtcInf[0] = utcTimeScu.Second;    /* Ticket SCU-100  - Start */
   pRwRegs->scuSetRegister.rtcInf[1] = 0; 
@@ -5371,9 +5367,9 @@ void  setUtcDateTimeRegister ()
   pRwRegs->scuSetRegister.rtcInf[10] = (utcTimeScu.Year - 1900);  
   pRwRegs->scuSetRegister.rtcInf[11] = ((utcTimeScu.Year - 1900) & 0xFF00) >> 8;  
   pRwRegs->scuSetRegister.rtcInf[12] = utcTimeScu.DayWeek;  
-  pRwRegs->scuSetRegister.rtcInf[16] = dst;              /* Ticket SCU-100 - End */
+  pRwRegs->scuSetRegister.rtcInf[16] = infoStation.Time_Settings.dst;              /* Ticket SCU-100 - End */
    
-  pRwRegs->scuSetRegister.rtcTimeZone = timezone * 60;
+  pRwRegs->scuSetRegister.rtcTimeZone = infoStation.Time_Settings.TimeZone * 60;
 }
 
 
@@ -5483,36 +5479,38 @@ void  setPowerManagementRegisters ()
   
   /* Set registro PM_FLAGS_RW */
 //  eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&pmOn, 1);
-  eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t *)&pmOn, 1);
+  // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t *)&pmOn, 1);
+  pmOn = infoStation.Hidden_Menu.Enabled;
   pmOn &= HIDDEN_MENU_PMNG_ENB;
-  eeprom_param_get(PMNG_UNBAL_EADD, (uint8_t *)&pmUnbal, 1);
+  // xx eeprom_param_get(PMNG_UNBAL_EADD, (uint8_t *)&pmUnbal, 1);
+  pmUnbal = infoStation.Pmng.Unbal;
   pRwRegs->scuSetRegister.pmFlags = pmOn | (pmUnbal << 1);
   // Set in eeprom
-  eeprom_param_get(PMNG_TRANGE_EADD, &pmOn, 1); 
+  // xx eeprom_param_get(PMNG_TRANGE_EADD, &pmOn, 1); 
   // Set modbus register
-  pRwRegs->scuSetRegister.pmFlags |= pmOn << PM_TIME_RANGE_FUNC_BIT_POS;
+  pRwRegs->scuSetRegister.pmFlags |= infoStation.Pmng.Trange << PM_TIME_RANGE_FUNC_BIT_POS;
   
   /* Set registro PM_PMAX_RW */
-  eeprom_param_get(PMNG_PWRLSB_EADD, (uint8_t*)&lsbPmax, 1);
-  eeprom_param_get(PMNG_PWRMSB_EADD, (uint8_t*)&msbPmax, 1);
-  pmPmax = (msbPmax << 8) | lsbPmax;
-  pRwRegs->scuSetRegister.pmPmax = pmPmax;
+  // xx eeprom_param_get(PMNG_PWRLSB_EADD, (uint8_t*)&lsbPmax, 1);
+  // xxeeprom_param_get(PMNG_PWRMSB_EADD, (uint8_t*)&msbPmax, 1);
+  // pmPmax = (msbPmax << 8) | lsbPmax;
+  pRwRegs->scuSetRegister.pmPmax = infoStation.Pmng.Power;
   
   /* Set registro PM_IMIN_RW */
-  eeprom_param_get(PMNG_CURRENT_EADD, (uint8_t*)&pmImin, 1);
-  pRwRegs->scuSetRegister.pmImin = pmImin;
+  // xx eeprom_param_get(PMNG_CURRENT_EADD, (uint8_t*)&pmImin, 1);
+  pRwRegs->scuSetRegister.pmImin = infoStation.Pmng.Current;
   
   /* Set registro PM_HPOWER_RW */
-  eeprom_param_get(PMNG_MULTIP_EADD, (uint8_t*)&pmHpower, 1);
-  pRwRegs->scuSetRegister.pmHpower = pmHpower + 1;
+  // xx eeprom_param_get(PMNG_MULTIP_EADD, (uint8_t*)&pmHpower, 1);
+  pRwRegs->scuSetRegister.pmHpower = infoStation.Pmng.Multip + 1;
   
   /* Set registro PM_DSET_RW */
-  eeprom_param_get(PMNG_ERROR_EADD, (uint8_t*)&pmDset, 1);
-  pRwRegs->scuSetRegister.pmDset = pmDset;
+  // xx eeprom_param_get(PMNG_ERROR_EADD, (uint8_t*)&pmDset, 1);
+  pRwRegs->scuSetRegister.pmDset = infoStation.Pmng.Error;
   
   /* Set registro PM_DMAX_RW */
-  eeprom_param_get(PMNG_DMAX_EADD, (uint8_t*)&pmDmax, 1);
-  pRwRegs->scuSetRegister.pmDmax = pmDmax;
+  // xx eeprom_param_get(PMNG_DMAX_EADD, (uint8_t*)&pmDmax, 1);
+  pRwRegs->scuSetRegister.pmDmax = infoStation.Pmng.Dmax;
 }
 
 /**
@@ -5770,7 +5768,7 @@ uint32_t getMaxTempPowerAc (void)
 void setHwActuators (uint8_t actEeprom)
 {
   scuRwMapRegister_st*  pRwRegs;
-  uint8_t               mdbAddr, tmp;
+  uint8_t               mdbAddr;
   uint16_t              value = 0;
   
   /* get address on modbus and relative modbus pointer area   */
@@ -5778,7 +5776,7 @@ void setHwActuators (uint8_t actEeprom)
   pRwRegs = getRwMdbRegs(mdbAddr);
   
   /* Get LCD_TYPE address from eeprom, where WIFI (actuator) is saved */
-  eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&tmp, 1);
+  // xx eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&tmp, 1);
   
   if((actEeprom & BLOCK_ATT0) == BLOCK_ATT0)
   {
@@ -5801,7 +5799,7 @@ void setHwActuators (uint8_t actEeprom)
   }
   
   /* Check if WIFI is enabled or not */
-  if((tmp & WIFI_ON) == WIFI_ON)
+  if((infoStation.LcdType & WIFI_ON) == WIFI_ON)
     value |= ACT_WIFI;        /* Enable WIFI actuator */    
   
   pRwRegs->scuSetRegister.hwActuators = value;
@@ -5837,7 +5835,7 @@ void setActuatorsInEeprom (uint16_t actModbus)
     value |= RCBO_ATT0;
   }
   
-  EEPROM_Save_Config (ACTUATORS_EADD, &value, 1);
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.actuators, &value, 1);   /* ex ACTUATORS_EADD */
 }
 
 
@@ -6626,7 +6624,8 @@ static void restartTimerToResetRs485Uart()
 void updateScuModbusAddrr (void)
 {
   /* Read RS485 address */
-  eeprom_param_get(RS485_ADD_EADD, &scuAddr, 1);
+  // eeprom_param_get(RS485_ADD_EADD, &scuAddr, 1);
+  scuAddr = infoStation.rs485Address;
 }
 
 /**
@@ -6642,11 +6641,12 @@ uint8_t setPmRemoteSemFlag (uint8_t writeImm)
 {
   uint8_t   semFlag;
 
-  eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t *)&semFlag, 1);
+  // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t *)&semFlag, 1);
+  semFlag = infoStation.Hidden_Menu.Enabled;
   semFlag |= HIDDEN_MENU_SEM_ENB; 
   /* save PM enable flag (remote) *****/
   // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&semFlag, 1);
-  eeprom_param_set (HIDDEN_MENU_ENB_EADD, (uint8_t*)&semFlag, 1);
+  // xx eeprom_param_set (HIDDEN_MENU_ENB_EADD, (uint8_t*)&semFlag, 1);
   if (writeImm != 0)
   {
     /* save new parameter in EEPROM */
@@ -6671,12 +6671,13 @@ uint8_t ResetPmRemoteSemFlag (uint8_t writeImm)
   uint8_t   semFlag;
 
   /* Get PM configuration */
-  eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t *)&semFlag, 1);
+  // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t *)&semFlag, 1);
+  semFlag = infoStation.Hidden_Menu.Enabled;
   /* Disable PM remote flag (remote) */
   semFlag &= ~HIDDEN_MENU_SEM_ENB; 
   /* Stoe configuration */
   // xx eeprom_array_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&semFlag, 1);
-  eeprom_param_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&semFlag, 1);
+  // xx eeprom_param_set(HIDDEN_MENU_ENB_EADD, (uint8_t*)&semFlag, 1);
   if (writeImm != 0)
   {
     /* save new parameter in EEPROM */

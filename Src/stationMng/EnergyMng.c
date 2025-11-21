@@ -744,7 +744,7 @@ if (energy_parameter <= EM_SES_ACTIVE_ENERGY)
                       pass[1] = (uint8_t)((TOT_ACTIVE_ENERGY & 0x00FF0000) >> 16);
                       pass[2] = (uint8_t)((TOT_ACTIVE_ENERGY & 0x0000FF00) >> 8);
                       pass[3] = (uint8_t)((TOT_ACTIVE_ENERGY & 0x000000FF));
-                      EEPROM_Save_Config (TOT_ENERGY0_EADD, pass, 4);
+                      SCU_InfoStation_Set ((uint8_t *)&infoStation.TotalEnergy, pass, 4);  /* ex TOT_ENERGY0_EADD */
                       InitModbusRegisters_Stop = TRUE;   /* Stop the InitModbusRegister call during this operation */
                     }
           

@@ -2093,10 +2093,9 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
       
       /* Check command type: oldest or newest depending on the motor driver attached */
       
-      eeprom_param_get(BLOCK_DIR_EADD, &block_polarity, 1);
-      block_polarity &= BLOCK_POLARITY_MASK;
+      // xx eeprom_param_get(BLOCK_DIR_EADD, &block_polarity, 1);
 
-      switch (block_polarity)
+      switch (infoStation.blockDir & BLOCK_POLARITY_MASK)
       {
         case 0:         /* newest one */
         
@@ -2617,7 +2616,8 @@ void vApplicationIdleHook (void)
         if (flag230 == BACKUP_FAIL_BOARD) 
         {
             /* set station V230 control from   CONTROL_BYTE1_EADD bit  VBUS_CRL1  */
-            eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
+            // xx eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
+            flagVbus = infoStation.controlByte.Byte.Byte1;
             flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
             if ((flagVbus == DISABLED) || (infoV230.statusV230 == V230_PRESENT))
             {
@@ -2727,8 +2727,8 @@ void vApplicationIdleHook (void)
             break;
 
           case EMRG_VBUS_DIS:
-            eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
-            if (socket_type & EVS_TETHERED)   
+            // xx eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
+            if (infoStation.socketType & EVS_TETHERED)   
             {
               valVin =  VIN_ATTENUATION * getADCmV(VIN_ADC_IN);
               if (valVin < MIN_VIN_TETHERED)
@@ -3304,7 +3304,8 @@ void checkStartSemSbcUartTask (void)
   if (infoV230.statusSBC485 == TASK_RS485_SBC_OFF)
   {
     infoV230.statusSBC485 = TASK_RS485_SBC_ON;
-    eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
+    // xx eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
+    flagVbus = infoStation.controlByte.Byte.Byte1;
     flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
 
     if ((infoV230.statusV230 == V230_PRESENT) || (flagVbus == DISABLED) || 

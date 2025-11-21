@@ -2686,8 +2686,8 @@ lang_def_byte = (*(src_ptr + 4) / 8);
 
 *(src_ptr + lang_def_byte) |= lang_bit;                 // si forza la lingua selezionata di default a essere fra quelle abilitate [si controlla e nel caso, si forza]
 
-EEPROM_Save_Config (LANG_DEFAULT_EADD, (src_ptr + 4), 1);
-EEPROM_Save_Config (LANG_CONFIG0_EADD, (src_ptr + 0), 4);
+SCU_InfoStation_Set ((uint8_t *)&infoStation.default_Lang, (src_ptr + 4), 1);     /* ex LANG_DEFAULT_EADD */
+SCU_InfoStation_Set ((uint8_t *)&infoStation.LangConfig, (src_ptr + 0), 4);     /* ex LANG_CONFIG0_EADD */
 send_to_lcd(LANGUAGE_TIME_EXPIRED);                     // forza aggiornamento a nuova lingua di default
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
@@ -2736,7 +2736,7 @@ void lcd_language_def_update(void)
 lcd_language_def_enable = 0;
 lcd_main_blink = 1;
 lcd_toggle = 0;
-EEPROM_Save_Config (LANG_DEFAULT_EADD, &lcd_language, 1);
+SCU_InfoStation_Set ((uint8_t *)&infoStation.default_Lang, &lcd_language, 1);     /* ex LANG_DEFAULT_EADD */
 lcd_set_timer(LCD_MAIN_BLINK_TIM, LCD_MAIN_BLINK_TIME);
 send_to_lcd(REFRESH_TIME_EXPIRED);
 }
@@ -2847,7 +2847,7 @@ void LANG_Modbus_to_EEprom_Translate(uint32_t display_lang_reg)
      if ((display_lang_reg & bit) != 0)
      {
        // xx eeprom_array_set(LANG_DEFAULT_EADD, (uint8_t*)&cnt, 1);
-       EEPROM_Save_Config (LANG_DEFAULT_EADD, (uint8_t*)&cnt, 1);
+       SCU_InfoStation_Set ((uint8_t *)&infoStation.default_Lang, (uint8_t*)&cnt, 1);     /* ex LANG_DEFAULT_EADD */
        lcd_language_set(cnt);
        lcd_language_def_update();
        break;
@@ -2873,7 +2873,7 @@ void LANG_Available_Mdb_to_EEprom_Translate (uint32_t display_avail_lang)
    temp[2] = (display_avail_lang >> 16) & 0x000000FF;
    temp[3] = (display_avail_lang >> 24) & 0x000000FF;
    /* set in eeprom */
-   EEPROM_Save_Config (LANG_CONFIG0_EADD, (uint8_t *)temp, 4);
+   SCU_InfoStation_Set ((uint8_t *)&infoStation.LangConfig, (uint8_t *)temp, 4);        /* ex LANG_CONFIG0_EADD */
    
 }
 

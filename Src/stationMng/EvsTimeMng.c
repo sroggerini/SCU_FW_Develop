@@ -156,7 +156,7 @@ char        ret;
 uint8_t     *src_ptr, config;
 uint32_t    rtc_backup;
 
-eeprom_param_get(TCHARGE_MODE_EADD, &config, 1);
+// x eeprom_param_get(TCHARGE_MODE_EADD, &config, 1);
 
 if (rtc_backup_get == 1)
     {
@@ -166,20 +166,20 @@ if (rtc_backup_get == 1)
     rtc_backup_get = 0;
     }
 
-if (config == 1)
+if (infoStation.TCharge.Mode == 1)
     {
-    eeprom_param_get(TCHARGE_TIME_EADD, &config, 1);
+    // xx eeprom_param_get(TCHARGE_TIME_EADD, &config, 1);
 
-    if (config > 0)
-        config = 1;
+    if (infoStation.TCharge.Time > 0)
+        infoStation.TCharge.Time = 1;
     }
 
-if ((user_card_auth_get() & TIME_CHARGE_AUTH) || (config == 1))
+if ((user_card_auth_get() & TIME_CHARGE_AUTH) || (infoStation.TCharge.Time == 1))
     {
     src_ptr = charge_time_array;
-    eeprom_param_get(BATTERY_CONFIG_EADD, &config, 1);
+    // xx eeprom_param_get(BATTERY_CONFIG_EADD, &config, 1);
         
-    if (config == 1)
+    if (infoStation.batteryConfig == 1)
         {
         rtc_backup = (evstime_rtc_backup_get(BACKUP_CHARGE_TIME) & 0xFF000000);
         rtc_backup += charging_seconds;
@@ -189,9 +189,9 @@ if ((user_card_auth_get() & TIME_CHARGE_AUTH) || (config == 1))
 else
     {
     src_ptr = busy_time_array;
-    eeprom_param_get(BATTERY_CONFIG_EADD, &config, 1);
+    // xx eeprom_param_get(BATTERY_CONFIG_EADD, &config, 1);
         
-    if (config == 1)
+    if (infoStation.batteryConfig == 1)
         {
         rtc_backup = (evstime_rtc_backup_get(BACKUP_CHARGE_TIME) & 0xFF000000);
         rtc_backup += busy_seconds;
@@ -299,12 +299,12 @@ if ((rtc_backup_get == 0) && (busy_time_run == 0))
 
 evstime_time_update(&busy_seconds, busy_time_array);
 
-eeprom_param_get(TCHARGE_MODE_EADD, &i, 1);
+// xx eeprom_param_get(TCHARGE_MODE_EADD, &i, 1);
 
-if (i == 1)
+if (infoStation.TCharge.Mode == 1)
     {
-    eeprom_param_get(TCHARGE_TIME_EADD, &i, 1);
-    timed_charge_seconds = (uint32_t)(i) * 1800;
+    // xx eeprom_param_get(TCHARGE_TIME_EADD, &i, 1);
+    timed_charge_seconds = (uint32_t)(infoStation.TCharge.Time) * 1800;
     }
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
@@ -388,12 +388,12 @@ charging_time_init();
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 static uint32_t EvsTimeManager(EvsTimeMngMsg_st *pMsg)
 {
-uint8_t     timed_recharge, charge_time;
+// uint8_t     timed_recharge, charge_time;
 uint32_t    charge_seconds, rtc_backup;
 uint32_t    newTimeTick = pdMS_TO_TICKS(1000);
 
-eeprom_param_get(TCHARGE_MODE_EADD, &timed_recharge, 1);
-eeprom_param_get(TCHARGE_TIME_EADD, &charge_time, 1);
+// xx eeprom_param_get(TCHARGE_MODE_EADD, &timed_recharge, 1);
+// xx eeprom_param_get(TCHARGE_TIME_EADD, &charge_time, 1);
 
 if (busy_time_run == 1)
 	{
@@ -402,7 +402,7 @@ if (busy_time_run == 1)
 
 	evstime_time_update(&busy_seconds, busy_time_array);
 
-    if (timed_recharge == 1)
+    if (infoStation.TCharge.Mode == 1)
         {
         timed_charge_seconds --;
         charge_seconds = timed_charge_seconds;
@@ -412,16 +412,16 @@ if (busy_time_run == 1)
         {
         charge_seconds = user_card_time_decrease();
         
-        if (timed_recharge == 1)
+        if (infoStation.TCharge.Mode == 1)
             {
             if (timed_charge_seconds < charge_seconds)
                 charge_seconds = timed_charge_seconds;
             }
         
-        timed_recharge = 1;
+        infoStation.TCharge.Mode = 1;
         }
 	
-	if (timed_recharge == 1)
+	if (infoStation.TCharge.Mode == 1)
 	    {
 	    evstime_time_update(&charge_seconds, charge_time_array);
 
@@ -460,7 +460,7 @@ if (pMsg->EvsTimeMngEvent == EVSTIME_CARD_TIME_UPDATE)
     {
     charge_seconds = user_card_time_decrease();
 
-    if (timed_recharge == 1)
+    if (infoStation.TCharge.Mode == 1)
         {
         if (timed_charge_seconds < charge_seconds)
             charge_seconds = timed_charge_seconds;

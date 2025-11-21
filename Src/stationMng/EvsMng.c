@@ -1122,7 +1122,7 @@ if ((pMsg->EvsMngEvent == EVS_EXTERNAL_EM_GOOD) || (pMsg->EvsMngEvent == EVS_SIN
         if (sinapsi_inst_status != 1)
             {
             sinapsi_inst_status = 1;
-            EEPROM_Save_Config (SINAPSI_INST_EADD, &sinapsi_inst_status, 1);
+            SCU_InfoStation_Set ((uint8_t *)&infoStation.Sinapsi_Installed, &sinapsi_inst_status, 1);  /* ex SINAPSI_INST_EADD */
             }
 
         chn2_error_enable = 1;
@@ -1524,12 +1524,12 @@ eeprom_param_get(CONTROL_BYTE2_EADD, &control_enable, 1);
 if ((control_enable & EMETER_EXT_CRL2) && ((control_enable & SINAPSI_CHN2_CRL2) == 0))
     {
     control_enable |= SINAPSI_CHN2_CRL2;
-    EEPROM_Save_Config (CONTROL_BYTE2_EADD, &control_enable, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, &control_enable, 1);       /* ex CONTROL_BYTE2_EADD */
     }
 else if (((control_enable & EMETER_EXT_CRL2) == 0) && (control_enable & SINAPSI_CHN2_CRL2))
     {
     control_enable &=~ SINAPSI_CHN2_CRL2;
-    EEPROM_Save_Config (CONTROL_BYTE2_EADD, &control_enable, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, &control_enable, 1);       /* ex CONTROL_BYTE2_EADD */
     }
 
 eeprom_param_get(SINAPSI_INST_EADD, &sinapsi_inst_status, 1);

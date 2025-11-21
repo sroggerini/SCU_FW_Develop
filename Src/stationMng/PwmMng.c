@@ -612,7 +612,7 @@ eeprom_param_get(PMNG_UNBAL_EADD, &eeprom_unbalance_enable, 1);     // legge con
 if ((isSemMode() == TRUE) && (eeprom_unbalance_enable == 0))
     {
     eeprom_unbalance_enable = 1;
-    EEPROM_Save_Config (PMNG_UNBAL_EADD, &eeprom_unbalance_enable, 1);
+    SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, &eeprom_unbalance_enable, 1);      /* ex PMNG_UNBAL_EADD */
     }
 
 evs_error_get(pass, 0, 0, 0);                                       // legge la presenza di errori [EMETER_EXT_ANOM2]
@@ -1510,22 +1510,15 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmImin(); 
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        EEPROM_Save_Config (PMNG_CURRENT_EADD, (uint8_t *)&tmp16, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Current, (uint8_t *)&tmp16, 1);         /* ex PMNG_CURRENT_EADD */
       break;
       
     case ADDR_PM_PMAX_RW:
         // Get PMAX value 
         tmp16 = getPmPmax();
-        // Get LSB part
-        tmp8 = tmp16 & 0xFF;          
         // Set in eeprom       
         /*** SAVE ON EEPROM ***/        
-        EEPROM_Save_Config (PMNG_PWRLSB_EADD, (uint8_t *)&tmp8, 1);
-        // Get MSB part 
-        tmp8 = (tmp16 & 0xFF00) >> 8; 
-        // Set in eeprom       
-        /*** SAVE ON EEPROM ***/        
-        EEPROM_Save_Config (PMNG_PWRMSB_EADD, (uint8_t *)&tmp8, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Power, (uint8_t *)&tmp16, 2);          /* ex PMNG_PWRLSB_EADD - PMNG_PWRMSB_EADD */
       break;
       
     case ADDR_PM_FLAGS_RW:
@@ -1535,12 +1528,12 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp8 = tmp16 & HIDDEN_MENU_PMNG_ENB;
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        EEPROM_Save_Config (HIDDEN_MENU_ENB_EADD, &tmp8, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &tmp8, 1);     /* ex HIDDEN_MENU_ENB_EADD */
         // Get Unbalance flag
         tmp8 = tmp16 >> 1;
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        EEPROM_Save_Config (PMNG_UNBAL_EADD, &tmp8, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, &tmp8, 1);     /* ex PMNG_UNBAL_EADD */
         // Check if TIME RANGE functionality is enabled
         if (tmp16 & PM_TIME_RANGE_FUNC_MASK)
           tmp8 = TRUE;
@@ -1548,7 +1541,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
           tmp8 = FALSE;
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        EEPROM_Save_Config (PMNG_TRANGE_EADD, &tmp8, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Trange, &tmp8, 1);     /* ex PMNG_TRANGE_EADD */
       break;
       
     case ADDR_PM_HPOWER_RW:
@@ -1556,7 +1549,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmHpower() - 1;
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        EEPROM_Save_Config (PMNG_MULTIP_EADD, (uint8_t *)&tmp16, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Multip, (uint8_t *)&tmp16, 1);         /* ex PMNG_MULTIP_EADD */
       break;
       
     case ADDR_PM_DSET_RW:
@@ -1564,7 +1557,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmDset();
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        EEPROM_Save_Config (PMNG_ERROR_EADD, (uint8_t *)&tmp16, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Error, (uint8_t *)&tmp16, 1);         /* ex PMNG_ERROR_EADD */
       break;
       
     case ADDR_PM_DMAX_RW:
@@ -1572,7 +1565,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmDmax();
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        EEPROM_Save_Config (PMNG_DMAX_EADD, (uint8_t *)&tmp16, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Dmax, (uint8_t *)&tmp16, 1);         /* ex PMNG_DMAX_EADD */
       break;
       
     case ADDR_PM_MODE_RW:
@@ -1580,7 +1573,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmMode();
         // Set in eeprom
         /*** SAVE ON EEPROM ***/
-        EEPROM_Save_Config (PMNG_MODE_EADD, (uint8_t *)&tmp16, 1);
+        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, (uint8_t *)&tmp16, 1);         /* ex PMNG_MODE_EADD */
       break;
       
     default:

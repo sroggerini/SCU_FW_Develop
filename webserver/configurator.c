@@ -250,7 +250,7 @@ HttpResponse configurator_process_config (void)
       sn[2] |= (param.value[4] - '0') << 4;
       sn[3] |= (param.value[7] - '0');
       sn[3] |= (param.value[6] - '0') << 4;
-      EEPROM_Save_Config (SERNUM_BYTE0_EADD, sn, 4);
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, sn, 4);  /* ex SERNUM_BYTE0_EADD */
       res = setScuSerialNumberEeprom((char*)sn, param.value);
     } else if (strcmp("hw_code", param.name) == 0) {
       res = setScuHardwareVersionEeprom(param.value);
@@ -278,7 +278,7 @@ HttpResponse configurator_process_config (void)
       UpdateGlobalDT();
       sn[0] = 1;
       // xx eeprom_array_set(RTC_VALID_EADD, &sn[0], 1);
-      EEPROM_Save_Config (RTC_VALID_EADD, &sn[0], 1);
+      SCU_InfoStation_Set ((uint8_t *)&infoStation.rtcValid, &sn[0], 1);      /* ex RTC_VALID_EADD */
     } else if (strcmp("server_key", param.name) == 0) {
       header.magic = 0xF1F1;
       header.list_size = 1;
