@@ -482,7 +482,7 @@ static uint32_t HTSManager(HTSMngMsg_st *pMsg)
 {
 uint32_t    temp, newTimeTick = pdMS_TO_TICKS(125);
 uint16_t    delta_temp, temp_hysteresis, temp_threshold, hts_min_current;
-uint8_t     dData, dDec, pmng_enable;
+uint8_t     dData, dDec;
 int32_t     hts_charging_current;
 int8_t      delta_sign, hts_correction = 0;
 

@@ -343,7 +343,7 @@ control_enable = infoStation.controlByte.Byte.Byte0;
 control_enable &= BLOCK_CRL0;
 
 // xx eeprom_param_get(ACTUATORS_EADD, &actuator_enable, 1);
-
+actuator_enable = infoStation.actuators;
 actuator_enable &= BLOCK_ATT0;
 actuator_enable = infoStation.actuators;
 // xx eeprom_param_get(BLOCK_DIR_EADD, &block_polarity_assigned, 1);

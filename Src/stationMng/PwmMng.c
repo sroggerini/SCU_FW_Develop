@@ -605,9 +605,11 @@ sinapsiSetReg_st    *pmng_sinapsi_ptr;
 uint8_t             pass[3], unbalance_enable, eeprom_min_power_index, eeprom_delta_error;
 uint16_t            pmng_max_current_entry;
 
-eeprom_param_get(PMNG_PWRLSB_EADD, pass, 2);
-eeprom_available_power = ((uint16_t)(pass[1]) << 8) + pass[0];      // potenza totale disponibile da eeprom data [potenza contrattuale]
-eeprom_param_get(PMNG_UNBAL_EADD, &eeprom_unbalance_enable, 1);     // legge consenso al carico sbilanciato nei sistemi trifase
+// xx eeprom_param_get(PMNG_PWRLSB_EADD, pass, 2);
+// eeprom_available_power = ((uint16_t)(pass[1]) << 8) + pass[0];      // potenza totale disponibile da eeprom data [potenza contrattuale]
+eeprom_available_power = infoStation.Pmng.Power;
+// xx eeprom_param_get(PMNG_UNBAL_EADD, &eeprom_unbalance_enable, 1);     // legge consenso al carico sbilanciato nei sistemi trifase
+eeprom_unbalance_enable = infoStation.Pmng.Unbal;
 
 if ((isSemMode() == TRUE) && (eeprom_unbalance_enable == 0))
     {
@@ -634,10 +636,14 @@ if (((eeprom_pmng_enable & HIDDEN_MENU_PMNG_ENB) == 0)/* || (pmng_internal_em ==
     return;
     }
 
-eeprom_param_get(PMNG_MULTIP_EADD, &eeprom_min_power_index, 1);     // fattore moltiplicativo della potenza minima per uscire da NO POWER
-eeprom_param_get(PMNG_ERROR_EADD, &eeprom_delta_error, 1);          // errore ammesso nella regolazione di potenza [KW * 10] [da sottrarre al setpoint potenza disponibile]
-eeprom_param_get(PMNG_DMAX_EADD, &eeprom_dmax_power, 1);            // fattore moltiplicativo della potenza per la sospensione immediata della ricarica
-eeprom_param_get(PMNG_TRANGE_EADD, &eeprom_time_range_enable, 1);   // abilitazione modalità a fasce orarie
+// xx eeprom_param_get(PMNG_MULTIP_EADD, &eeprom_min_power_index, 1);     // fattore moltiplicativo della potenza minima per uscire da NO POWER
+eeprom_min_power_index = infoStation.Pmng.Multip;
+// xx eeprom_param_get(PMNG_ERROR_EADD, &eeprom_delta_error, 1);          // errore ammesso nella regolazione di potenza [KW * 10] [da sottrarre al setpoint potenza disponibile]
+eeprom_delta_error = infoStation.Pmng.Error;
+// xx eeprom_param_get(PMNG_DMAX_EADD, &eeprom_dmax_power, 1);            // fattore moltiplicativo della potenza per la sospensione immediata della ricarica
+eeprom_dmax_power = infoStation.Pmng.Dmax;
+// xx eeprom_param_get(PMNG_TRANGE_EADD, &eeprom_time_range_enable, 1);   // abilitazione modalità a fasce orarie
+eeprom_time_range_enable = infoStation.Pmng.Trange;
 
 pmng_max_current_entry = *max_current;
 
@@ -1055,10 +1061,12 @@ uint8_t     m3t_current, m3s_current;
   }
 
 
-eeprom_param_get(PMNG_MODE_EADD, &eeprom_pmng_mode, 1);             // legge tipo di power management
-
-eeprom_param_get(M3T_CURRENT_EADD, &m3t_current, 1);
-eeprom_param_get(M3S_CURRENT_EADD, &m3s_current, 1);
+// xx eeprom_param_get(PMNG_MODE_EADD, &eeprom_pmng_mode, 1);             // legge tipo di power management
+eeprom_pmng_mode = infoStation.Pmng.Mode;
+// xx eeprom_param_get(M3T_CURRENT_EADD, &m3t_current, 1);
+m3t_current = infoStation.max_current;
+// xx eeprom_param_get(M3S_CURRENT_EADD, &m3s_current, 1);
+m3s_current = infoStation.max_currentSemp;
 
 pwm_m3t_current = ((uint16_t)(m3t_current) * 10);
 pwm_m3s_current = ((uint16_t)(m3s_current) * 10);
@@ -1082,9 +1090,12 @@ pwm_gsy_current = gsy_current_get();                                // lettura d
 if (charging_current > pwm_gsy_current)                             // limitazione pwm da corrente impostata via gsy
     charging_current = pwm_gsy_current;
         
-eeprom_param_get(PMNG_CURRENT_EADD, &eeprom_min_current, 1);        // minima corrente pwm applicabile prima di andare in sospensione [A]
-eeprom_param_get(EMETER_INT_EADD, &eeprom_emeter_type, 1);          // tipo di energy meter interno
-eeprom_param_get(HIDDEN_MENU_ENB_EADD, &eeprom_pmng_enable, 1);     // legge power management enable
+// xx eeprom_param_get(PMNG_CURRENT_EADD, &eeprom_min_current, 1);        // minima corrente pwm applicabile prima di andare in sospensione [A]
+eeprom_min_current = infoStation.Pmng.Current;
+// xx eeprom_param_get(EMETER_INT_EADD, &eeprom_emeter_type, 1);          // tipo di energy meter interno
+eeprom_emeter_type = infoStation.emTypeInt;
+// xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &eeprom_pmng_enable, 1);     // legge power management enable
+eeprom_pmng_enable = infoStation.Hidden_Menu.Enabled;
 eeprom_pmng_enable &= (HIDDEN_MENU_SEM_ENB | HIDDEN_MENU_PMNG_ENB);
 
 if (pMsg->PwmMngEvent == PWM_INTERNAL_EM_GOOD)                      // aggiornamento stato energy meter

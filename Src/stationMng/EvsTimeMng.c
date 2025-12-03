@@ -153,10 +153,10 @@ return busy_seconds;
 char evstime_time_get(uint8_t *time_array)
 {
 char        ret;
-uint8_t     *src_ptr, config;
+uint8_t     *src_ptr /*, config*/;
 uint32_t    rtc_backup;
 
-// x eeprom_param_get(TCHARGE_MODE_EADD, &config, 1);
+// xx eeprom_param_get(TCHARGE_MODE_EADD, &config, 1);
 
 if (rtc_backup_get == 1)
     {
@@ -292,7 +292,7 @@ sec = (uint16_t)(data);
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 static void busy_time_init(void)
 {
-uint8_t     i;
+// xx uint8_t     i;
 
 if ((rtc_backup_get == 0) && (busy_time_run == 0))
   busy_seconds = 0L;

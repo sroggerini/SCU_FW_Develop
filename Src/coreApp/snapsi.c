@@ -215,8 +215,6 @@ static void sinapsiManager (sinapsiMngMsg_st* pMsg)
   rseSetRegEEPROM_st* pSrc;
 #ifdef SINAPSI_RSE
   rseSetReg_st*       pTmp;
-#else
-  uint16_t            tmp;
 #endif
 
   switch (sinapsiMng.stato)

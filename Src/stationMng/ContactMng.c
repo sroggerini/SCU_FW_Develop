@@ -339,13 +339,14 @@ return contact_state;
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 static void ContactManager(ContactMngMsg_st *pMsg)
 {
-uint8_t     control_enable/*, actuator_enable*/;
+uint8_t     control_enable, actuator_enable;
 
 // xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
 control_enable = infoStation.controlByte.Byte.Byte0;
 control_enable &= MIRROR_CRL0;
 
 // xx eeprom_param_get(ACTUATORS_EADD, &actuator_enable, 1);
+actuator_enable = infoStation.actuators;
 
 if (pMsg->ContactMngEvent == RCBO_STATE_TIM_EXPIRED)
     setOutputState(SGCBOB, GPIO_PIN_RESET);                         // diseccita la bobina del magnetotermico allo scadere del timer

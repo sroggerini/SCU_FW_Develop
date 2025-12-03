@@ -163,7 +163,7 @@ void DateTimeSet(struct DataAndTime_t *DT_Set)
   uint32_t              currentUnixTime, newUnixTime, deltaSet, deltaSec, n32Bk;
   uint32_t              currCalp, currCalm, newCalm;
   struct DataAndTime_t  DT_Get;
-	unsigned char         YearTemp, dataValid;
+  unsigned char         YearTemp;
 
 
   

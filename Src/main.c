@@ -2450,7 +2450,7 @@ void vApplicationIdleHook (void)
   uint16_t      valVin;
   statusFlag_e  flagVbus; 
   uint8_t       status;
-  uint8_t       socket_type;
+  // xx uint8_t       socket_type;
 
 #ifdef HW_MP28947   
   // ONLY FOR DEBUG --> uint16_t      Key;
@@ -2617,7 +2617,7 @@ void vApplicationIdleHook (void)
         {
             /* set station V230 control from   CONTROL_BYTE1_EADD bit  VBUS_CRL1  */
             // xx eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
-            flagVbus = infoStation.controlByte.Byte.Byte1;
+            flagVbus = (statusFlag_e) infoStation.controlByte.Byte.Byte1;
             flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
             if ((flagVbus == DISABLED) || (infoV230.statusV230 == V230_PRESENT))
             {
@@ -3305,7 +3305,7 @@ void checkStartSemSbcUartTask (void)
   {
     infoV230.statusSBC485 = TASK_RS485_SBC_ON;
     // xx eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
-    flagVbus = infoStation.controlByte.Byte.Byte1;
+    flagVbus = (statusFlag_e) infoStation.controlByte.Byte.Byte1;
     flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
 
     if ((infoV230.statusV230 == V230_PRESENT) || (flagVbus == DISABLED) || 

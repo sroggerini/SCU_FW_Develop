@@ -688,7 +688,6 @@ uint8_t checkVbusFlag(void)
   */
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-  uint8_t         rcdm_enable;
   ioMngMsg_st     ioExpMsg;
   portBASE_TYPE   xHigherPriorityTaskWoken;
 
@@ -1507,7 +1506,6 @@ void stopNewTransaction( uint32_t activeEnergy )
 {
   scuRoMapRegister_st*  pRoRegs;
   uint8_t               mdbAddr;
-  uint8_t               lcdEepromFlags;
   appMapRwRegister_st* pAppRwRegs;
   int32_t res;
   
@@ -2458,15 +2456,8 @@ void initModbusRegisters(void)
 {
     
   uint8_t check1_tmp;
-  uint8_t actuators = 0;
   uint16_t checks1Mod = 0;
   uint16_t checks2Mod = 0;
-  uint8_t menuVisibility = 0;
-  uint8_t pmMode = 0;
-  uint8_t langDef = 0;
-  uint8_t langAvail[4];
-  uint8_t timeZone = 0;
-  uint32_t languages = 0;
   uint8_t  tmp;
   uint16_t current;
   
@@ -2745,7 +2736,6 @@ char*  getStationFakeCodeCodeString(void)
 
 sck_wiring_e  getStationSocketType(void)
 {
-  sck_wiring_e tmp;
 
   /* set socket type  from SOCKET_TYPE_EADD   */
   // xx eeprom_param_get(SOCKET_TYPE_EADD, (uint8_t *)&tmp, 1); 
@@ -2923,7 +2913,7 @@ void  setStationEmType(energy_meter_e emType,  emEnum_e pos, EmeterType_en gsyEm
 {
   
   EmeterType_en  localWebEmType, localGsyEmType;
-  uint8_t        tmp, emTypeInt, emTypeExt, modePwr;
+  uint8_t        emTypeInt, emTypeExt, modePwr;
 
   localWebEmType = webEmType; localGsyEmType = gsyEmType; 
   if ((pos == INTERNAL_EM) && (webEmType != EMETER_TYPE_NULL))
@@ -4795,7 +4785,7 @@ void setCurrentTimestamp()
   struct tm             structUnixTime = {0} ;
 
   scuRwMapRegister_st*  pRwRegs;
-  uint8_t               mdbAddr, timezoneRam, DSTcurr, DSTram;
+  uint8_t               mdbAddr, DSTcurr;
   int16_t               timezone;
   uint8_t               timezoneEeprom = 0x00; 
         
@@ -5536,10 +5526,12 @@ void BCD_to_PackedBCD (uint8_t *pPackedBCD, uint8_t *pBCD, uint8_t nBCD)
 void PackedBCD_to_BCD (uint8_t *pBCD, uint8_t *pPackedBCD, uint8_t nBCD)
 {
   
+  uint8_t i;
+  
   for (i = 0; i < MAX_SERIAL_LENGTH; i <<= 1)
   {
-    temp[i] = data8u_array[i];
-    temp[i + 1] = (data8u_array[i] & 0xF0) >> 4;
+    *pBCD++ = *pPackedBCD;
+    *pBCD++ = (*pPackedBCD & 0xF0) >> 4;
   }
   
 }

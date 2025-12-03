@@ -32,6 +32,7 @@
 #include "string.h"
 #include "transaction_register.h"
 #include "secure_area.h"
+#include "err.h"
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
@@ -137,6 +138,9 @@ typedef struct
 }infoEE_t;
 
 // -------------------------- local constats ------------------------------------------------------------------------------------------------------------------------- //
+
+#ifdef OLD_EEPROM_MANAGEMENT
+
 static const uint8_t eeprom_param_board_val[EEPROM_PARAM_NUM] = {EDATA_VALID_EDEF,    EDATA_NUM_EDEF,       SERNUM_BYTE0_EDEF,     SERNUM_BYTE1_EDEF,
                                                                  SERNUM_BYTE2_EDEF,   SERNUM_BYTE3_EDEF,    SOCKET_ENABLE_EDEF,    BATTERY_CONFIG_EDEF,
                                                                  LANGUAGE_EDEF,       RS485_ADD_EDEF,       RTC_VALID_EDEF,        EVS_MODE_EDEF,
@@ -172,6 +176,192 @@ static const uint8_t eeprom_param_master_Iso[EEPROM_PARAM_NUM] = {EDATA_VALID_ED
                                                                  SINAPSI_CONFIG_EDEF, EMETER_SCU_INT_EDEF,  SCU_SEM_STAND_ALONE,   TEMP_CTRL_ENB_EDEF,   /* operative mode = SCU_SEM_STAND_ALONE = 4*/
                                                                  TEMP_CTRL_VAL_EDEF,  TEMP_DELTA_EDEF,      TEMP_HYSTERESIS_EDEF,  RS485_ADD_ALIAS_EDEF,
                                                                  SEM_FLAGS_CTRL_EDEF, NOMINAL_POWER_EDEF,   CONNECTOR_NUMBER_EDEF, POST_SUSP_TIME_EDEF};
+#else
+
+/***************************************************************************************************/
+/**************************** DEFAULT parameter set ************************************************/
+/***************************************************************************************************/
+
+static const infoStation_t infoStation_DEFAULT = {
+  
+  .wiring			= PRESA_NESSUNA,
+  .max_current			= VALUE_OF_TIPCURR,
+  .max_currentSemp		= VALUE_OF_SIMPLCURR, 
+  .emTypeInt			= UNKNOW, 
+  .emTypeExt			= UNKNOW, 
+  .evs_mode			= EVS_FREE_MODE, 
+  .modePwr			= MODE_MONO_PH_NO_PM, 
+  .pmModeEn			= DISABLED, 
+  .pmUnbalEn			= PMNG_UNBAL_OFF, 
+  .batteryBackup		= BATTERY_BACKUP_OFF,
+  .v230MonFlag			= DISABLED, 
+  .auth				= 0,
+  .key				= EDATA_DEFAULT_PRG,
+  .userPin			= "      ",
+  .routerSsid			= 0,
+  .routerPass			= 0, 
+  .installerPin			= 0,
+  .socketActivatedFlag	        = DISABLED,
+  .bootEvent			= REGULAR_BOOT,
+  .italyProductSn		= 0,
+  .maxRandomDelay		= 0,
+  .esitoUpdateFw		= ERR_OK,
+  .antennaPresence		= WIFI_ANTENNA_TEST_NOT_VALID,
+  .sinapsiRS485Errors		= 0,
+  .keyForRestoreModule	        = 0xFF,
+  .restoreModule		= FALSE,
+  .productCode			= 0,
+  .fakeProductCode		= 0,
+  .sessionIdNum			= 0,
+  .channelId			= WIFI_AP_MIN_CHANNEL_ID,
+  .productSn			= '0',
+  .toRange1.keyValue		= 0xFFFF,
+  .toRange1.timeRangeVal        = 0, 
+  .socketEnable 	    	= EVS_MODE_AVAILABLE, 
+  .batteryConfig                = BATTERY_CONFIG_EDEF,
+  .default_Lang                 = LANGUAGE_EDEF,
+  .rs485Address                 = RS485_ADD_EDEF,
+  .rtcValid                     = RTC_VALID_EDEF,  
+  .socketType                   = SOCKET_ENABLE_EDEF,  
+  .controlByte.Byte.Byte0       = CONTROL_BYTE0_EDEF,    
+  .controlByte.Byte.Byte1       = CONTROL_BYTE1_EDEF,    
+  .controlByte.Byte.Byte2       = CONTROL_BYTE2_EDEF,    
+  .controlByte.Byte.Byte3       = CONTROL_BYTE3_EDEF,    
+  .actuators                    = ACTUATORS_EDEF,            
+  .blockDir                     = BLOCK_DIR_EDEF,    
+  .persUidNum                   = PERS_UIDNUM_EDEF,
+  .persMaster                   = PERS_MASTER_EDEF,   
+  .LangConfig.Byte.Byte0        = LANG_CONFIG0_EDEF,
+  .LangConfig.Byte.Byte1        = LANG_CONFIG1_EDEF, 
+  .LangConfig.Byte.Byte2        = LANG_CONFIG2_EDEF, 
+  .LangConfig.Byte.Byte3        = LANG_CONFIG3_EDEF,     
+  .TotalEnergy                  = 0,
+  .StripLedType                 = STRIP_LED_TYPE_EDEF,   
+  .LcdType                      = LCD_TYPE_EDEF, 
+  .Energy_limit		        = ENRG_LIMIT_EDEF,
+  .Sinapsi_Installed            = 0,
+  .EmeterScu_Int                = EMETER_SCU_INT_EDEF,
+  .Operative_mode               = OPERATIVE_MODE_EDEF,   
+  .semFlagControl               = SEM_FLAGS_CTRL_EDEF,   
+  .StationNominalPower          = NOMINAL_POWER_EDEF,   
+  .connectorNumber              = CONNECTOR_NUMBER_EDEF,  
+  .postSuspensionTime           = POST_SUSP_TIME_EDEF,  
+  .Pmng.Mode                    = PMNG_MODE_EDEF,    
+  .Pmng.Emeter                  = PMNG_EMETER_EDEF,   
+  .Pmng.Power                   = (uint16_t)((PMNG_PWRMSB_EDEF << 8) | PMNG_PWRLSB_EDEF), 
+  .Pmng.Error                   = PMNG_ERROR_EDEF,
+  .Pmng.Current                 = PMNG_CURRENT_EDEF,
+  .Pmng.Multip                  = PMNG_MULTIP_EDEF,   
+  .Pmng.Dmax                    = PMNG_DMAX_EDEF, 
+  .Pmng.Trange                  = PMNG_TRANGE_EDEF,   
+  .TCharge.Mode                 = TCHARGE_MODE_EDEF,  
+  .TCharge.Time                 = TCHARGE_TIME_EDEF,
+  .Hidden_Menu.Enabled          = HIDDEN_MENU_ENB_EDEF,
+  .Hidden_Menu.Visible          = HIDDEN_MENU_VIS_EDEF,
+  .Hidden_Menu.Pwd              = (uint32_t)((((uint32_t)PMNG_PWDB0_EDEF) << 16) | (((uint32_t)PMNG_PWDB1_EDEF) << 8)  | (((uint32_t)PMNG_PWDB2_EDEF))),
+  .Time_Settings.TimeZone       = TIME_ZONE_EDEF,
+  .Time_Settings.dst            = DST_FLAG_EDEF,
+  .Time_Settings.TimeDstOffset  = TIME_DST_OFFSET_EDEF,
+  .Time_Settings.DstStatus      = DST_DST_EDEF,
+  .Temp_Ctrl.Enabled            = TEMP_CTRL_ENB_EDEF,
+  .Temp_Ctrl.Value              = TEMP_CTRL_VAL_EDEF,   
+  .Temp_Ctrl.Delta              = TEMP_DELTA_EDEF,
+  .Temp_Ctrl.Hysteresis         = TEMP_HYSTERESIS_EDEF,      
+  
+};
+
+/************************** DEFAULT parameter set for SCU MASTER ISOLATED ************************************************/
+
+static const infoStation_t infoStation_DEFAULT_Iso = {
+  
+  .wiring			= PRESA_NESSUNA,
+  .max_current			= VALUE_OF_TIPCURR,
+  .max_currentSemp		= VALUE_OF_SIMPLCURR, 
+  .emTypeInt			= UNKNOW, 
+  .emTypeExt			= UNKNOW, 
+  .evs_mode			= EVS_FREE_MODE, 
+  .modePwr			= MODE_MONO_PH_NO_PM, 
+  .pmModeEn			= DISABLED, 
+  .pmUnbalEn			= PMNG_UNBAL_OFF, 
+  .batteryBackup		= BATTERY_BACKUP_OFF,
+  .v230MonFlag			= DISABLED, 
+  .auth				= 0,
+  .key				= EDATA_DEFAULT_PRG,
+  .userPin			= "      ",
+  .routerSsid			= 0,
+  .routerPass			= 0, 
+  .installerPin			= 0,
+  .socketActivatedFlag	        = DISABLED,
+  .bootEvent			= REGULAR_BOOT,
+  .italyProductSn		= 0,
+  .maxRandomDelay		= 0,
+  .esitoUpdateFw		= ERR_OK,
+  .antennaPresence		= WIFI_ANTENNA_TEST_NOT_VALID,
+  .sinapsiRS485Errors		= 0,
+  .keyForRestoreModule	        = 0xFF,
+  .restoreModule		= FALSE,
+  .productCode			= 0,
+  .fakeProductCode		= 0,
+  .sessionIdNum			= 0,
+  .channelId			= WIFI_AP_MIN_CHANNEL_ID,
+  .productSn			= '0',
+  .toRange1.keyValue		= 0xFFFF,
+  .toRange1.timeRangeVal        = 0, 
+  .socketEnable 	    	= EVS_MODE_AVAILABLE, 
+  .batteryConfig                = BATTERY_CONFIG_EDEF,
+  .default_Lang                 = LANGUAGE_EDEF,
+  .rs485Address                 = 0,
+  .rtcValid                     = RTC_VALID_EDEF,  
+  .socketType                   = 0,  
+  .controlByte.Byte.Byte0       = 0,    
+  .controlByte.Byte.Byte1       = 0,    
+  .controlByte.Byte.Byte2       = 0,    
+  .controlByte.Byte.Byte3       = 0,    
+  .actuators                    = 0,            
+  .blockDir                     = BLOCK_DIR_EDEF,    
+  .persUidNum                   = PERS_UIDNUM_EDEF,
+  .persMaster                   = PERS_MASTER_EDEF,   
+  .LangConfig.Byte.Byte0        = 0,
+  .LangConfig.Byte.Byte1        = 0, 
+  .LangConfig.Byte.Byte2        = 0, 
+  .LangConfig.Byte.Byte3        = 0,     
+  .TotalEnergy                  = 0,
+  .StripLedType                 = STRIP_LED_TYPE_EDEF,   
+  .LcdType                      = LCD_NULL, 
+  .Energy_limit		        = ENRG_LIMIT_EDEF,
+  .Sinapsi_Installed            = 0,
+  .EmeterScu_Int                = EMETER_SCU_INT_EDEF,
+  .Operative_mode               = SCU_SEM_STAND_ALONE,   
+  .semFlagControl               = SEM_FLAGS_CTRL_EDEF,   
+  .StationNominalPower          = NOMINAL_POWER_EDEF,   
+  .connectorNumber              = CONNECTOR_NUMBER_EDEF,  
+  .postSuspensionTime           = POST_SUSP_TIME_EDEF,  
+  .Pmng.Mode                    = PMNG_MODE_EDEF,    
+  .Pmng.Emeter                  = PMNG_EMETER_EDEF,   
+  .Pmng.Power                   = (uint16_t)((PMNG_PWRMSB_EDEF << 8) | PMNG_PWRLSB_EDEF), 
+  .Pmng.Error                   = PMNG_ERROR_EDEF,
+  .Pmng.Current                 = PMNG_CURRENT_EDEF,
+  .Pmng.Multip                  = PMNG_MULTIP_EDEF,   
+  .Pmng.Dmax                    = PMNG_DMAX_EDEF, 
+  .Pmng.Trange                  = PMNG_TRANGE_EDEF,   
+  .TCharge.Mode                 = TCHARGE_MODE_EDEF,  
+  .TCharge.Time                 = TCHARGE_TIME_EDEF,
+  .Hidden_Menu.Enabled          = HIDDEN_MENU_ENB_EDEF,
+  .Hidden_Menu.Visible          = HIDDEN_MENU_VIS_EDEF,
+  .Hidden_Menu.Pwd              = (uint32_t)((((uint32_t)PMNG_PWDB0_EDEF) << 16) | (((uint32_t)PMNG_PWDB1_EDEF) << 8)  | (((uint32_t)PMNG_PWDB2_EDEF))),
+  .Time_Settings.TimeZone       = TIME_ZONE_EDEF,
+  .Time_Settings.dst            = DST_FLAG_EDEF,
+  .Time_Settings.TimeDstOffset  = TIME_DST_OFFSET_EDEF,
+  .Time_Settings.DstStatus      = DST_DST_EDEF,
+  .Temp_Ctrl.Enabled            = TEMP_CTRL_ENB_EDEF,
+  .Temp_Ctrl.Value              = TEMP_CTRL_VAL_EDEF,   
+  .Temp_Ctrl.Delta              = TEMP_DELTA_EDEF,
+  .Temp_Ctrl.Hysteresis         = TEMP_HYSTERESIS_EDEF,      
+  
+};
+
+#endif
+
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
@@ -186,10 +376,9 @@ static EEpromMngMsg_st        EEpromMngMsg;
 static uint8_t                eeprom_param_array[EEPROM_PARAM_NUM];
 static uint8_t                eeprom_master_uid_array[CARD_UID_DIM];
 static uint8_t                eeprom_user_map_array[USER_MAP_EEDIM];
-#ifdef OLD_EEPROM_MANAGEMENT
 static uint8_t                eeprom_user_uid_array[CARD_UID_DIM];
 
-
+#ifdef OLD_EEPROM_MANAGEMENT
 static uint8_t                eeprom_do_reset;
 static uint8_t                eeprom_uc_reset;
 
@@ -310,7 +499,10 @@ return eeprom_busy;
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 void eeprom_default_set(void)
 {
-  WriteOnEeprom(EDATA_DEFAULT_EADD, eeprom_param_array, EEPROM_PARAM_NUM);
+  // xx WriteOnEeprom(EDATA_DEFAULT_EADD, eeprom_param_array, EEPROM_PARAM_NUM);
+  /* Insert here the default set for infoStation struct */
+  
+  /* */
   WriteOnEeprom(EDATA_DEFAULT_SKT_PRESENCE, (uint8_t*)getDefSocketInfoPtr(), sizeof(socketPresence_t));
   WriteOnEeprom(EDATA_DEFAULT_ID_CODES, (uint8_t*)infoStation.productSn, sizeof(infoStation.productSn));
   WriteOnEeprom(EDATA_DEFAULT_ID_CODES + sizeof(infoStation.productSn), (uint8_t*)infoStation.productCode, sizeof(infoStation.productCode));
@@ -417,7 +609,33 @@ if (SRAM_SCU_Check.BKP_Store)
   BKP_SCU_Image_Store();  
 
 // xx send_to_eeprom(EEPROM_UPDATE);
+#else
 
+  uint8_t i, *update_array;
+  
+  if (eadd < USER_MAP_EEOFFSET)
+  {
+    update_array = eeprom_master_uid_array;
+    // xx eeprom_update_field |= EEPROM_MASTER_UPDATE;
+  }
+  else if (eadd < USER_UID_EEOFFSET)
+  {
+    update_array = eeprom_user_map_array;
+    // xx eeprom_update_field |= EEPROM_USERMAP_UPDATE;
+  }
+  else
+  {
+    update_array = eeprom_user_uid_array;
+    // xx eeprom_user_uid_eadd = eadd;
+    // xx eeprom_update_field |= EEPROM_USERID_UPDATE;
+  }
+  
+  for (i = 0; i < num; i++)
+    *(update_array + i) = *(src_ptr + i);
+
+  /* Write on EEPROM */
+  WriteOnEeprom (eadd, (uint8_t *)update_array, num);
+  
 #endif
 
 
@@ -664,13 +882,17 @@ static bool Addr_MatrixConv_IsNull (void)
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 static void eeprom_read_all(void)
 {
-uint8_t     valid, ee_data;
+uint8_t     ee_data;
 uint16_t    i, error, ee_data16;
-infoEE_t    infoEE;
 uint8_t     *pBuff;
 
 uint8_t Product_SN_temp[PRODUCT_SN_LENGTH], Product_Code_temp[PRODUCT_CODE_LENGTH], FakeProduct_Code_temp[FAKE_CODE_LENGTH];
                                            
+#ifdef OLD_EPROM_MNG
+
+uint8_t   valid;
+infoEE_t  infoEE;
+
 if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
 {
 
@@ -735,9 +957,9 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
           for (i=ee_data; i<EEPROM_PARAM_NUM; i++)
               eeprom_param_array[i] = eeprom_param_board_val[i];
           /* Realign the number of parameters */
-          eeprom_param_array[EDATA_NUM_EADD] = EEPROM_PARAM_NUM;          
+          // xx eeprom_param_array[EDATA_NUM_EADD] = EEPROM_PARAM_NUM;          
           /* Validate data */
-          eeprom_param_array[EDATA_VALID_EADD] = EDATA_VALID_PRG;
+          // xx eeprom_param_array[EDATA_VALID_EADD] = EDATA_VALID_PRG;
           /* Store the new set of params */
           WriteOnEeprom(EDATA_VALID_EADD, &eeprom_param_array[EDATA_VALID_EADD], EEPROM_PARAM_NUM);
       }
@@ -962,6 +1184,173 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
 
 /* release the semaphore */
 osSemaphoreRelease(EEprom_semaphore); 
+
+#else
+
+uint8_t EDATA_key, serial_tmp[MAX_SERIAL_LENGTH];
+
+if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
+{
+
+  /* Read key validity of parameter set */
+  if (ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES + (uint8_t)((uint32_t)&infoStation.key - (uint32_t)&infoStation), (uint8_t*)&EDATA_key, 1) != osOK)
+  {
+    /* Impossible to read the key --> reset uP and restart */
+    EVLOG_Message (EV_ERROR, "Error reading the EEPROM, force a RESET");      
+    setFlagForNvic();
+    NVIC_SystemReset();            
+  }
+        
+  (void)rs485AutoAddress();
+  
+  /* Check validity key */
+  switch (EDATA_key)
+  {
+    case EDATA_VALID_PRG:
+      
+      EVLOG_Message (EV_INFO, "Data in EEPROM are valid");      
+    
+      ReadFromEeprom(MASTER_UID00_EADD, eeprom_master_uid_array, CARD_UID_DIM);
+      ReadFromEeprom(USER_MAP00_EADD, eeprom_user_map_array, USER_MAP_EEDIM);
+      ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+      /* Read backup area for SCU data backup */
+      ReadFromEeprom(EDATA_BKP_SCU_EE_ADDRESS + sizeof (infoStation_t), (uint8_t *)&ee_data16, sizeof (uint16_t));
+      /* Check if BKP image is present or not */
+      if (ee_data16 != EDATA_BKP_SCU_SIGNATURE)
+        SRAM_SCU_Check.BKP_Store = TRUE;                  /* The BKP image for SCU data is missing, create it! */
+      
+      break;
+      
+    case EDATA_FACTORY_PRG:
+      
+      EVLOG_Message (EV_INFO, "Data in EEPROM have been reset to the FACTORY values");      
+                
+      for (i = 0; i < CARD_UID_DIM; i++) 
+        eeprom_master_uid_array[i] = 0xFF;
+      
+      for (i = 0; i < USER_MAP_EEDIM; i++) 
+        eeprom_user_map_array[i] = 0x00;
+      
+      WriteOnEeprom(MASTER_UID00_EADD, eeprom_master_uid_array, CARD_UID_DIM);           
+      
+      WriteOnEeprom(USER_MAP00_EADD, eeprom_user_map_array, USER_MAP_EEDIM);
+      ee_data = 0;
+      WriteOnEeprom(PERS_UIDNUM_EADD, &ee_data, 1);     // cancello in eeprom il numero UID registrati - Fixed SCU-76
+      WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)getDefSocketInfoPtr(), sizeof(socketPresence_t));
+         
+      /* Copy default values to infostation */
+      memcpy ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT, sizeof (infoStation));
+      /* Restore factory ID copying them from EDATA_DEFAULT_ID_CODES address */
+      ReadFromEeprom(EDATA_DEFAULT_ID_CODES, (uint8_t*)Product_SN_temp, sizeof(Product_SN_temp));
+      ReadFromEeprom(EDATA_DEFAULT_ID_CODES + sizeof(Product_SN_temp), (uint8_t*)Product_Code_temp, sizeof(Product_Code_temp));
+      ReadFromEeprom(EDATA_DEFAULT_ID_CODES + sizeof(Product_SN_temp) + sizeof(Product_Code_temp), (uint8_t*)FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));
+      WriteOnEeprom(PRD_SN_EE_ADDRES, (uint8_t*)Product_SN_temp, sizeof(Product_SN_temp));
+      WriteOnEeprom(PRD_CODE_EE_ADDRES, (uint8_t*)Product_Code_temp, sizeof(Product_Code_temp));
+      memcpy(infoStation.productSn, Product_SN_temp, sizeof(Product_SN_temp));
+      memcpy(infoStation.productCode, Product_Code_temp, sizeof(Product_Code_temp));
+      memcpy(infoStation.fakeProductCode, FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));
+      
+      /* Update full infostation structure in EEPROM */
+      WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation));
+      
+      SRAM_SCU_Check.BKP_Store = TRUE;  /* The BKP image for SCU data must be updated */
+
+      break;
+      
+    default:
+      
+      EVLOG_Message (EV_INFO, "Data in EEPROM has been reset to the DEFAULT values");      
+
+      do
+      {
+        error = (uint8_t)0;
+    
+        pBuff = (uint8_t*)malloc(EDATA_DEFAULT_EADD);   // cancella da EDATA_VALID_EADD a EDATA_DEFAULT_EADD escluso
+        memset((void*)pBuff, 0xFF, EDATA_DEFAULT_EADD); 
+    
+        if (WriteOnEeprom((uint16_t)EDATA_VALID_EADD, pBuff, (uint16_t)EDATA_DEFAULT_EADD) == 0)
+        {
+          if (ReadFromEeprom(EDATA_VALID_EADD, pBuff, EDATA_DEFAULT_EADD) == osOK)    // rileggo la eeprom
+          {
+            for (i = 0; i < EDATA_DEFAULT_EADD; i++)
+            {
+              if (pBuff[i] != (uint8_t)0xFF)
+                error++;
+            }
+          }
+        }
+      } while (error != (uint8_t)0);  
+
+      /* Backup serial value */
+      memcpy ((uint8_t *)&serial_tmp, (uint8_t *)&infoStation.serial, sizeof (infoStation.serial)); 
+      /* Copy default values to infostation */
+      memcpy ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT, sizeof (infoStation));
+      /* Overwrite serial value with the original */
+      memcpy ((uint8_t *)&infoStation.serial, (uint8_t *)&serial_tmp, sizeof (infoStation.serial)); 
+
+      /* Update full infostation structure in EEPROM */
+      if (WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation)) != osOK) 
+         error = TRUE;            
+        
+      /* if error writing default data */
+      if (error)
+      {
+        /* reset uP and restart */
+        setFlagForNvic();
+        NVIC_SystemReset();        
+      }
+  
+      for (i = 0; i < CARD_UID_DIM; i++)
+          eeprom_master_uid_array[i] = 0xFF;
+  
+      WriteOnEeprom(USER_MAP00_EADD, eeprom_master_uid_array, CARD_UID_DIM);
+  
+      for (i = 0; i < USER_MAP_EEDIM; i++)
+          eeprom_user_map_array[i] = 0x00;
+  
+      WriteOnEeprom(USER_MAP00_EADD, eeprom_user_map_array, USER_MAP_EEDIM);
+      
+      SRAM_SCU_Check.BKP_Store = TRUE;  /* The BKP image for SCU data must be updated */
+      
+      break;
+  }
+    
+  evs_control_save();
+  
+  /* Sinapsi enabled? init variables */
+  if (getSinapsiEepromEn() == ENABLED)
+    evs_chn2_init();
+  
+  do
+  {
+    ;
+  } while (readSocketPresence() != osOK);
+    
+  /* Check if matrixConv in socket presence is NULL for some reason */
+  if (Addr_MatrixConv_IsNull())
+  {
+    /* set default value for socket presence SEM structure (baco hard fault dovuto alla corruzione di freeRTos in getLogicalMdbAddrSem()  */
+    /* return NULL_ID calling fromRs485ToSem()  when colling setGeneralStationParameters() at line 829                                    */
+    memcpy ((uint8_t*)&socketPresence, (uint8_t*)getDefSocketInfoPtr(), sizeof(socketPresence_t));
+    WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)getDefSocketInfoPtr(), sizeof(socketPresence_t));     
+  }
+  
+  /* Restore SCU type working mode  */
+  setScuTypeModeFromEeprom();  
+  setGeneralStationParameters(EDATA_key);
+  Scheduler_scheduleCharge(getSchedulationFromMemory());
+  setNominalPower(eeprom_param_array[M3T_CURRENT_EADD]);
+  SecureArea_init();
+  
+  /* Update the backup image for SCU data if needed */
+  if (SRAM_SCU_Check.BKP_Store)
+    BKP_SCU_Image_Store();  
+}
+
+/* release the semaphore */
+osSemaphoreRelease(EEprom_semaphore); 
+
+#endif
 
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
@@ -1245,15 +1634,18 @@ uint8_t*  getEepromArray(void)
 ****************************************************************/
 void  setEepromArrayIsolatedMode(void) 
 {
-  uint8_t   i, SerNum[8];
+  uint8_t SerNum[8];
 
   // xx eeprom_param_get(SERNUM_BYTE0_EADD, SerNum, 4);
   memcpy (&SerNum, &infoStation.serial, sizeof (infoStation.serial));
+  
+  // for (i=0; i<EEPROM_PARAM_NUM; i++)
+  //     eeprom_param_array[i] = eeprom_param_master_Iso[i];                /* Fill the structure with DEFAULT data for isolated mode */
+  
+  /* Set to DEFAULT values */
+  memcpy ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT_Iso, sizeof (infoStation));
 
-  for (i=0; i<EEPROM_PARAM_NUM; i++)
-      eeprom_param_array[i] = eeprom_param_master_Iso[i];                /* Fill the structure with DEFAULT data for isolated mode */
-
-  SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, SerNum, 4);         /* ex SERNUM_BYTE0_EADD */
+  SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, SerNum, MAX_SERIAL_LENGTH);         /* ex SERNUM_BYTE0_EADD */
 }
 
 /**
@@ -1688,8 +2080,8 @@ void BKP_Reload_Param (uint8_t FromIdle)
   else
     ReadFromEeprom_no_Semaph (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&infoStation, sizeof (infoStation_t));       
   /* Set values in eeprom_param_array */
-  eeprom_param_array[M3S_CURRENT_EADD] = infoStation.max_currentSemp / 1000;
-  eeprom_param_array[M3T_CURRENT_EADD] = infoStation.max_current / 1000;
+  // xx eeprom_param_array[M3S_CURRENT_EADD] = infoStation.max_currentSemp / 1000;
+  // xx eeprom_param_array[M3T_CURRENT_EADD] = infoStation.max_current / 1000;
   
    /*              destination                source                   len   */
    configASSERT(memCpyInfoSt((uint8_t*)&infoStation, (uint8_t*)pInfoStation, sizeof(infoStation_t)));

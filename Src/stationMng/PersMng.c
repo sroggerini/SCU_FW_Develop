@@ -663,7 +663,8 @@ uint16_t                card_operation = ((uint16_t)(*(block_ptr + 1)) << 8) + *
 
 if (card_operation == 0xFFFF)                                   // aggiorna white list
     {
-    eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
+    // xx eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
+    uid_map_num = infoStation.persUidNum;
     pers_wlist_update_set(&pers_state);
     send_to_lcd(LCD_UPDATE_WLIST);
     }
@@ -700,8 +701,10 @@ else if ((card_operation == 0x7007)                             // aggiorna data
 
             lcd_language_config(block_ptr);
 
-            eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data08u[1], 1);
-            eeprom_param_get(HIDDEN_MENU_ENB_EADD, &data08u[0], 1);
+            // xx eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data08u[1], 1);
+            data08u[1] = infoStation.Hidden_Menu.Visible;
+            // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &data08u[0], 1);
+            data08u[0] = infoStation.Hidden_Menu.Enabled;
 
             if (*(block_ptr + 5) & 0x01)
                 {
@@ -750,19 +753,25 @@ else if ((card_operation == 0x7007)                             // aggiorna data
 
             if (*(block_ptr + 5) & 0x20)
             {
-              eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              // xx eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              data08u[0] = infoStation.Hidden_Menu.Visible;
               data08u[0] |= HIDDEN_MENU_TMEG_VIS;
-              eeprom_param_set(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
-              data08u[0] = 1;
-              WriteOnEeprom (HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              // xx eeprom_param_set(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              SCU_InfoStation_Set((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[0], 1);
+              
+              // Serve??? --> data08u[0] = 1;
+              // Serve??? --> WriteOnEeprom (HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
             }
             else
             {
-              eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              // xx eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              data08u[0] = infoStation.Hidden_Menu.Visible;
               data08u[0] &= (~HIDDEN_MENU_TMEG_VIS);
-              eeprom_param_set(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
-              data08u[0] = 0;
-              WriteOnEeprom (HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              // xx eeprom_param_set(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              SCU_InfoStation_Set((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[0], 1);
+
+              // Serve??? --> data08u[0] = 0;
+              // Serve??? --> WriteOnEeprom (HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
             }
 
             SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge.Mode, data08u, 1);       /* ex TCHARGE_MODE_EADD */
@@ -1259,7 +1268,8 @@ if (uid_type == UID_MASTER)
 	}
 else    // if (uid_type == UID_USER)
     {
-    eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
+    // xx eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
+    uid_map_num = infoStation.persUidNum;
     eeprom_uid_map_get(uid_map_array);
 
     if (uid_map_num < USER_UID_EENUM)
@@ -1294,9 +1304,11 @@ void manual_uid_factory(void)
 {
 uint8_t*    pBuff;
 
-eeprom_param_get(PERS_MASTER_EADD, &master_card_reg, 1);
+// xx eeprom_param_get(PERS_MASTER_EADD, &master_card_reg, 1);
+master_card_reg = infoStation.persMaster;
 eeprom_master_uid_get(master_uid_array);
-eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
+// xx eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
+uid_map_num = infoStation.persUidNum;
 eeprom_uid_map_get(uid_map_array);
 
 if (master_card_reg & 0x01)
@@ -1356,7 +1368,8 @@ evs_mode_en     pers_mode;
 new_uid = new_uid_array;
 new_block = new_block_array;
 
-eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&pers_mode), 1);
+// xx eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&pers_mode), 1);
+pers_mode = infoStation.evs_mode;
 
 pers_event_save(pMsg);
 
@@ -1389,9 +1402,10 @@ switch (pers_state)
         {
         if (pMsg->PersMngEvent == PERS_START)
             {
-            eeprom_param_get(PERS_MASTER_EADD, &master_card_reg, 1);
-            eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
-
+            // xx eeprom_param_get(PERS_MASTER_EADD, &master_card_reg, 1);
+            master_card_reg = infoStation.persMaster;
+            // xx eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
+            uid_map_num = infoStation.persUidNum;
             if (master_card_reg & 0x01)
                 eeprom_master_uid_get(master_uid_array);
             else

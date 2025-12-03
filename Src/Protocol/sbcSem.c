@@ -3209,7 +3209,7 @@ void setCurrentDateTimeInSem(void)
   scuRwMapRegister_st*  pRwRegs;
   uint8_t               mdbAddr;
   uint8_t               timezone;
-  uint8_t               dst;
+  // uint8_t               dst;
   struct tm             *pTimeinfo;
 
   //setUtcDateTimeRegister();
@@ -4287,7 +4287,7 @@ static uint32_t remoteSuspRelProcess(frameRemote_st* pMsg)
 ****************************************************************/
 uint8_t getRemotePmFlag (void) 
 {
-  uint8_t               pmng_enable;
+  // uint8_t               pmng_enable;
 
   // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);     // legge power management enable  
   // if ((pmng_enable & HIDDEN_MENU_SEM_ENB) == 0) return(FALSE); else return(TRUE);

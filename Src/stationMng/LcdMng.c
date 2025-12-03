@@ -1719,8 +1719,8 @@ evs_mode_en lcd_mode;
 
 if (aux_inf & LCD_EVS_MODE_ORINF)                                   // l'info si allinea al margine sinistro
     {
-    eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&lcd_mode), 1);
-
+    // xx eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&lcd_mode), 1);
+    lcd_mode = infoStation.evs_mode;
     lcd_rs485_add  = getIdNumberForLcd();  // indirizzi da 0 a 15 -> visualizzazione da 1 a 16
 
     if (lcd_mode == EVS_PERS_MODE)
@@ -1875,7 +1875,8 @@ if (aux_inf == LCD_DATE_TIME_EXINF)
     }
 else if (aux_inf == LCD_USER_UID_NUM_EXINF)
     {
-    eeprom_param_get(PERS_UIDNUM_EADD, &data08u, 1);
+    // xx eeprom_param_get(PERS_UIDNUM_EADD, &data08u, 1);
+    data08u = infoStation.persUidNum;
 
     *num = lcd_hex08_to_ascii(&data08u, dst_ptr, 0);                // dato inserito in testa alla linea
     
@@ -2475,9 +2476,11 @@ uint8_t *array_ptr;
 
 *dst_ptr = 0;
 
-eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
+// xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
+emeter_type = infoStation.emTypeInt;
 
-eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);
+// eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);
+pmng_enable = infoStation.Hidden_Menu.Enabled;
 pmng_enable &= HIDDEN_MENU_PMNG_ENB;
 
 if (emeter_type != lcd_emeter_type_old)
@@ -2577,10 +2580,12 @@ static void lcd_charging_string_get(char *dst_ptr, uint8_t *emeter_parameter)
 uint8_t i, enrg_limit;
 uint8_t *string_ptr;
 
-eeprom_param_get(TCHARGE_MODE_EADD, &enrg_limit, 1);
+// xx eeprom_param_get(TCHARGE_MODE_EADD, &enrg_limit, 1);
+enrg_limit = infoStation.TCharge.Mode;
 
 if (enrg_limit == 1)
-    eeprom_param_get(ENRG_LIMIT_EADD, &enrg_limit, 1);
+    // xx eeprom_param_get(ENRG_LIMIT_EADD, &enrg_limit, 1);
+    enrg_limit = infoStation.Energy_limit;
 
 switch (*emeter_parameter)
     {
@@ -2772,7 +2777,11 @@ uint8_t scroll, lang_set, lang_sel, lang_bit, lang_byte, language_array[4];
 
 scroll = 0;
 
-eeprom_param_get(LANG_CONFIG0_EADD, language_array, 4);
+// xx eeprom_param_get(LANG_CONFIG0_EADD, language_array, 4);
+language_array[0] = infoStation.LangConfig.Byte.Byte0;
+language_array[1] = infoStation.LangConfig.Byte.Byte1;
+language_array[2] = infoStation.LangConfig.Byte.Byte2;
+language_array[3] = infoStation.LangConfig.Byte.Byte3;
 
 lang_set = (lcd_language % 8);
 lang_sel = 0x01;
@@ -2966,7 +2975,8 @@ while (osSemaphoreAcquire (EEprom_semaphore, osWaitForever) != osOK);
 osSemaphoreRelease (EEprom_semaphore);
 
 if (pMsg->LcdMngEvent == LANGUAGE_TIME_EXPIRED)
-    eeprom_param_get(LANG_DEFAULT_EADD, &lcd_language, 1);
+    // xx eeprom_param_get(LANG_DEFAULT_EADD, &lcd_language, 1);
+    lcd_language = infoStation.default_Lang;
 
 if ((pMsg->LcdMngEvent == LCD_PERS_BACK) && (LcdPersMsg_Old.LcdMngEvent != LCD_NULL))
     {
@@ -2989,7 +2999,8 @@ switch (pMsg->LcdMngEvent)
     {
     case LCD_WRITE_SCAME:
         {
-        eeprom_param_get(LANG_DEFAULT_EADD, &lcd_language, 1);
+        // xx eeprom_param_get(LANG_DEFAULT_EADD, &lcd_language, 1);
+        lcd_language =  infoStation.default_Lang;
         lcd_line_update(lcd_line1, lcd_write_scame_string1, CENTER_ALIGNMENT, LCD_AUX_NULL_EXINF);
 
         /*         destination       source */
@@ -3079,9 +3090,12 @@ switch (pMsg->LcdMngEvent)
 
         lcd_line_update(lcd_line1, lang_table[(lcd_language_offset + WRITE_CARD_WAIT)], CENTER_ALIGNMENT, LCD_EVS_MODE_ORINF);
         
-        eeprom_param_get(EVS_MODE_EADD, &data8u[0], 1);
-        eeprom_param_get(RTC_VALID_EADD, &data8u[1], 1);
-        eeprom_param_get(SOCKET_ENABLE_EADD, &data8u[2], 1);
+        // xx eeprom_param_get(EVS_MODE_EADD, &data8u[0], 1);
+        data8u[0] = infoStation.evs_mode;
+        // xx eeprom_param_get(RTC_VALID_EADD, &data8u[1], 1);
+        data8u[1] = infoStation.rtcValid;
+        // xx eeprom_param_get(SOCKET_ENABLE_EADD, &data8u[2], 1);
+        data8u[2] = infoStation.socketEnable;
 
         if ((data8u[0] > EVS_FREE_MODE) && (data8u[1] == 0))
             lcd_line_update(lcd_line2, lcd_write_clke_error, CENTER_ALIGNMENT, LCD_AUX_NULL_EXINF);
@@ -3381,7 +3395,8 @@ switch (pMsg->LcdMngEvent)
 
     case LCD_CLOSE_LID:
         {
-        eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
+        // xx eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
+        socket_type = infoStation.socketType;
 
         if (socket_type & EVS_TETHERED)
             {

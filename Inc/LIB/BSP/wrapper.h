@@ -569,7 +569,7 @@ typedef  __packed struct
   
   uint8_t  Enabled;
   uint8_t  Visible;
-  uint8_t  Pwd;
+  uint32_t Pwd;
   
 } Hidden_Menu_t;
 
@@ -826,7 +826,7 @@ typedef __packed struct
   Time_Settings_t               Time_Settings;                                  /* ex TIME_ZONE_EADD - DST_EADD - TIME_DST_OFFSET_EADD - DST_STATUS_EADD */
   Temp_Ctrl_t                   Temp_Ctrl;                                      /* ex TEMP_CTRL_ENB_EADD - TEMP_CTRL_VAL_EADD - TEMP_DELTA_EADD - TEMP_HYSTERESIS_EADD */
   
-}   infoStation_t;
+} infoStation_t;
 
 /* Socket */
 typedef struct 

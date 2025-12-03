@@ -425,7 +425,7 @@ xQueueHandle getScuUartRxTimeoutQueueHandle (void)
 void scuGestTask (void * pvParameters)
 {
   uint32_t       timeTick;
-  uint8_t        tmpVal;
+  // uint8_t        tmpVal;
 
   /*-------- Creates an empty mailbox for uart  messages --------------------------*/
   scuQueue = xQueueCreate(NUM_BUFF_SCU_RX, sizeof(frameScu_st));
@@ -4051,7 +4051,7 @@ void  setHwFlags ()
 void  setNumberOfLeds (void) 
 {
   scuRwMapRegister_st*  pRwRegs;
-  uint8_t               mdbAddr, ledNum, ledCode;
+  uint8_t               mdbAddr, /* ledNum,*/ ledCode;
 
   /* set energy meter type  from STRIP_LED_TYPE_EADD   */
   // xx eeprom_param_get(STRIP_LED_TYPE_EADD, (uint8_t *)&ledNum, 1);  
@@ -5340,8 +5340,8 @@ void  setUtcDateTimeRegister ()
 {
   scuRwMapRegister_st*  pRwRegs;
   uint8_t               mdbAddr;
-  uint8_t               timezone;
-  uint8_t               dst;
+  // uint8_t               timezone;
+  // uint8_t               dst;
 
   mdbAddr = getLogicalMdbAddrSem();
   pRwRegs = getRwMdbRegs(mdbAddr);
@@ -5470,8 +5470,8 @@ void  setPowerManagementRegisters ()
 {
   scuRwMapRegister_st*    pRwRegs;
   uint8_t                 mdbAddr;
-  uint8_t                 pmOn, pmUnbal, pmImin, lsbPmax, msbPmax, pmHpower, pmDset, pmDmax;
-  uint16_t                pmPmax;
+  uint8_t                 pmOn, pmUnbal /*, pmImin, lsbPmax, msbPmax, pmHpower, pmDset, pmDmax*/;
+  // uint16_t                pmPmax;
 
   mdbAddr = getLogicalMdbAddrSem();
   pRwRegs = getRwMdbRegs(mdbAddr);

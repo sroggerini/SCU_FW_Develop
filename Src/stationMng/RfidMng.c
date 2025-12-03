@@ -257,9 +257,10 @@ uint32_t    newTimeTick;
 uint8_t     rfid_control_enable;
 evs_mode_en rfid_mode;
 
-eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&rfid_mode), 1);
-
-eeprom_param_get(CONTROL_BYTE1_EADD, &rfid_control_enable, 1);
+// xx eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&rfid_mode), 1);
+rfid_mode = infoStation.evs_mode;
+// xx eeprom_param_get(CONTROL_BYTE1_EADD, &rfid_control_enable, 1);
+rfid_control_enable = infoStation.controlByte.Byte.Byte1;
 rfid_control_enable &= MIFARE_CRL1;
 
 if (rfid_control_enable == MIFARE_CRL1)
@@ -769,7 +770,8 @@ uint8_t     rfid_control_enable, actuator_mode;
 evs_mode_en rfid_mode;
 
 newTimeTick = pdMS_TO_TICKS(1000);
-eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&rfid_mode), 1);
+// xx eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&rfid_mode), 1);
+rfid_mode = infoStation.evs_mode;
 
 if ((isSemMode() == TRUE) && (rfid_mode == EVS_PERS_MODE) && (getCollaudoRunning() == FALSE))
     {
@@ -782,7 +784,8 @@ if ((isSemMode() == TRUE) && (rfid_mode == EVS_PERS_MODE) && (getCollaudoRunning
         }
     }
 
-eeprom_param_get(CONTROL_BYTE1_EADD, &rfid_control_enable, 1);
+// xx eeprom_param_get(CONTROL_BYTE1_EADD, &rfid_control_enable, 1);
+rfid_control_enable = infoStation.controlByte.Byte.Byte1;
 rfid_control_enable &= MIFARE_CRL1;
 
 if (((rfid_control_enable == 0) || (rfid_mode == EVS_FREE_MODE)) && (rfid_error == 1))
@@ -868,7 +871,8 @@ switch (rfid_state)
                         
                         if (gsy_connected_get() == 1)
                             {
-                            eeprom_param_get(ACTUATORS_EADD, &actuator_mode, 1);
+                            // xx eeprom_param_get(ACTUATORS_EADD, &actuator_mode, 1);
+                            actuator_mode = infoStation.actuators;
                             actuator_mode &= PAUT_ATT0;
 
                             if (evs_gost_param_get() == 1)

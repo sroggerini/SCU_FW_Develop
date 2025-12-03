@@ -875,7 +875,6 @@ uint8_t                 i, reply, data8u, data8u_array[4], emeter_type, temp[8];
 int32_t                 data32i;
 headerFrameSbcRx_st     headerFrameSbcRx;
 evs_state_en            evState;
-uint16_t *              ptr16;
 
 if (gsy_enable == 0)
   return (uint8_t)FALSE;

@@ -1165,7 +1165,8 @@ static uint32_t Process_em_Request(frameEm_st* pEmMsg)
                   if (((uint8_t)((temp32 >> 8) & 0x00000003)) != (mdbAddr & 0x03))
                   {
                     /* get current power management mode */
-                    eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&readSize, 1);
+                    // xx eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&readSize, 1);
+                    readSize = infoStation.Pmng.Mode;
                     readSize &=(~(uint8_t)PMNG_MODE_MASK), (uint8_t *)&pass[0], 4;
 
                     readSize |= (uint8_t)((temp32 >> 8) & 0x00000003);

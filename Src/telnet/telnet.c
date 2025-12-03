@@ -1119,17 +1119,20 @@ static void PrintHtsMenu (void)
   temp_int = (temp_degrees / 10);
   temp_dec = (temp_degrees % 10);
 
-  eeprom_param_get(TEMP_CTRL_ENB_EADD, &dData, 1);
+  // xx eeprom_param_get(TEMP_CTRL_ENB_EADD, &dData, 1);
+  dData = infoStation.Temp_Ctrl.Enabled;
   tPrintf("\n\r1     Temperature control enable   %d [1/0]\n\r", dData);
 
-  eeprom_param_get(TEMP_CTRL_VAL_EADD, &dData, 1);
+  // xx eeprom_param_get(TEMP_CTRL_VAL_EADD, &dData, 1);
+  dData = infoStation.Temp_Ctrl.Value;
 
   if (dData <= 9)
     tPrintf("2     Temperature control value    %d [deg]\n\r", dData);
   else
     tPrintf("2     Temperature control value   %d [deg]\n\r", dData);
 
-  eeprom_param_get(TEMP_DELTA_EADD, &dData, 1);
+  // xx eeprom_param_get(TEMP_DELTA_EADD, &dData, 1);
+  dData = infoStation.Temp_Ctrl.Delta;
 
   if ((dData & 0x7F) <= 9)
     tPrintf("3 [s] Temperature control delta   ");
@@ -1150,7 +1153,8 @@ static void PrintHtsMenu (void)
   dData &= 0x7F;
   tPrintf("%d [deg] [s=null/-]\n\r", dData);
 
-  eeprom_param_get(TEMP_HYSTERESIS_EADD, &dData, 1);
+  // xx eeprom_param_get(TEMP_HYSTERESIS_EADD, &dData, 1);
+  dData = infoStation.Temp_Ctrl.Hysteresis;
 
   if (dData <= 9)
     tPrintf("4     Temperature control hyster   %d [deg]\n\r", dData);
@@ -1240,7 +1244,8 @@ static void PrintMenu (void)
       break;
 
     case COMANDO_SET_SN:
-      eeprom_param_get(SERNUM_BYTE0_EADD, (uint8_t*)tmeDateStr, 4);
+      // eeprom_param_get(SERNUM_BYTE0_EADD, (uint8_t*)tmeDateStr, 4);
+      memcpy((uint8_t*)tmeDateStr, (uint8_t*)infoStation.serial, 4);
       if (!((tmeDateStr[0] == 0xFF) || (tmeDateStr[2] == 0xFF) || (tmeDateStr[2] == 0xFF) || (tmeDateStr[3] == 0xFF)))
       {
         temp =  ((uint32_t)((tmeDateStr[0] & 0xF0) >> 4) * 10000000) + ((uint32_t)((tmeDateStr[0] & 0x0F)) * 1000000) +
@@ -3244,7 +3249,8 @@ static void funzioniEEPROM (uint8_t* msgRcv)
         }
         else
         {
-          eeprom_param_get(RS485_ADD_EADD, (uint8_t*)&hexAdd[0], 1);
+          // xx eeprom_param_get(RS485_ADD_EADD, (uint8_t*)&hexAdd[0], 1);
+          hexAdd[0] = infoStation.rs485Address;
           if (add == 99)
           {
             setFlagHwInfo(KEY_FOR_RS485_ADD, MASK_FOR_RS485_ADD_SET);

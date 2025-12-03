@@ -257,15 +257,16 @@ configASSERT(xQueueSendToBack(getEnergyMngQueueHandle(), (void *)&msgEnergySend,
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 void energy_param_get(emReadReg_e energy_parameter, int32_t *dst_ptr, uint8_t num)
 {
-uint8_t     i, energy_limit_set, pass[4];
+uint8_t     i, energy_limit_set;
 uint16_t    energy_limit;
 
-eeprom_param_get(TCHARGE_MODE_EADD, &energy_limit_set, 1);
+// xx eeprom_param_get(TCHARGE_MODE_EADD, &energy_limit_set, 1);
+energy_limit_set = infoStation.TCharge.Mode;
 
 if (energy_limit_set == 1)
     {
-    eeprom_param_get(ENRG_LIMIT_EADD, &pass[0], 1);
-    energy_limit = ((uint16_t)(pass[0]) * 10);
+    // xx eeprom_param_get(ENRG_LIMIT_EADD, &pass[0], 1);
+    energy_limit = infoStation.Energy_limit;
     }
 else
     energy_limit = 0;
@@ -293,8 +294,9 @@ for (i=0; i<num; i++)
     
         if ((((uint8_t)(energy_parameter) + i) == EM_TOT_ACTIVE_ENERGY) && (em_tot_active_energy_read == 0))
             {
-            eeprom_param_get(TOT_ENERGY0_EADD, pass, 4);
-            *(dst_ptr + i) = ((int32_t)(pass[0]) << 24) + ((int32_t)(pass[1]) << 16) + ((int32_t)(pass[2]) << 8) + pass[3];
+            // xx eeprom_param_get(TOT_ENERGY0_EADD, pass, 4);
+            // *(dst_ptr + i) = ((int32_t)(pass[0]) << 24) + ((int32_t)(pass[1]) << 16) + ((int32_t)(pass[2]) << 8) + pass[3];
+              *(dst_ptr + i) = infoStation.TotalEnergy;
             }
         }
     }
@@ -312,7 +314,7 @@ for (i=0; i<num; i++)
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 void energy_to_gsy_get(emReadReg_e energy_parameter, int32_t *dst_ptr, uint8_t num)
 {
-uint8_t i, pass[4];
+uint8_t i;
 
 for (i=0; i<num; i++)
     {
@@ -320,8 +322,9 @@ for (i=0; i<num; i++)
     
     if ((((uint8_t)(energy_parameter) + i) == EM_TOT_ACTIVE_ENERGY) && (em_tot_active_energy_read == 0))
         {
-        eeprom_param_get(TOT_ENERGY0_EADD, pass, 4);
-        *(dst_ptr + i) = ((int32_t)(pass[0]) << 24) + ((int32_t)(pass[1]) << 16) + ((int32_t)(pass[2]) << 8) + pass[3];
+        // xx eeprom_param_get(TOT_ENERGY0_EADD, pass, 4);
+        // *(dst_ptr + i) = ((int32_t)(pass[0]) << 24) + ((int32_t)(pass[1]) << 16) + ((int32_t)(pass[2]) << 8) + pass[3];
+          *(dst_ptr + i) = infoStation.TotalEnergy;
         }
     }
 }
@@ -355,12 +358,14 @@ max_current_1K0s = (uint16_t)(((current * 110) + 50) / 100);   // massima corren
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 static void overcurrent_manager(void)
 {
-uint8_t         emeter_type, control_enable, error_array[EVS_ERROR_ARRAY_SIZE];
+uint8_t         /* emeter_type,*/ control_enable, error_array[EVS_ERROR_ARRAY_SIZE];
 
-eeprom_param_get(CONTROL_BYTE1_EADD, &control_enable, 1);
+// xx eeprom_param_get(CONTROL_BYTE1_EADD, &control_enable, 1);
+control_enable = infoStation.controlByte.Byte.Byte1;
 control_enable &= OVERCURRENT_CRL1;
 
-eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
+// xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
+// xx emeter_type = infoStation.emTypeInt;
 
 if (evs_state_get() == EVSTATE_CHARGING)
     {
@@ -561,7 +566,8 @@ uint16_t energy_limit;
 int32_t	val;
 int32_t Ext_Act_Power_Val = 0;
  
-eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
+// xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
+emeter_type = infoStation.emTypeInt;
   
 if (emeter_type == EMETER_TYPE_NULL)
     {
@@ -569,11 +575,14 @@ if (emeter_type == EMETER_TYPE_NULL)
     return;
     }
   
-eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);
+// xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);
+pmng_enable = infoStation.Hidden_Menu.Enabled;
 pmng_enable &= HIDDEN_MENU_PMNG_ENB;
 
-eeprom_param_get(PMNG_MODE_EADD, &pmng_mode, 1);
-eeprom_param_get(PMNG_UNBAL_EADD, &unbalance_enable, 1);
+// eeprom_param_get(PMNG_MODE_EADD, &pmng_mode, 1);
+pmng_mode = infoStation.Pmng.Mode;
+// xx eeprom_param_get(PMNG_UNBAL_EADD, &unbalance_enable, 1);
+unbalance_enable = infoStation.Pmng.Unbal;
 
 evs_state_Current = evs_state_get();  /* Fixed ticket SCU-85 */
 
@@ -750,12 +759,14 @@ if (energy_parameter <= EM_SES_ACTIVE_ENERGY)
           
                 em_tot_act_energy_old = TOT_ACTIVE_ENERGY;
           
-                eeprom_param_get(TCHARGE_MODE_EADD, &energy_limit_set, 1);
+                // xx eeprom_param_get(TCHARGE_MODE_EADD, &energy_limit_set, 1);
+                energy_limit_set = infoStation.TCharge.Mode;
           
                 if (energy_limit_set == 1)
                     {
-                    eeprom_param_get(ENRG_LIMIT_EADD, &pass[0], 1);
-                    energy_limit = ((uint16_t)(pass[0]) * 10);
+                    // xx eeprom_param_get(ENRG_LIMIT_EADD, &pass[0], 1);                      
+                    // energy_limit = ((uint16_t)(pass[0]) * 10);
+                      energy_limit = infoStation.Energy_limit;
                     }
                 else
                     energy_limit = 0;
