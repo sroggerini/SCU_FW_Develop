@@ -1491,7 +1491,7 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
                   SerNum[1] = 0; SerNum[1] = (data[normLen + 3] - '0'); SerNum[1] |= ((data[normLen + 2] - '0') << 4);  
                   SerNum[0] = 0; SerNum[0] = (data[normLen + 1] - '0'); SerNum[0] |= ((data[normLen + 0] - '0') << 4);  /* BCD, first two MSB digit  */
                   // xx eeprom_param_set(SERNUM_BYTE0_EADD, SerNum, 4);
-                  PackedBCD_to_BCD ((uint8_t *)infoStation.serial, (uint8_t *)SerNum, MAX_SERIAL_LENGTH/2);
+                  // PackedBCD_to_BCD ((uint8_t *)data, (uint8_t *)SerNum, MAX_SERIAL_LENGTH/2);
                   /* save SCU SN also in reserved area in EEPROM */
                   if (setScuSerialNumberEeprom((char*)SerNum, (char*)&data[normLen]) != 0)
                   {
@@ -5784,19 +5784,16 @@ static void scuGsyDwldTask (void * pvParameters)
                   {
                     /* The board serial number must be preserved so overwrite old board serial */
                     // xx eeprom_param_get(SERNUM_BYTE0_EADD, &pConfPar->blockConfPar[0].confEepromParamArray[SERNUM_BYTE0_EADD], 4);
-                    BCD_to_PackedBCD (&pConfPar->blockConfPar[0].confEepromParamArray[SERNUM_BYTE0_EADD], (uint8_t *)&infoStation.serial, 4);
+                    // xx BCD_to_PackedBCD (&pConfPar->blockConfPar[0].confEepromParamArray[SERNUM_BYTE0_EADD], (uint8_t *)&infoStation.serial, 4);
+                    memcpy ((uint8_t *)&pConfPar->blockConfPar[0].confInfoStation.serial, (uint8_t *)&infoStation.serial, MAX_SERIAL_LENGTH);
                     ReadFromEeprom (SCU_SN_EE_ADDRES,  &pConfPar->blockConfPar[0].confSerialCode[SCU_SN_EE_ADDRES - PRD_CODE_EE_ADDRES], 4); 
                     /*             destination                                                           source                       len  */
                     memcpy((uint8_t *)&pConfPar->blockConfPar[0].confInfoStation.serial[0], (uint8_t *)getStationSerialNumber(), BOARD_SN_LENGTH);     
                     /*             destination                                                           source                       len  */
                     memcpy((uint8_t *)&pConfPar->blockConfPar[0].confBackupInfoStation.serial[0], (uint8_t *)getStationSerialNumber(), BOARD_SN_LENGTH);     
                     /* now write all previous data in the current EEPROM area */    
-                    codeError = (uint16_t)WriteOnEeprom(EDATA_VALID_EADD, (uint8_t*)pConfPar->blockConfPar[0].confEepromParamArray, EEPROM_PARAM_NUM);
-                    if (codeError == 0)
-                    {
-                      codeError = (uint16_t)WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&pConfPar->blockConfPar[0].confInfoStation, sizeof (infoStation_t));
-                      
-                    }
+                    // xx codeError = (uint16_t)WriteOnEeprom(EDATA_VALID_EADD, (uint8_t*)pConfPar->blockConfPar[0].confEepromParamArray, EEPROM_PARAM_NUM);
+                    codeError = (uint16_t)WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&pConfPar->blockConfPar[0].confInfoStation, sizeof (infoStation_t));
                     if (codeError == 0)
                     {
                       codeError = (uint16_t)WriteOnEeprom(EDATA_BKP_SCU_EE_ADDRESS, (uint8_t*)&pConfPar->blockConfPar[0].confBackupInfoStation, sizeof (infoStation_t));
@@ -5819,7 +5816,7 @@ static void scuGsyDwldTask (void * pvParameters)
                     }
                     if (codeError == 0)
                     {
-                      tPrintf("Board address = %2d cloned!!\n\r", pConfPar->blockConfPar[0].confEepromParamArray[RS485_ADD_EADD] + 1);
+                      tPrintf("Board address = %2d cloned!!\n\r", pConfPar->blockConfPar[0].confInfoStation.rs485Address  + 1);
                       /** restart the system by NVIC reset */
                       activeImmediateReset();
                     }
@@ -7295,7 +7292,7 @@ void upgradeGeneralParameter (idModel_e currModel, char currEmType, char currAdd
   if (setSerialReceivedFlag() == 0)
   {
     /* Write configurations in eeprom array */
-    eeprom_ProductConfig_Param_Set();
+    // xx eeprom_ProductConfig_Param_Set();
 
     /* a new infoStation backup copy in EEPROM is need */
     BKP_SCU_Image_Store();

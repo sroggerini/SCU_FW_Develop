@@ -473,7 +473,7 @@ void scuGestTask (void * pvParameters)
       // xx eeprom_array_set(OPERATIVE_MODE_EADD, (uint8_t*)&scuTypeModes, 1);
       SCU_InfoStation_Set ((uint8_t *)&infoStation.Operative_mode, (uint8_t*)&scuTypeModes, 1);   /* ex OPERATIVE_MODE_EADD */
       /* Write configurations in eeprom array */
-      eeprom_ProductConfig_Param_Set();
+      // xx eeprom_ProductConfig_Param_Set();
     }
     activeSemTask();  // check if is possible to activate task Sem
 #ifndef DEBUG_TRACE_PIN   
@@ -1124,7 +1124,7 @@ void scuDataLinkTask (void * pvParameters)
                 // xx eeprom_array_set(OPERATIVE_MODE_EADD, (uint8_t*)&scuTypeModes, 1);
                 SCU_InfoStation_Set ((uint8_t *)&infoStation.Operative_mode, (uint8_t*)&scuTypeModes, 1);   /* ex OPERATIVE_MODE_EADD */
                 /* Write configurations in eeprom array */
-                eeprom_ProductConfig_Param_Set();
+                // xx eeprom_ProductConfig_Param_Set();
                 if (getPhysicalMdbAddr() == SCU_S_S_COLLAUDO_ADDR)
                 {
                   osDelay(3000); // a principal slave (address 11) restart a bit later from secondary slave (12, 13, 14)
@@ -1260,7 +1260,7 @@ static uint32_t scuDlProcess(frameScuRx_st* pMsg)
           // xx eeprom_array_set(OPERATIVE_MODE_EADD, (uint8_t*)&function, 1);
           SCU_InfoStation_Set ((uint8_t *)&infoStation.Operative_mode, (uint8_t*)&function, 1);  /* ex OPERATIVE_MODE_EADD */
           /* Write configurations in eeprom array */
-          eeprom_ProductConfig_Param_Set();
+          // xx eeprom_ProductConfig_Param_Set();
           /** restart the system by NVIC reset */
           //activeImmediateResetFromRemove();
 #else

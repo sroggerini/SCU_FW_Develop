@@ -2267,7 +2267,7 @@ uint8_t*  getFwVer (void)
   * @retval none
   */
 
-void setGeneralStationParameters(uint8_t Type)
+void setGeneralStationParameters (void)
 {
     unsigned char SerNum[4];
     infoStation_t* pInfoStation;
@@ -2413,9 +2413,10 @@ void setGeneralStationParameters(uint8_t Type)
     
     /*              destination                source                   len   */
     memCpyInfoSt((uint8_t*)&infoStation, (uint8_t*)pInfoStation, sizeof(infoStation_t));  
-
     /* free allocated area */
     free(pInfoStation);
+    /* Save in EEPROM */
+    WriteOnEeprom (SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
 
     /* check product serial number in reserved area */
     if (keySN != (uint8_t)0xA6)
@@ -4401,8 +4402,9 @@ unsigned char  setScuSerialNumberEeprom(char* key, char* keyString)
   /*         destination         source              len         */
   strncpy((char *)&locStr[0], keyString, sizeof(infoStation.serial));
 
-  /*                               destination                         source                   len   */
-  configASSERT(memCpyInfoSt((uint8_t*)&infoStation.serial[0], (uint8_t*)locStr, sizeof(infoStation.serial)));
+  /*                               destination                    source                   len   */
+  /* Set serial number */
+  SCU_InfoStation_Set ((uint8_t *)infoStation.serial, (uint8_t *)locStr, sizeof(infoStation.serial)); 
 
   return ( WriteOnEeprom(SCU_SN_EE_ADDRES, (uint8_t*)key, 4));
 }
@@ -5245,38 +5247,38 @@ void saveTimeoutRange1 (uint16_t toVal)
 uint8_t memCpyInfoSt(uint8_t* pInfoSt, uint8_t* pData, uint16_t lenField)
 {
   uint32_t        currCks;
-  uint8_t         resultOk;
-  infoStation_t*  pLocInfoStation;
+  // xx uint8_t         resultOk;
+  infoStation_t*  pLocInfoStation = &infoStation;
   
   /* Check if typical sizeof has been passed */
-  if ((lenField != sizeof(uint8_t)) || (lenField != sizeof(uint16_t)) || (lenField != sizeof(uint32_t)))
+  // xx if ((lenField != sizeof(uint8_t)) || (lenField != sizeof(uint16_t)) || (lenField != sizeof(uint32_t)))
+  // xx {
+  // xx   /* an error occurred  */
+  // xx   resultOk = FALSE;
+  // xx }
+  // xx else
+  
+  if (infoStation.key == KEY_FOR_INFOSTATION_VX)
   {
-    /* an error occurred  */
-    resultOk = FALSE;
-  }
-  else
-  {
-    if (infoStation.key == KEY_FOR_INFOSTATION_VX)
-    {
-      currCks = findInfoStationCheksum((uint8_t*)pLocInfoStation);
-      configASSERT(currCks == infoStation.checksum);   
-    }
-    /*** suspend protection area to set checksum and new data in the structure ***/
-    /* Disable MPU */
-    HAL_MPU_Disable();
-    /*       destination       source            Len  */
-    memcpy((void*)pInfoSt, (void*)pData, (size_t)lenField);
-    /* check the integrity for somestructure  field  */
-    //configASSERT(Data_Integrity_Check(ON_ALL_DATA) == NO_ERROR_ON_SRAM_DATA)
-    /** if all OK the checksum is attached  */
     currCks = findInfoStationCheksum((uint8_t*)pLocInfoStation);
-    /* set new checksum   */
-    pLocInfoStation->checksum = currCks;
-   /* Enable MPU */
-//    HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
-    /*** restored protection area to avoid any writing in this area outside this contest  ***/
+    configASSERT(currCks == infoStation.checksum);   
   }
-  return(resultOk);
+  /*** suspend protection area to set checksum and new data in the structure ***/
+  /* Disable MPU */
+  HAL_MPU_Disable();
+  /*       destination       source            Len  */
+  memcpy((void*)pInfoSt, (void*)pData, (size_t)lenField);
+  /* check the integrity for somestructure  field  */
+  //configASSERT(Data_Integrity_Check(ON_ALL_DATA) == NO_ERROR_ON_SRAM_DATA)
+  /** if all OK the checksum is attached  */
+  currCks = findInfoStationCheksum((uint8_t*)pLocInfoStation);
+  /* set new checksum   */
+  pLocInfoStation->checksum = currCks;
+  /* Enable MPU */
+  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+  
+  /*** restored protection area to avoid any writing in this area outside this contest  ***/
+  return(TRUE);
 }
 
 /**
@@ -5502,14 +5504,24 @@ void setRplOptionByte(uint8_t rdpLevel)
 
 void BCD_to_PackedBCD (uint8_t *pPackedBCD, uint8_t *pBCD, uint8_t nBCD)
 {
-  uint8_t i;
-  uint16_t *ptr16 = (uint16_t *)pBCD;
+  uint8_t i, Data;
+  uint8_t *pData;   
   
-  for (i = 0; i < (nBCD >> 1); i++)
+  pData = malloc(nBCD >> 1);
+  
+  for (i = 0; i < nBCD; i++, pBCD += 2)
   {
-    *pPackedBCD = *ptr16++;
+    Data = (*pBCD << 4) | *(pBCD + 1);
+    *pData++ = Data;
   }
   
+  pData -= (nBCD >> 1);
+  
+  if (((uint32_t)pPackedBCD >= (uint32_t)&infoStation) &&  (uint32_t)pPackedBCD <= ((uint32_t)&infoStation + sizeof (infoStation_t)))
+    memCpyInfoSt (pPackedBCD, pData, nBCD >> 1);
+  else
+    memcpy (pPackedBCD, pData, nBCD >> 1); 
+    
 }
 
 /**
@@ -5523,17 +5535,25 @@ void BCD_to_PackedBCD (uint8_t *pPackedBCD, uint8_t *pBCD, uint8_t nBCD)
   * @retval none
   */
 
-void PackedBCD_to_BCD (uint8_t *pBCD, uint8_t *pPackedBCD, uint8_t nBCD)
+void PackedBCD_to_BCD (uint8_t *pBCD, uint8_t *pPackedBCD, uint8_t nPackedBCD)
 {
   
-  uint8_t i;
-  
-  for (i = 0; i < MAX_SERIAL_LENGTH; i <<= 1)
+  uint8_t i;   
+  uint8_t *pData = malloc(nPackedBCD << 1);
+   
+  for (i = 0; i < nPackedBCD; i++, pPackedBCD++)
   {
-    *pBCD++ = *pPackedBCD;
-    *pBCD++ = (*pPackedBCD & 0xF0) >> 4;
+    *pData++ = (*pPackedBCD  & 0xF0) >> 4;
+    *pData++ = *pPackedBCD & 0x0F;
   }
   
+  pData -= (nPackedBCD << 1);
+    
+  if (((uint32_t)pBCD >= (uint32_t)&infoStation) &&  (uint32_t)pBCD <= ((uint32_t)&infoStation + sizeof (infoStation_t)))
+    memCpyInfoSt (pBCD, pData, nPackedBCD << 1);
+  else
+    memcpy (pBCD, pData, nPackedBCD << 1);
+    
 }
 
 /**

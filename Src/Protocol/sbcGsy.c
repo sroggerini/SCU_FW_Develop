@@ -1015,7 +1015,7 @@ switch (GSY_RECEIVED_CMD)
                   send_to_evs(EVS_AUTORIZATION_MODE);
                   send_to_pers(PERS_AUTORIZATION_MODE);
                   /* update station mode for APP */
-                  setGeneralStationParameters(EDATA_VALID_PRG);
+                  setGeneralStationParameters();
                   /* update station mode in modbus area (to use after in 0x500 regs) */
                   setStationOperationMode();
               }
@@ -1054,8 +1054,8 @@ switch (GSY_RECEIVED_CMD)
                 for (i=0; i <4; i++)
                     data8u_array[i] = gsy_rx_array[(i + 4)];                
 
-                // Converto from PAcked BCD (2cipher in a byte) to BCD
-                PackedBCD_to_BCD (&temp[0], &data8u_array[0], MAX_SERIAL_LENGTH);
+                // Convert from Packed BCD (2cipher in a byte) to BCD
+                PackedBCD_to_BCD (&temp[0], &data8u_array[0], MAX_SERIAL_LENGTH/2);
                                 
                 SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, (uint8_t *)&temp, MAX_SERIAL_LENGTH);   /* ex SERNUM_BYTE0_EADD */
               }

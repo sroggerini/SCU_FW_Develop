@@ -373,7 +373,7 @@ xQueueHandle EEpromMngQueue = NULL;
 static EEpromMngMsg_st        EEpromMngMsg;
 #endif
 
-static uint8_t                eeprom_param_array[EEPROM_PARAM_NUM];
+// xx REMOVED --> static uint8_t                eeprom_param_array[EEPROM_PARAM_NUM];
 static uint8_t                eeprom_master_uid_array[CARD_UID_DIM];
 static uint8_t                eeprom_user_map_array[USER_MAP_EEDIM];
 static uint8_t                eeprom_user_uid_array[CARD_UID_DIM];
@@ -550,7 +550,7 @@ void Eeprom_Master_User_card_Force_Reset (void)           /* Fixed ticket SCU-76
   Master_card_reg = infoStation.persMaster;
   Master_card_reg &=~ (0x10 | 0x01);
   // eeprom_param_array[PERS_MASTER_EADD] = Master_card_reg;
-  infoStation.persMaster = Master_card_reg;
+  memCpyInfoSt ((uint8_t*)&infoStation.persMaster, (uint8_t *)&Master_card_reg, 1);
   WriteOnEeprom((EDATA_DEFAULT_EADD + PERS_MASTER_EADD), &Master_card_reg, 1);   
     
 }
@@ -687,18 +687,18 @@ void eeprom_array_set(uint16_t eadd, uint8_t *src_ptr, uint8_t num)
 //
 //  OUTPUT:         none
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
-void eeprom_param_get(uint16_t eadd, uint8_t *dst_ptr, uint8_t num)
-{
-uint8_t i;
-
-  for (i=0; i<num; i++)
-  {
-      *(dst_ptr + i) = eeprom_param_array[(eadd + i)];
-  }
-#ifdef IGNORE_VBUS
-  if (eadd == CONTROL_BYTE1_EADD) *dst_ptr &= (~VBUS_CRL1);
-#endif
-}
+// xx REMOVED void eeprom_param_get(uint16_t eadd, uint8_t *dst_ptr, uint8_t num)
+// xx REMOVED {
+// xx REMOVED uint8_t i;
+// xx REMOVED 
+// xx REMOVED   for (i=0; i<num; i++)
+// xx REMOVED   {
+// xx REMOVED       *(dst_ptr + i) = eeprom_param_array[(eadd + i)];
+// xx REMOVED   }
+// xx REMOVED #ifdef IGNORE_VBUS
+// xx REMOVED   if (eadd == CONTROL_BYTE1_EADD) *dst_ptr &= (~VBUS_CRL1);
+// xx REMOVED #endif
+// xx REMOVED }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
@@ -761,10 +761,10 @@ ReadFromEeprom((USER_UID_EEOFFSET + uid_add), uid_ptr, CARD_UID_DIM);
 //
 //  OUTPUT:         none
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
-void eeprom_ProductConfig_Param_Set (void)
-{
-  WriteOnEeprom(EDATA_VALID_EADD, eeprom_param_array, EEPROM_PARAM_NUM);
-}
+// xx void eeprom_ProductConfig_Param_Set (void)
+// xx {
+// xx   WriteOnEeprom(EDATA_VALID_EADD, eeprom_param_array, EEPROM_PARAM_NUM);
+// xx }
 
 
 /**
@@ -1187,13 +1187,13 @@ osSemaphoreRelease(EEprom_semaphore);
 
 #else
 
-uint8_t EDATA_key, serial_tmp[MAX_SERIAL_LENGTH];
+uint8_t infoStation_key, serial_tmp[MAX_SERIAL_LENGTH];
 
 if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
 {
 
   /* Read key validity of parameter set */
-  if (ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES + (uint8_t)((uint32_t)&infoStation.key - (uint32_t)&infoStation), (uint8_t*)&EDATA_key, 1) != osOK)
+  if (ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES + (uint8_t)((uint32_t)&infoStation.key - (uint32_t)&infoStation), (uint8_t*)&infoStation_key, sizeof (infoStation_key)) != osOK)
   {
     /* Impossible to read the key --> reset uP and restart */
     EVLOG_Message (EV_ERROR, "Error reading the EEPROM, force a RESET");      
@@ -1204,15 +1204,16 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
   (void)rs485AutoAddress();
   
   /* Check validity key */
-  switch (EDATA_key)
+  switch (infoStation_key)
   {
     case EDATA_VALID_PRG:
-      
+    case KEY_FOR_INFOSTATION_VX:
+   
       EVLOG_Message (EV_INFO, "Data in EEPROM are valid");      
     
       ReadFromEeprom(MASTER_UID00_EADD, eeprom_master_uid_array, CARD_UID_DIM);
-      ReadFromEeprom(USER_MAP00_EADD, eeprom_user_map_array, USER_MAP_EEDIM);
-      ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+      ReadFromEeprom(USER_MAP00_EADD, eeprom_user_map_array, USER_MAP_EEDIM);      
+      ReadFromEeprom_no_MPU(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
       /* Read backup area for SCU data backup */
       ReadFromEeprom(EDATA_BKP_SCU_EE_ADDRESS + sizeof (infoStation_t), (uint8_t *)&ee_data16, sizeof (uint16_t));
       /* Check if BKP image is present or not */
@@ -1239,16 +1240,19 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
       WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)getDefSocketInfoPtr(), sizeof(socketPresence_t));
          
       /* Copy default values to infostation */
-      memcpy ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT, sizeof (infoStation));
+      memCpyInfoSt ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT, sizeof (infoStation));
       /* Restore factory ID copying them from EDATA_DEFAULT_ID_CODES address */
       ReadFromEeprom(EDATA_DEFAULT_ID_CODES, (uint8_t*)Product_SN_temp, sizeof(Product_SN_temp));
       ReadFromEeprom(EDATA_DEFAULT_ID_CODES + sizeof(Product_SN_temp), (uint8_t*)Product_Code_temp, sizeof(Product_Code_temp));
       ReadFromEeprom(EDATA_DEFAULT_ID_CODES + sizeof(Product_SN_temp) + sizeof(Product_Code_temp), (uint8_t*)FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));
       WriteOnEeprom(PRD_SN_EE_ADDRES, (uint8_t*)Product_SN_temp, sizeof(Product_SN_temp));
       WriteOnEeprom(PRD_CODE_EE_ADDRES, (uint8_t*)Product_Code_temp, sizeof(Product_Code_temp));
-      memcpy(infoStation.productSn, Product_SN_temp, sizeof(Product_SN_temp));
-      memcpy(infoStation.productCode, Product_Code_temp, sizeof(Product_Code_temp));
-      memcpy(infoStation.fakeProductCode, FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));
+      memCpyInfoSt((uint8_t *)&infoStation.productSn, Product_SN_temp, sizeof(Product_SN_temp));
+      memCpyInfoSt((uint8_t *)&infoStation.productCode, Product_Code_temp, sizeof(Product_Code_temp));
+      memCpyInfoSt((uint8_t *)&infoStation.fakeProductCode, FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));
+
+      infoStation_key = KEY_FOR_INFOSTATION_VX;
+      memCpyInfoSt ((uint8_t *)&infoStation.key, (uint8_t *)&infoStation_key, 1);
       
       /* Update full infostation structure in EEPROM */
       WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation));
@@ -1284,10 +1288,13 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
       /* Backup serial value */
       memcpy ((uint8_t *)&serial_tmp, (uint8_t *)&infoStation.serial, sizeof (infoStation.serial)); 
       /* Copy default values to infostation */
-      memcpy ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT, sizeof (infoStation));
+      memCpyInfoSt ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT, sizeof (infoStation_t));
       /* Overwrite serial value with the original */
-      memcpy ((uint8_t *)&infoStation.serial, (uint8_t *)&serial_tmp, sizeof (infoStation.serial)); 
+      memCpyInfoSt ((uint8_t *)&infoStation.serial, (uint8_t *)&serial_tmp, sizeof (infoStation.serial)); 
 
+      infoStation_key = KEY_FOR_INFOSTATION_VX;
+      memCpyInfoSt ((uint8_t *)&infoStation.key, (uint8_t *)&infoStation_key, 1);
+      
       /* Update full infostation structure in EEPROM */
       if (WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation)) != osOK) 
          error = TRUE;            
@@ -1337,9 +1344,9 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
   
   /* Restore SCU type working mode  */
   setScuTypeModeFromEeprom();  
-  setGeneralStationParameters(EDATA_key);
+  setGeneralStationParameters();
   Scheduler_scheduleCharge(getSchedulationFromMemory());
-  setNominalPower(eeprom_param_array[M3T_CURRENT_EADD]);
+  setNominalPower(infoStation.max_current);
   SecureArea_init();
   
   /* Update the backup image for SCU data if needed */
@@ -1618,10 +1625,10 @@ for (;;)
 * @retval      none 
 *  
 ****************************************************************/
-uint8_t*  getEepromArray(void) 
-{
-  return(eeprom_param_array);
-}
+// xx uint8_t*  getEepromArray(void) 
+// xx {
+// xx   return(eeprom_param_array);
+// xx }
 
 /**
 *
@@ -1643,7 +1650,7 @@ void  setEepromArrayIsolatedMode(void)
   //     eeprom_param_array[i] = eeprom_param_master_Iso[i];                /* Fill the structure with DEFAULT data for isolated mode */
   
   /* Set to DEFAULT values */
-  memcpy ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT_Iso, sizeof (infoStation));
+  memCpyInfoSt ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT_Iso, sizeof (infoStation));
 
   SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, SerNum, MAX_SERIAL_LENGTH);         /* ex SERNUM_BYTE0_EADD */
 }
@@ -2076,7 +2083,7 @@ void BKP_Reload_Param (uint8_t FromIdle)
 
   /* Reload values from infostation BKP area */
   if (FromIdle)
-    ReadFromEeprom (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&infoStation, sizeof (infoStation_t));     
+    ReadFromEeprom_no_MPU (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&infoStation, sizeof (infoStation_t));     
   else
     ReadFromEeprom_no_Semaph (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&infoStation, sizeof (infoStation_t));       
   /* Set values in eeprom_param_array */
@@ -2341,13 +2348,17 @@ uint8_t SCU_InfoStation_Set (uint8_t *pDst, uint8_t *pSrc, uint16_t nByte)
   uint16_t Address;
   
   /* Save configuration in RAM */
-  memCpyInfoSt (pDst, pSrc, nByte);
+  configASSERT(memCpyInfoSt (pDst, pSrc, nByte));
   
   // xx eeprom_array_set (Address, Buffer, Length);   
   Address = SCU_GENERAL_INFO_EE_ADDRES + ((uint32_t )pDst - (uint32_t)&infoStation);
     
-  /* Save configuration in EEPROM */
+  /* Save data in EEPROM */
   result = WriteOnEeprom(Address, (uint8_t*)pDst, nByte);
+  
+  Address = SCU_GENERAL_INFO_EE_ADDRES + ((uint32_t )&infoStation.checksum - (uint32_t)&infoStation);
+  /* save checksum in EEPROM */
+  result = WriteOnEeprom(Address, (uint8_t*)&infoStation.checksum, sizeof (uint32_t));
   
   /* Check writing result */
   if (result == 0)
@@ -2371,6 +2382,27 @@ uint8_t SCU_InfoStation_Set (uint8_t *pDst, uint8_t *pSrc, uint16_t nByte)
   
   return result;  
   
+}
+
+/**
+*
+* @brief       ReadFromEeprom disabling the MPU protection
+*
+* @param [in]  unsigned short: start read address 
+*              unsigned char *: pointer where store read data
+*              unsigned short: number of data to be read 
+*  
+* @retval      unsigned char: 0 when successfull read, error code otherwise 
+*  
+****************************************************************/
+uint8_t ReadFromEeprom_no_MPU (uint16_t Address, uint8_t *Buffer, uint16_t Length)
+{
+  uint8_t result;
+  
+  HAL_MPU_Disable();
+  result = ReadFromEeprom(Address, Buffer, Length);
+  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+  return result;  
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //

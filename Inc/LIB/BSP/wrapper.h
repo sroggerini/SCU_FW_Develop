@@ -795,7 +795,6 @@ typedef __packed struct
   uint32_t                      passWebWiFiHash;                                /* hash della password per accesso wifi                         */
   uint32_t                      startTimeWebCollaudo;                           /* istante di prima attivazione web server al collaudo          */
   uint16_t                      confDataAndPassStatus;                          /* flag = 0xBBAA con tutti i dati di configurazione presenti    */
-  uint32_t                      checksum;                                       /* checksum It is  the sum of all structure byte                */
   /*                    From there parameters comes from original eeprom_param_array[]                      */
   uint8_t                       socketEnable;                                   /* ex SOCKET_ENABLE_EADD    */
   uint8_t                       batteryConfig;                                  /* ex BATTERY_CONFIG_EADD   */
@@ -825,6 +824,7 @@ typedef __packed struct
   Hidden_Menu_t                 Hidden_Menu;                                    /* ex HIDDEN_MENU_VIS_EADD - HIDDEN_MENU_ENB_EADD */
   Time_Settings_t               Time_Settings;                                  /* ex TIME_ZONE_EADD - DST_EADD - TIME_DST_OFFSET_EADD - DST_STATUS_EADD */
   Temp_Ctrl_t                   Temp_Ctrl;                                      /* ex TEMP_CTRL_ENB_EADD - TEMP_CTRL_VAL_EADD - TEMP_DELTA_EADD - TEMP_HYSTERESIS_EADD */
+  uint32_t                      checksum;                                       /* checksum It is  the sum of all structure byte                */
   
 } infoStation_t;
 
@@ -934,7 +934,7 @@ typedef struct {
 /* Structure used to manage the different area in EEPROM involved in configuration parameter */
 typedef struct {
   uint16_t               idLogicScu;
-  uint8_t                confEepromParamArray[EEPROM_PARAM_NUM];
+// xx  uint8_t                confEepromParamArray[EEPROM_PARAM_NUM];
   infoStation_t          confInfoStation;
   infoStation_t          confBackupInfoStation;
   uint8_t                confSerialCode[END_SN_EE_ADDRES - PRD_CODE_EE_ADDRES + 1];
@@ -1065,7 +1065,7 @@ void            sendEventToSemMng             (sbcSemEvent_e eventMsg , uint16_t
 
 /* primitive per gestione informazioni della stazione  */
 uint8_t*        getFwVer                        (void);
-void            setGeneralStationParameters     (uint8_t Type);
+void            setGeneralStationParameters     (void);
 char *          getStationName                  (void);
 unsigned char   setStationName                  (char* stName, int length);
 char*           getStationSerialNumber          (void);

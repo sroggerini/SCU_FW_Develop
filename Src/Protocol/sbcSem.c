@@ -4850,7 +4850,7 @@ uint8_t getAndsendAllSlaveParameters(uint8_t idLogic)
   pConfPar->idLogicScu = (uint16_t)idLogic;
   /*             Start to copy eeprom array area                                                                   */
   /*             destination                                  source                           len                 */
-  memcpy((uint8_t *)pConfPar->confEepromParamArray, (uint8_t *)getEepromArray(), EEPROM_PARAM_NUM);                             
+  // xx memcpy((uint8_t *)pConfPar->confEepromParamArray, (uint8_t *)getEepromArray(), EEPROM_PARAM_NUM);                             
   /*             Copy infostation           area                                                                   */
   /*             destination                                  source                           len                 */
   memcpy((uint8_t *)&pConfPar->confInfoStation, (uint8_t *)getStationName(), sizeof (infoStation_t));                             
