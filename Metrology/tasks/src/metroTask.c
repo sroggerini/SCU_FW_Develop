@@ -82,7 +82,7 @@ METRO_Device_Config_t Tab_METRO_Global_Devices_Config[NB_MAX_DEVICE];
 extern METRO_Device_Config_t Tab_METRO_internal_Devices_Config[NB_MAX_DEVICE];
 extern IWDG_HandleTypeDef    hiwdg;
 extern emTaskState_st        emTaskState;
-extern infoStation_t         infoStation;
+extern SCU_param_t           SCU_param;
 
 
 /*******************************************************************************
@@ -1124,7 +1124,7 @@ METRO_STPM_LINK_IRQ_Status_Type_t METRO_CheckStatus(void)
   for (cnt = 0; cnt < METRO_MAX_PHASES; cnt++)
   {
     /* Check if there is an anomaly condition */
-    if (metroData.rmscurrent[cnt] > infoStation.max_current * 2)
+    if (metroData.rmscurrent[cnt] > SCU_param.max_current * 2)
       /* if for 1s the device gives this value from DSPEVENT register it means that there is an anomaly */
       if (Error_cnt++ == MAX_ERRORS_FOR_ANOMALY)
       {

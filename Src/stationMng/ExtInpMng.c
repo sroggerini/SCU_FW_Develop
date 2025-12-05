@@ -279,48 +279,27 @@ send_to_evs(EVS_EXTERNAL_EM_UPDATE);
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 static void hidden_menu_start(void)
 {
-// xx uint8_t emeter_type, data_array[2];
-
-// xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
-
-// xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, (uint8_t*)(&hidden_pmng_enable), 1);
-hidden_pmng_enable = infoStation.Hidden_Menu.Enabled;
+hidden_pmng_enable = SCU_param.Hidden_Menu.Enabled;
 hidden_pmng_enable &= HIDDEN_MENU_PMNG_ENB;
 
-// xx eeprom_param_get(PMNG_MODE_EADD, (uint8_t*)(&hidden_pmng_mode), 1);
+hidden_domestic_power = SCU_param.Pmng.Power;
 
-// xx eeprom_param_get(PMNG_PWRLSB_EADD, data_array, 2);
-// xx hidden_domestic_power = ((uint16_t)(data_array[1]) << 8) + data_array[0];
-hidden_domestic_power = infoStation.Pmng.Power;
-
-// xx eeprom_param_get(PMNG_CURRENT_EADD, (uint8_t*)(&hidden_min_current), 1);
-hidden_min_current = infoStation.Pmng.Current;
-// xx eeprom_param_get(PMNG_MULTIP_EADD, (uint8_t*)(&hidden_power_multip), 1);
-hidden_power_multip = infoStation.Pmng.Multip;
-// xx eeprom_param_get(PMNG_ERROR_EADD, (uint8_t*)(&hidden_power_error), 1);
-hidden_power_error = infoStation.Pmng.Error;
-// xx eeprom_param_get(PMNG_DMAX_EADD, (uint8_t*)(&hidden_power_dmax), 1);
-hidden_power_dmax = infoStation.Pmng.Dmax;
-// xx eeprom_param_get(CONTROL_BYTE2_EADD, (uint8_t*)(&hidden_emeter_crl2), 1);
-hidden_unbal_enb = infoStation.controlByte.Byte.Byte2;
-// xx eeprom_param_get(PMNG_UNBAL_EADD, (uint8_t*)(&hidden_unbal_enb), 1);
-hidden_unbal_enb = infoStation.Pmng.Unbal;
-// xx eeprom_param_get(PMNG_TRANGE_EADD, (uint8_t*)(&hidden_time_range), 1);
-hidden_time_range = infoStation.Pmng.Trange;
-// xx eeprom_param_get(TCHARGE_MODE_EADD, (uint8_t*)(&hidden_timed_time_enable), 1);
-hidden_timed_time_enable = infoStation.TCharge.Mode;
-// xx eeprom_param_get(TCHARGE_TIME_EADD, (uint8_t*)(&hidden_timed_time), 1);
-hidden_timed_time = infoStation.TCharge.Time;
-// xx eeprom_param_get(ENRG_LIMIT_EADD, (uint8_t*)(&hidden_enrg_limit), 1);
-hidden_enrg_limit = infoStation.Energy_limit;
+hidden_min_current = SCU_param.Pmng.Current;
+hidden_power_multip = SCU_param.Pmng.Multip;
+hidden_power_error = SCU_param.Pmng.Error;
+hidden_power_dmax = SCU_param.Pmng.Dmax;
+hidden_unbal_enb = SCU_param.controlByte.Byte.Byte2;
+hidden_unbal_enb = SCU_param.Pmng.Unbal;
+hidden_time_range = SCU_param.Pmng.Trange;
+hidden_timed_time_enable = SCU_param.TCharge.Mode;
+hidden_timed_time = SCU_param.TCharge.Time;
+hidden_enrg_limit = SCU_param.Energy_limit;
 
 hidden_emeter_crl2 &= EMETER_EXT_CRL2;
 
-// xx eeprom_param_get(PMNG_PWDB0_EADD, hidden_password_array, 3);
-// hidden_change_password = ((hidden_password_array[0] - '0') * 100) + ((hidden_password_array[1] - '0') * 10) + (hidden_password_array[2] - '0');
-hidden_change_password = infoStation.Hidden_Menu.Pwd;
+hidden_change_password = SCU_param.Hidden_Menu.Pwd;
 
-if (((uint8_t)infoStation.emTypeInt > EMETER_TAMP) && ((uint8_t)infoStation.emTypeInt != EMETER_TAMP_3))
+if (((uint8_t)SCU_param.emTypeInt > EMETER_TAMP) && ((uint8_t)SCU_param.emTypeInt != EMETER_TAMP_3))
 	{
 	hidden_menu_sel = HIDDEN_TOTAL_ENERGY;
 	send_to_lcd(LCD_TOTAL_ENERGY);
@@ -353,8 +332,7 @@ static void hidden_menu_manager(ExtInpMngMsg_st *pMsg)
 {
 uint8_t auth, emeter_type, data_array[3];
 
-// xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
-emeter_type = infoStation.emTypeInt;
+emeter_type = SCU_param.emTypeInt;
 
 if (pMsg->ExtInpMngEvent == HIDDEN_TIME_EXPIRED)
     {
@@ -419,7 +397,7 @@ else
                             hidden_password_array[hidden_enter_index] = '0';
                         
                         hidden_change_password = ((hidden_password_array[0] - '0') * 100) + ((hidden_password_array[1] - '0') * 10) + (hidden_password_array[2] - '0');
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Pwd, (uint8_t *)&hidden_change_password, 2);       /* ex PMNG_PWDB0_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Pwd, (uint8_t *)&hidden_change_password, 2);       /* ex PMNG_PWDB0_EADD */
                         auth = 0;
                         }
                     else
@@ -665,7 +643,7 @@ else
     
                         data_array[0] = (uint8_t)(*hidden_enter_data & 0x00FF);
                         data_array[1] = (uint8_t)(*hidden_enter_data >> 8);
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Power, data_array, 2);  /* ex PMNG_PWRLSB_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Power, data_array, 2);  /* ex PMNG_PWRLSB_EADD */
                         hidden_data_to_array(hidden_enter_array, *hidden_enter_data, 3);
                         }
                     else if (hidden_menu_sel == HIDDEN_ENTER_MINCURRENT)
@@ -675,35 +653,35 @@ else
                         else if (*hidden_enter_data > 255)
                             *hidden_enter_data = 255;
     
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Current, (uint8_t*)(hidden_enter_data), 1);   /* ex PMNG_CURRENT_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Current, (uint8_t*)(hidden_enter_data), 1);   /* ex PMNG_CURRENT_EADD */
                         hidden_data_to_array(hidden_enter_array, *hidden_enter_data, 3);
                         }
                     else if (hidden_menu_sel == HIDDEN_ENTER_PMNGENB)
                         {
                         hidden_menu_enb &=~ HIDDEN_MENU_PMNG_ENB;
                         hidden_menu_enb |= (uint8_t)(*hidden_enter_data);
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &hidden_menu_enb, 1);    /* ex HIDDEN_MENU_ENB_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Enabled, &hidden_menu_enb, 1);    /* ex HIDDEN_MENU_ENB_EADD */
                         }
                     else if (hidden_menu_sel == HIDDEN_ENTER_TIMED_TIME_ENB)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge.Mode, (uint8_t*)(hidden_enter_data), 1);    /* ex TCHARGE_MODE_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.TCharge.Mode, (uint8_t*)(hidden_enter_data), 1);    /* ex TCHARGE_MODE_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_PWRMULTIP)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Multip, (uint8_t*)(hidden_enter_data), 1);     /* ex PMNG_MULTIP_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Multip, (uint8_t*)(hidden_enter_data), 1);     /* ex PMNG_MULTIP_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_PMNGTYPE)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, (uint8_t*)(hidden_enter_data), 1);       /* ex PMNG_MODE_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Mode, (uint8_t*)(hidden_enter_data), 1);       /* ex PMNG_MODE_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_PWRERROR)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Error, (uint8_t*)(hidden_enter_data), 1);   /* ex PMNG_ERROR_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Error, (uint8_t*)(hidden_enter_data), 1);   /* ex PMNG_ERROR_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_PWRDMAX)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Dmax, (uint8_t*)(hidden_enter_data), 1);    /* ex PMNG_DMAX_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Dmax, (uint8_t*)(hidden_enter_data), 1);    /* ex PMNG_DMAX_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_UNBAL)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, (uint8_t*)(hidden_enter_data), 1);     /* ex PMNG_UNBAL_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Unbal, (uint8_t*)(hidden_enter_data), 1);     /* ex PMNG_UNBAL_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_EMETER_CRL2)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, (uint8_t*)(hidden_enter_data), 1);    /* ex CONTROL_BYTE2_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.controlByte.Byte.Byte2, (uint8_t*)(hidden_enter_data), 1);    /* ex CONTROL_BYTE2_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_TIME_RANGE)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Trange, (uint8_t*)(hidden_enter_data), 1);     /* ex PMNG_TRANGE_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Trange, (uint8_t*)(hidden_enter_data), 1);     /* ex PMNG_TRANGE_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_TIMED_TIME)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge.Time, (uint8_t*)(hidden_enter_data), 1);     /* ex TCHARGE_TIME_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.TCharge.Time, (uint8_t*)(hidden_enter_data), 1);     /* ex TCHARGE_TIME_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_ENRG_LIMIT)
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Energy_limit, (uint8_t*)(hidden_enter_data), 1);     /* ex ENRG_LIMIT_EADD */
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Energy_limit, (uint8_t*)(hidden_enter_data), 1);     /* ex ENRG_LIMIT_EADD */
                     else if (hidden_menu_sel == HIDDEN_ENTER_CHANGE_PASSWORD)
                         {
                         *hidden_enter_data = (hidden_enter_array[0] * 100) + (hidden_enter_array[1] * 10) + hidden_enter_array[2];
@@ -714,7 +692,7 @@ else
                             hidden_password_array[hidden_enter_index] = hidden_enter_array[hidden_enter_index];
                             }
 
-                        SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Pwd, hidden_enter_array, 3);        /* ex PMNG_PWDB0_EADD */                       
+                        SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Pwd, hidden_enter_array, 3);        /* ex PMNG_PWDB0_EADD */                       
                         hidden_change_password = ((hidden_password_array[0] - '0') * 100) + ((hidden_password_array[1] - '0') * 10) + (hidden_password_array[2] - '0');
 
                         for (hidden_enter_index=0; hidden_enter_index<3; hidden_enter_index++)
@@ -798,10 +776,8 @@ for (i=0; i<3; i++)
 void hidden_menu_enable_set(uint8_t enable)
 {
 hidden_menu_enable = enable;
-// xx eeprom_param_get(HIDDEN_MENU_VIS_EADD, &hidden_menu_vis, 1);
-hidden_menu_vis = infoStation.Hidden_Menu.Visible;
-// xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &hidden_menu_enb, 1);
-hidden_menu_enb = infoStation.Hidden_Menu.Enabled;
+hidden_menu_vis = SCU_param.Hidden_Menu.Visible;
+hidden_menu_enb = SCU_param.Hidden_Menu.Enabled;
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
@@ -907,8 +883,7 @@ static void puls_manager(ExtInpMngMsg_st *pMsg)
 uint8_t         puls_enable;
 evs_state_en    state = evs_state_get();
 
-// xx eeprom_param_get(CONTROL_BYTE0_EADD, &puls_enable, 1);
-puls_enable = infoStation.controlByte.Byte.Byte0;
+puls_enable = SCU_param.controlByte.Byte.Byte0;
 puls_enable &= PULS_CRL0;
 
 if (puls_enable == 0)
@@ -1045,8 +1020,7 @@ static void remote_manager(ExtInpMngMsg_st *pMsg)
 {
 uint8_t control_enable;
 
-// xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-control_enable = infoStation.controlByte.Byte.Byte0;
+control_enable = SCU_param.controlByte.Byte.Byte0;
 
 if (control_enable & REMOTE_CRL0)
     {
@@ -1109,8 +1083,7 @@ static uint32_t ExtInpManager(ExtInpMngMsg_st *pMsg)
 {
 uint8_t emeter_type;
 
-// xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
-emeter_type = infoStation.emTypeInt;
+emeter_type = SCU_param.emTypeInt;
 
 if (hidden_menu_sel > HIDDEN_IDLE)
     hidden_menu_manager(&ExtInpMngMsg);

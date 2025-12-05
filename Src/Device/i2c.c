@@ -75,7 +75,7 @@ static   osSemaphoreId      i2c3Semaphore;
 ******************************************************************************
 */
 extern I2C_HandleTypeDef HI2Cx;
-extern infoStation_t  infoStation;
+extern SCU_param_t  SCU_param;
 
 /*
 *********************************** SCAME ************************************

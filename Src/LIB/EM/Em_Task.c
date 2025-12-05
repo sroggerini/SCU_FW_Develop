@@ -863,8 +863,7 @@ static uint32_t Process_em_Request(frameEm_st* pEmMsg)
                       pass[2] = (uint8_t)((temp32 & 0x0000FF00) >> 8);
                       pass[3] = (uint8_t)((temp32 & 0x000000FF));
                       /* now save in array eeprom the total energy value  */
-                      // xx eeprom_array_set(TOT_ENERGY0_EADD, (uint8_t *)&pass[0], 4);
-                      SCU_InfoStation_Set ((uint8_t *)&infoStation.TotalEnergy, (uint8_t *)&pass[0], 4);   
+                      SCU_Param_Set ((uint8_t *)&SCU_param.TotalEnergy, (uint8_t *)&pass[0], 4);   
                     }
                     break;
                     
@@ -1149,7 +1148,7 @@ static uint32_t Process_em_Request(frameEm_st* pEmMsg)
                   {
                     lenInfo = (uint16_t)regAddr + (uint16_t)50;
                     lenInfo /= 100;
-                    SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Power, (uint8_t*)&lenInfo, 2);  /* ex PMNG_PWRLSB_EADD */
+                    SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Power, (uint8_t*)&lenInfo, 2);  /* ex PMNG_PWRLSB_EADD */
                   }
                   /* When SEM, the Unbalance flag is fixed as enabled, so must be ignored */
                   if (isSemMode () == FALSE)
@@ -1159,19 +1158,18 @@ static uint32_t Process_em_Request(frameEm_st* pEmMsg)
                       readSize = (uint8_t)((temp32 >> 8) & 0x00000004);
                       if (readSize != 0) readSize = 1; 
                       /* save Unbalance enable flag 1 = sbilanciamento permesso *****/
-                      SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, (uint8_t*)&readSize, 1);  /* ex PMNG_UNBAL_EADD */
+                      SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Unbal, (uint8_t*)&readSize, 1);  /* ex PMNG_UNBAL_EADD */
                     }
                   }
                   if (((uint8_t)((temp32 >> 8) & 0x00000003)) != (mdbAddr & 0x03))
                   {
                     /* get current power management mode */
-                    // xx eeprom_param_get(PMNG_MODE_EADD, (uint8_t *)&readSize, 1);
-                    readSize = infoStation.Pmng.Mode;
+                    readSize = SCU_param.Pmng.Mode;
                     readSize &=(~(uint8_t)PMNG_MODE_MASK), (uint8_t *)&pass[0], 4;
 
                     readSize |= (uint8_t)((temp32 >> 8) & 0x00000003);
                     /* save received power management mode */
-                    SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, (uint8_t *)&readSize, 1);   /* ex PMNG_MODE_EADD */
+                    SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Mode, (uint8_t *)&readSize, 1);   /* ex PMNG_MODE_EADD */
                   }
                 }
               }
@@ -2734,13 +2732,7 @@ uint8_t initEmParameter(emEvents_e emEvent)
 ***********************************************************************************************************************/
 int32_t  getEepromTotalActiveEnergy (void)
 {
-  // xx int32_t  totActEnrg;
-  // xx uint8_t  pass[4];
-
-  // xx eeprom_param_get(TOT_ENERGY0_EADD, pass, 4);
-  // xx totActEnrg = ((int32_t)(pass[0]) << 24) + ((int32_t)(pass[1]) << 16) + ((int32_t)(pass[2]) << 8) + pass[3];  
-  // xx return((int32_t)100 * totActEnrg);
-  return (infoStation.TotalEnergy * 100); 
+  return (SCU_param.TotalEnergy * 100); 
 }
 
 /**
@@ -2761,7 +2753,7 @@ void  setEepromTotalActiveEnergy (int32_t totActEnrg)
   pass[1] = (uint8_t)((totActEnrg & 0x00FF0000) >> 16);
   pass[2] = (uint8_t)((totActEnrg & 0x0000FF00) >> 8);
   pass[3] = (uint8_t)((totActEnrg & 0x000000FF));
-  SCU_InfoStation_Set ((uint8_t *)&infoStation.TotalEnergy, pass, 4);   /* ex TOT_ENERGY0_EADD */
+  SCU_Param_Set ((uint8_t *)&SCU_param.TotalEnergy, pass, 4);   /* ex TOT_ENERGY0_EADD */
 }
 
 /**

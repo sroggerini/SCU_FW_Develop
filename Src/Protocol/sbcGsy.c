@@ -592,12 +592,10 @@ static uint8_t  gsy_protocol_compliance (uint8_t *src_ptr)
 {
 uint8_t /* add ,*/ len;
 
-// xx eeprom_param_get(RS485_ADD_EADD, &add, 1);
-
 if (*src_ptr != GSY_STX)
     return 0;
 
-if ((*(src_ptr + 1) != infoStation.rs485Address) && (*(src_ptr + 1) != GSY_BROADCAST_ADDR))
+if ((*(src_ptr + 1) != SCU_param.rs485Address) && (*(src_ptr + 1) != GSY_BROADCAST_ADDR))
     return 0;
 
 len = *(src_ptr + 2);                               // get received message length
@@ -640,11 +638,9 @@ static void gsy_init(void)
 {
 uint8_t i;
 
-// xx eeprom_param_get(EVS_MODE_EADD, &gsy_evs_mode, 1);
-gsy_evs_mode = infoStation.evs_mode;
+gsy_evs_mode = SCU_param.evs_mode;
 gsy_connected = 0;
 gsy_current = 63;
-//gsy_quick_polling = (BUSY_OUTLET | PLUGGED_OUTLET);
 gsy_quick_polling = (BUSY_OUTLET);
 
 gsy_enable = 0;
@@ -890,10 +886,8 @@ if ((evState < EVSTATE_DISABLED) && (GSY_RECEIVED_CMD != FW_UPDATE_WRITE)&& (evS
 //if (evs_state_get() < EVSTATE_DISABLED)
 //    return (uint8_t)FALSE;
 
-// xx eeprom_param_get(RS485_ADD_EADD, &data8u, 1);
-data8u = infoStation.rs485Address;
-// xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
-emeter_type = infoStation.emTypeInt;
+data8u = SCU_param.rs485Address;
+emeter_type = SCU_param.emTypeInt;
 
 GSY_REPLY_STX = GSY_STX;                                // set start
 GSY_REPLY_ADD = data8u;                                 // set RS-485 SCU address
@@ -911,7 +905,7 @@ switch (GSY_RECEIVED_CMD)
         if (GSY_RECEIVED_LEN == 4)
             {
             data8u = gsy_rx_array[4];
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.rs485Address, &data8u, 1);   /* ex RS485_ADD_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.rs485Address, &data8u, 1);   /* ex RS485_ADD_EADD */
             gsy_tx_array[4] = data8u; 
             send_to_lcd(LCD_CURRENT_UPDATE);
             GSY_REPLY_LEN += 1;
@@ -939,7 +933,7 @@ switch (GSY_RECEIVED_CMD)
             DateTimeSet(&locDateTime);
             
             data8u = 1;
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.rtcValid, &data8u, 1);    /* ex RTC_VALID_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.rtcValid, &data8u, 1);    /* ex RTC_VALID_EADD */
             gsy_dec_to_bcd(&locDateTime.Second, &gsy_tx_array[4]);
             gsy_dec_to_bcd(&locDateTime.Minute, &gsy_tx_array[5]);
             gsy_dec_to_bcd(&locDateTime.Hour, &gsy_tx_array[6]);
@@ -982,7 +976,7 @@ switch (GSY_RECEIVED_CMD)
         if (GSY_RECEIVED_LEN == 4)
             {
             data8u = gsy_rx_array[4];
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.socketEnable, &data8u, 1);   /* ex SOCKET_ENABLE_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.socketEnable, &data8u, 1);   /* ex SOCKET_ENABLE_EADD */
             send_to_evs(EVS_AUTORIZATION_MODE);
             gsy_tx_array[4] = data8u;
             GSY_REPLY_LEN += 1;
@@ -994,8 +988,7 @@ switch (GSY_RECEIVED_CMD)
         {
         if (GSY_RECEIVED_LEN == 3)
             {
-            // xx eeprom_param_get(SOCKET_ENABLE_EADD, &data8u, 1);
-            gsy_tx_array[4] = infoStation.socketEnable;
+            gsy_tx_array[4] = SCU_param.socketEnable;
             GSY_REPLY_LEN += 1;
             }
         }
@@ -1004,18 +997,16 @@ switch (GSY_RECEIVED_CMD)
     case EVS_MODE_WRITE:    // write evs_mode command
         {
         if (GSY_RECEIVED_LEN == 4)
-            {
-                // xx eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&i), 1);
-                
+            {               
                 data8u = gsy_rx_array[4];
                 /* The modality to set is different? (Fixed ticket SCU-80) */
-                if (data8u != infoStation.evs_mode)
+                if (data8u != SCU_param.evs_mode)
                 {
-                  SCU_InfoStation_Set ((uint8_t *)&infoStation.evs_mode, &data8u, 1);     /* ex EVS_MODE_EADD */
+                  SCU_Param_Set ((uint8_t *)&SCU_param.evs_mode, &data8u, 1);     /* ex EVS_MODE_EADD */
                   send_to_evs(EVS_AUTORIZATION_MODE);
                   send_to_pers(PERS_AUTORIZATION_MODE);
                   /* update station mode for APP */
-                  setGeneralStationParameters(EDATA_VALID_PRG);
+                  setGeneralStationParameters();
                   /* update station mode in modbus area (to use after in 0x500 regs) */
                   setStationOperationMode();
               }
@@ -1034,8 +1025,7 @@ switch (GSY_RECEIVED_CMD)
         {
         if (GSY_RECEIVED_LEN == 3)
             {
-            // xx eeprom_param_get(EVS_MODE_EADD, &data8u, 1);
-            gsy_tx_array[4] = infoStation.evs_mode;
+            gsy_tx_array[4] = SCU_param.evs_mode;
             GSY_REPLY_LEN += 1;
             }
         }
@@ -1045,19 +1035,18 @@ switch (GSY_RECEIVED_CMD)
         {
             if (GSY_RECEIVED_LEN == 7)
             {
-              // xx eeprom_param_get(SERNUM_BYTE0_EADD, data8u_array, 4);            
               // Convert from BCD to Packed BCD (2 cipher in a byte)
-              BCD_to_PackedBCD (&data8u_array[0], (uint8_t *)&infoStation.serial[0], MAX_SERIAL_LENGTH);
+              BCD_to_PackedBCD (&data8u_array[0], (uint8_t *)&SCU_param.serial[0], MAX_SERIAL_LENGTH);
                   
               if ((data8u_array[0] == 0xFF) && (data8u_array[2] == 0xFF) && (data8u_array[2] == 0xFF) && (data8u_array[3] == 0xFF))
               {
                 for (i=0; i <4; i++)
                     data8u_array[i] = gsy_rx_array[(i + 4)];                
 
-                // Converto from PAcked BCD (2cipher in a byte) to BCD
-                PackedBCD_to_BCD (&temp[0], &data8u_array[0], MAX_SERIAL_LENGTH);
+                // Convert from Packed BCD (2cipher in a byte) to BCD
+                PackedBCD_to_BCD (&temp[0], &data8u_array[0], MAX_SERIAL_LENGTH/2);
                                 
-                SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, (uint8_t *)&temp, MAX_SERIAL_LENGTH);   /* ex SERNUM_BYTE0_EADD */
+                SCU_Param_Set ((uint8_t *)&SCU_param.serial, (uint8_t *)&temp, MAX_SERIAL_LENGTH);   /* ex SERNUM_BYTE0_EADD */
               }
             
               for (i=0; i <4; i++)
@@ -1072,8 +1061,7 @@ switch (GSY_RECEIVED_CMD)
         {
         if (GSY_RECEIVED_LEN == 3)
             {
-            // xx eeprom_param_get(SERNUM_BYTE0_EADD, data8u_array, 4);            
-            BCD_to_PackedBCD ((uint8_t *)&data8u_array[0], (uint8_t *)&infoStation.serial, MAX_SERIAL_LENGTH);
+            BCD_to_PackedBCD ((uint8_t *)&data8u_array[0], (uint8_t *)&SCU_param.serial, MAX_SERIAL_LENGTH);
 
             for (i=0; i <4; i++)
                 gsy_tx_array[(i + 4)] = data8u_array[i];
@@ -1096,20 +1084,19 @@ switch (GSY_RECEIVED_CMD)
         if (GSY_RECEIVED_LEN == 8)
             {
             data8u = gsy_rx_array[4];
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.socketType, &data8u, 1);    /* ex SOCKET_TYPE_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.socketType, &data8u, 1);    /* ex SOCKET_TYPE_EADD */
             gsy_tx_array[4] = data8u;
             
             if ((data8u & (LID_OPEN_IN_CHARGE | LID_CLOSE_IN_CHARGE)) == 0)  // presa senza coperchio
                 {
-                // xx eeprom_param_get(CONTROL_BYTE0_EADD, &data8u, 1);
-                data8u = infoStation.controlByte.Byte.Byte0;
+                data8u = SCU_param.controlByte.Byte.Byte0;
                 data8u &=~ LID_CRL0;
-                SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte0, &data8u, 1);           /* ex CONTROL_BYTE0_EADD */
+                SCU_Param_Set ((uint8_t *)&SCU_param.controlByte.Byte.Byte0, &data8u, 1);           /* ex CONTROL_BYTE0_EADD */
                 evs_error_control(&data8u, CONTROL_BYTE0_EADD, 1);
                 }
 
             data8u = gsy_rx_array[5];
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.emTypeInt, &data8u, 1);      /* ex EMETER_INT_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.emTypeInt, &data8u, 1);      /* ex EMETER_INT_EADD */
             if (data8u <= EMETER_TAMP)
                 {
                 evs_error_set(CONTROL_BYTE_1, EMETER_INT_ANOM1, 0);
@@ -1126,7 +1113,7 @@ switch (GSY_RECEIVED_CMD)
             else if (data8u < (uint8_t)(EVS_CURRENT_MIN / 10))
                 data8u = (uint8_t)(EVS_CURRENT_MIN / 10);
 
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.max_current, &data8u, 1);   /* ex M3T_CURRENT_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.max_current, &data8u, 1);   /* ex M3T_CURRENT_EADD */
             gsy_tx_array[6] = data8u;
             
             data8u = gsy_rx_array[7];
@@ -1138,13 +1125,12 @@ switch (GSY_RECEIVED_CMD)
             else if (data8u < (uint8_t)(EVS_CURRENT_MIN / 10))
                 data8u = (uint8_t)(EVS_CURRENT_MIN / 10);
 
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.max_currentSemp, &data8u, 1);   /* ex M3S_CURRENT_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.max_currentSemp, &data8u, 1);   /* ex M3S_CURRENT_EADD */
             gsy_tx_array[7] = data8u;
             
             data8u = gsy_rx_array[8];
-            // xx eeprom_param_get(BATTERY_CONFIG_EADD, &i, 1); // get current battery backup status
-            i = infoStation.batteryConfig;
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.batteryConfig, &data8u, 1);    /* ex BATTERY_CONFIG_EADD */
+            i = SCU_param.batteryConfig;
+            SCU_Param_Set ((uint8_t *)&SCU_param.batteryConfig, &data8u, 1);    /* ex BATTERY_CONFIG_EADD */
             gsy_tx_array[8] = data8u;
             if (data8u == 1)  // funzione di backup temporaneo attivato
                 {
@@ -1173,16 +1159,11 @@ switch (GSY_RECEIVED_CMD)
         {
         if (GSY_RECEIVED_LEN == 3)
             {
-            // xx eeprom_param_get(SOCKET_TYPE_EADD, &gsy_tx_array[4], 1);
-            gsy_tx_array[4] = infoStation.socketType;  
-            // xx eeprom_param_get(EMETER_INT_EADD, &gsy_tx_array[5], 1);
-            gsy_tx_array[5] = infoStation.emTypeInt;
-            // xx eeprom_param_get(M3T_CURRENT_EADD, &gsy_tx_array[6], 1);
-            gsy_tx_array[6] = infoStation.max_current;
-            // xx eeprom_param_get(M3S_CURRENT_EADD, &gsy_tx_array[7], 1);
-            gsy_tx_array[7] = infoStation.max_currentSemp;
-            // xx eeprom_param_get(BATTERY_CONFIG_EADD, &gsy_tx_array[8], 1);
-            gsy_tx_array[8] = infoStation.batteryConfig;
+            gsy_tx_array[4] = SCU_param.socketType;  
+            gsy_tx_array[5] = SCU_param.emTypeInt;
+            gsy_tx_array[6] = SCU_param.max_current;
+            gsy_tx_array[7] = SCU_param.max_currentSemp;
+            gsy_tx_array[8] = SCU_param.batteryConfig;
             GSY_REPLY_LEN += 5;
             }
         }
@@ -1241,15 +1222,13 @@ switch (GSY_RECEIVED_CMD)
         if (GSY_RECEIVED_LEN == 6)
             {
             evs_control_save();
-            // xx eeprom_param_get(CONTROL_BYTE2_EADD, &data8u, 1);
-
             for (i=0; i<3; i++)
                 data8u_array[i] = gsy_rx_array[(4 + i)];
 
-            data8u_array[2] = (data8u_array[2] & (~EMETER_EXT_CRL2)) | (infoStation.controlByte.Byte.Byte2 & EMETER_EXT_CRL2);      // GSY non gestisce l'abilitazione (Fixed ticket SCU-86)
-            data8u_array[2] = (data8u_array[2] & (~SINAPSI_CHN2_CRL2)) | (infoStation.controlByte.Byte.Byte2 & SINAPSI_CHN2_CRL2);  // GSY non gestisce l'abilitazione SINAPSI (Fixed ticket SCU-86)
+            data8u_array[2] = (data8u_array[2] & (~EMETER_EXT_CRL2)) | (SCU_param.controlByte.Byte.Byte2 & EMETER_EXT_CRL2);      // GSY non gestisce l'abilitazione (Fixed ticket SCU-86)
+            data8u_array[2] = (data8u_array[2] & (~SINAPSI_CHN2_CRL2)) | (SCU_param.controlByte.Byte.Byte2 & SINAPSI_CHN2_CRL2);  // GSY non gestisce l'abilitazione SINAPSI (Fixed ticket SCU-86)
             
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Word, data8u_array, CONTROL_BYTE_NUM);  /* ex CONTROL_BYTE0_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.controlByte.Word, data8u_array, CONTROL_BYTE_NUM);  /* ex CONTROL_BYTE0_EADD */
             
             if ((rfid_state_get() == RFID_ERROR) && (data8u_array[1] & MIFARE_CRL1))
                 send_to_rfid(RFID_CONTROL_UPDATE);
@@ -1271,10 +1250,9 @@ switch (GSY_RECEIVED_CMD)
         {
         if (GSY_RECEIVED_LEN == 3)
             {
-            // xx eeprom_param_get(CONTROL_BYTE0_EADD, data8u_array, CONTROL_BYTE_NUM);
-            data8u_array[0] = infoStation.controlByte.Byte.Byte0;  
-            data8u_array[1] = infoStation.controlByte.Byte.Byte1;  
-            data8u_array[2] = infoStation.controlByte.Byte.Byte2;
+            data8u_array[0] = SCU_param.controlByte.Byte.Byte0;  
+            data8u_array[1] = SCU_param.controlByte.Byte.Byte1;  
+            data8u_array[2] = SCU_param.controlByte.Byte.Byte2;
             data8u_array[2] &=~ EMETER_EXT_CRL2;  // GSY non gestisce l'abilitazione
 
             for (i=0; i<3; i++)
@@ -1290,7 +1268,7 @@ switch (GSY_RECEIVED_CMD)
         if (GSY_RECEIVED_LEN == 4)
             {
             data8u = gsy_rx_array[4];
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.actuators, &data8u, 1);   /* ex ACTUATORS_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.actuators, &data8u, 1);   /* ex ACTUATORS_EADD */
             gsy_tx_array[4] = data8u;
             GSY_REPLY_LEN += 1;
             }
@@ -1301,8 +1279,7 @@ switch (GSY_RECEIVED_CMD)
         {
         if (GSY_RECEIVED_LEN == 3)
             {
-            // xx eeprom_param_get(ACTUATORS_EADD, &gsy_tx_array[4], 1); 
-            gsy_tx_array[4] = infoStation.actuators;  
+            gsy_tx_array[4] = SCU_param.actuators;  
             GSY_REPLY_LEN += 1;
             }     
         }
@@ -1520,24 +1497,22 @@ switch (GSY_RECEIVED_CMD)
         {
         if (GSY_RECEIVED_LEN == 8)
             {
-            // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &data8u, 1);
-            data8u = infoStation.Hidden_Menu.Enabled;
+            data8u = SCU_param.Hidden_Menu.Enabled;
             if (gsy_rx_array[4] == 1)
                 {
                 data8u |= HIDDEN_MENU_PMNG_ENB;
-                SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &data8u, 1);   /* ex HIDDEN_MENU_ENB_EADD */
-                // xx eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data8u, 1);
-                data8u = infoStation.Hidden_Menu.Visible;
+                SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Enabled, &data8u, 1);   /* ex HIDDEN_MENU_ENB_EADD */
+                data8u = SCU_param.Hidden_Menu.Visible;
                 data8u |= HIDDEN_MENU_PMNG_VIS;
-                SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, &data8u, 1);   /* ex HIDDEN_MENU_VIS_EADD */
+                SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Visible, &data8u, 1);   /* ex HIDDEN_MENU_VIS_EADD */
                 }
             else
                 {
                 data8u &=~ HIDDEN_MENU_PMNG_ENB;
-                SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &data8u, 1);   /* ex HIDDEN_MENU_ENB_EADD */
+                SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Enabled, &data8u, 1);   /* ex HIDDEN_MENU_ENB_EADD */
                 }
 
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge.Mode, &gsy_rx_array[5], 1);   /* ex TCHARGE_MODE_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.TCharge.Mode, &gsy_rx_array[5], 1);   /* ex TCHARGE_MODE_EADD */
             gsy_tx_array[4] = gsy_rx_array[4];
             gsy_tx_array[5] = gsy_rx_array[5];
             gsy_tx_array[6] = 0x00;
@@ -1553,13 +1528,10 @@ switch (GSY_RECEIVED_CMD)
         {
         if (GSY_RECEIVED_LEN == 3)
             {
-            //eeprom_param_get(PMNG_MODE_EADD, &gsy_tx_array[4], 1);
-            // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &data8u, 1);
-            data8u = infoStation.Hidden_Menu.Enabled;  
+            data8u = SCU_param.Hidden_Menu.Enabled;  
             data8u &= HIDDEN_MENU_PMNG_ENB;
             gsy_tx_array[4] = data8u;
-            // xx eeprom_param_get(TCHARGE_MODE_EADD, &gsy_tx_array[5], 1);
-            gsy_tx_array[5] = infoStation.TCharge.Mode;
+            gsy_tx_array[5] = SCU_param.TCharge.Mode;
             gsy_tx_array[6] = 0x00;
             gsy_tx_array[7] = 0x00;
             gsy_tx_array[8] = 0x00;
@@ -1757,8 +1729,7 @@ void sendToSbcOnUart(uint16_t data)
 {
   uint8_t data8u;
 
-  // xx eeprom_param_get(RS485_ADD_EADD, &data8u, 1);
-  data8u = infoStation.rs485Address;
+  data8u = SCU_param.rs485Address;
   GSY_REPLY_STX = GSY_STX;                                        // set start
   GSY_REPLY_ADD = data8u;                                         // set RS-485 SCU address
   GSY_REPLY_LEN = 4;                                              // init reply len
@@ -1781,8 +1752,7 @@ void sendToSbcOnRS485(uint16_t data)
 {
   uint8_t data8u;
 
-  // xx eeprom_param_get(RS485_ADD_EADD, &data8u, 1);
-  data8u = infoStation.rs485Address;
+  data8u = SCU_param.rs485Address;
   GSY_REPLY_STX = GSY_STX;                                        // set start
   GSY_REPLY_ADD = data8u;                                         // set RS-485 SCU address
   GSY_REPLY_LEN = 4;                                              // init reply len

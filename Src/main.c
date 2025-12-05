@@ -97,7 +97,7 @@
 //#define REDUCE_CLOCK      1
 #define WAKEUP_ON_TIMEOUT 1
 //#define SPEAD_SPECTRUM    1 
-#define MPU_ON_INFOSTATION 1
+#define MPU_ON_SCU_PARAM 1
 
 #define   MIN_VIN_TO_WORK     ((uint16_t)10000)   /* min Vin value to start the program */
 #define   VIN_ATTENUATION     ((uint16_t)16)      /* Vin has in imput a 10 / 160 resistor partitor  */
@@ -544,7 +544,7 @@ HAL_RCC_MCOConfig(RCC_MCO1, RCC_MCO1SOURCE_LSE, RCC_MCODIV_1);
   HAL_GPIO_Init(LCD_PWR_GPIO_Port, &GPIO_InitStruct); 
 #endif
   
-#ifdef MPU_ON_INFOSTATION
+#ifdef MPU_ON_SCU_PARAM
   /* Set MPU regions */
   MPU_Config();
   MPU_AccessPermConfig();
@@ -2093,9 +2093,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
       
       /* Check command type: oldest or newest depending on the motor driver attached */
       
-      // xx eeprom_param_get(BLOCK_DIR_EADD, &block_polarity, 1);
-
-      switch (infoStation.blockDir & BLOCK_POLARITY_MASK)
+      switch (SCU_param.blockDir & BLOCK_POLARITY_MASK)
       {
         case 0:         /* newest one */
         
@@ -2450,7 +2448,6 @@ void vApplicationIdleHook (void)
   uint16_t      valVin;
   statusFlag_e  flagVbus; 
   uint8_t       status;
-  // xx uint8_t       socket_type;
 
 #ifdef HW_MP28947   
   // ONLY FOR DEBUG --> uint16_t      Key;
@@ -2616,8 +2613,7 @@ void vApplicationIdleHook (void)
         if (flag230 == BACKUP_FAIL_BOARD) 
         {
             /* set station V230 control from   CONTROL_BYTE1_EADD bit  VBUS_CRL1  */
-            // xx eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
-            flagVbus = (statusFlag_e) infoStation.controlByte.Byte.Byte1;
+            flagVbus = (statusFlag_e) SCU_param.controlByte.Byte.Byte1;
             flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
             if ((flagVbus == DISABLED) || (infoV230.statusV230 == V230_PRESENT))
             {
@@ -2727,8 +2723,7 @@ void vApplicationIdleHook (void)
             break;
 
           case EMRG_VBUS_DIS:
-            // xx eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
-            if (infoStation.socketType & EVS_TETHERED)   
+            if (SCU_param.socketType & EVS_TETHERED)   
             {
               valVin =  VIN_ATTENUATION * getADCmV(VIN_ADC_IN);
               if (valVin < MIN_VIN_TETHERED)
@@ -3304,8 +3299,7 @@ void checkStartSemSbcUartTask (void)
   if (infoV230.statusSBC485 == TASK_RS485_SBC_OFF)
   {
     infoV230.statusSBC485 = TASK_RS485_SBC_ON;
-    // xx eeprom_param_get(CONTROL_BYTE1_EADD, (uint8_t *)&flagVbus, 1);
-    flagVbus = (statusFlag_e) infoStation.controlByte.Byte.Byte1;
+    flagVbus = (statusFlag_e) SCU_param.controlByte.Byte.Byte1;
     flagVbus = (((uint8_t)flagVbus & (uint8_t)VBUS_CRL1) == (uint8_t)VBUS_CRL1) ? ENABLED : DISABLED;
 
     if ((infoV230.statusV230 == V230_PRESENT) || (flagVbus == DISABLED) || 
@@ -3433,7 +3427,7 @@ void startLcdTask (void)
   lowLevelLcdTaskHandle = osThreadNew(lowLevelLcdMngTask, NULL, &lowLevelLcdMngTask_attributes); 
 }
 
-#ifdef MPU_ON_INFOSTATION
+#ifdef MPU_ON_SCU_PARAM
 /**
   * @brief  Configures the main MPU regions.
   * @param  None
@@ -3448,7 +3442,7 @@ void MPU_Config(void)
 
   /* Configure RAM region as Region N 0, 512B of size and R/W region infoStatio ram */
   MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.BaseAddress = INFO_ADDR;
+  MPU_InitStruct.BaseAddress = SCU_PARAM_ADDR;
   MPU_InitStruct.Size = MPU_AREA_SIZE;
   MPU_InitStruct.AccessPermission = portMPU_REGION_READ_WRITE;
   MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;
@@ -3480,7 +3474,7 @@ void MPU_AccessPermConfig(void)
   HAL_MPU_Disable();
 
   MPU_InitStruct.Enable = MPU_REGION_ENABLE;
-  MPU_InitStruct.BaseAddress = INFO_ADDR;
+  MPU_InitStruct.BaseAddress = SCU_PARAM_ADDR;
   MPU_InitStruct.Size = MPU_AREA_SIZE;
   MPU_InitStruct.AccessPermission = portMPU_REGION_PRIVILEGED_READ_ONLY;
   MPU_InitStruct.IsBufferable = MPU_ACCESS_NOT_BUFFERABLE;

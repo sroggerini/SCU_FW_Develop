@@ -663,8 +663,7 @@ uint16_t                card_operation = ((uint16_t)(*(block_ptr + 1)) << 8) + *
 
 if (card_operation == 0xFFFF)                                   // aggiorna white list
     {
-    // xx eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
-    uid_map_num = infoStation.persUidNum;
+    uid_map_num = SCU_param.persUidNum;
     pers_wlist_update_set(&pers_state);
     send_to_lcd(LCD_UPDATE_WLIST);
     }
@@ -692,7 +691,7 @@ else if ((card_operation == 0x7007)                             // aggiorna data
             setDateTimeWithTimeZone((struct DataAndTime_t*)&locDateTime);
 
             data08u[0] = 1;
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.rtcValid, data08u, 1);       /* ex RTC_VALID_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.rtcValid, data08u, 1);       /* ex RTC_VALID_EADD */
             }
 
         if (card_operation == 0x7008)
@@ -701,80 +700,67 @@ else if ((card_operation == 0x7007)                             // aggiorna data
 
             lcd_language_config(block_ptr);
 
-            // xx eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data08u[1], 1);
-            data08u[1] = infoStation.Hidden_Menu.Visible;
-            // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &data08u[0], 1);
-            data08u[0] = infoStation.Hidden_Menu.Enabled;
+            data08u[1] = SCU_param.Hidden_Menu.Visible;
+            data08u[0] = SCU_param.Hidden_Menu.Enabled;
 
             if (*(block_ptr + 5) & 0x01)
                 {
                 data08u[0] |= HIDDEN_MENU_PMNG_ENB;
                 data08u[1] |= HIDDEN_MENU_PMNG_VIS;
                 data08u[2] = PMNG_FULL;
-                SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, &data08u[2], 1);       /* ex PMNG_MODE_EADD */
+                SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Mode, &data08u[2], 1);       /* ex PMNG_MODE_EADD */
                 }
             else
                 data08u[0] &=~ HIDDEN_MENU_PMNG_ENB;
 
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &data08u[0], 1);           /* ex HIDDEN_MENU_ENB_EADD */
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[1], 1);           /* ex HIDDEN_MENU_VIS_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Enabled, &data08u[0], 1);           /* ex HIDDEN_MENU_ENB_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Visible, &data08u[1], 1);           /* ex HIDDEN_MENU_VIS_EADD */
 
             if (*(block_ptr + 5) & 0x02)
                 data08u[0] = PMNG_UNBAL_ON;
             else
                 data08u[0] = PMNG_UNBAL_OFF;
 
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, data08u, 1);       /* ex PMNG_UNBAL_EADD */
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, data08u, 1);       /* ex CONTROL_BYTE2_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Unbal, data08u, 1);       /* ex PMNG_UNBAL_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.controlByte.Byte.Byte2, data08u, 1);       /* ex CONTROL_BYTE2_EADD */
 
             if (*(block_ptr + 5) & 0x10)
                 data08u[0] |= (EMETER_EXT_CRL2 | SINAPSI_CHN2_CRL2);
             else
                 data08u[0] &=~ (EMETER_EXT_CRL2 | SINAPSI_CHN2_CRL2);
 
-            //eeprom_param_get(PMNG_MODE_EADD, &data08u[1], 1);
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[2], 1);   /* ex HIDDEN_MENU_VIS_EADD */
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &data08u[1], 1);   /* ex HIDDEN_MENU_ENB_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Visible, &data08u[2], 1);   /* ex HIDDEN_MENU_VIS_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Enabled, &data08u[1], 1);   /* ex HIDDEN_MENU_ENB_EADD */
             
             if (data08u[1] == 1)
                 {
                 data08u[1] |= HIDDEN_MENU_PMNG_ENB;
                 data08u[2] |= HIDDEN_MENU_PMNG_VIS;
                 data08u[3] = PMNG_FULL;
-                SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, &data08u[3], 1);       /* ex PMNG_MODE_EADD */
+                SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Mode, &data08u[3], 1);       /* ex PMNG_MODE_EADD */
                 }
             else
                 data08u[1] &=~ HIDDEN_MENU_PMNG_ENB;
             
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &data08u[1], 1);   /* ex HIDDEN_MENU_ENB_EADD */
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[2], 1);   /* ex HIDDEN_MENU_VIS_EADD */
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, data08u, 1);    /* ex CONTROL_BYTE2_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Enabled, &data08u[1], 1);   /* ex HIDDEN_MENU_ENB_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Visible, &data08u[2], 1);   /* ex HIDDEN_MENU_VIS_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.controlByte.Byte.Byte2, data08u, 1);    /* ex CONTROL_BYTE2_EADD */
             setPmEmexInModbus(data08u[0]);
 
             if (*(block_ptr + 5) & 0x20)
             {
-              // xx eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
-              data08u[0] = infoStation.Hidden_Menu.Visible;
+              data08u[0] = SCU_param.Hidden_Menu.Visible;
               data08u[0] |= HIDDEN_MENU_TMEG_VIS;
-              // xx eeprom_param_set(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
-              SCU_InfoStation_Set((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[0], 1);
-              
-              // Serve??? --> data08u[0] = 1;
-              // Serve??? --> WriteOnEeprom (HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              SCU_Param_Set((uint8_t *)&SCU_param.Hidden_Menu.Visible, &data08u[0], 1);
             }
             else
             {
-              // xx eeprom_param_get(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
-              data08u[0] = infoStation.Hidden_Menu.Visible;
+              data08u[0] = SCU_param.Hidden_Menu.Visible;
               data08u[0] &= (~HIDDEN_MENU_TMEG_VIS);
-              // xx eeprom_param_set(HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
-              SCU_InfoStation_Set((uint8_t *)&infoStation.Hidden_Menu.Visible, &data08u[0], 1);
-
-              // Serve??? --> data08u[0] = 0;
-              // Serve??? --> WriteOnEeprom (HIDDEN_MENU_VIS_EADD, &data08u[0], 1);
+              SCU_Param_Set((uint8_t *)&SCU_param.Hidden_Menu.Visible, &data08u[0], 1);
             }
 
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge.Mode, data08u, 1);       /* ex TCHARGE_MODE_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.TCharge.Mode, data08u, 1);       /* ex TCHARGE_MODE_EADD */
             
             if (*(block_ptr + 5) & 0x40)
             {
@@ -785,32 +771,32 @@ else if ((card_operation == 0x7007)                             // aggiorna data
                 data08u[0] = 0;
             }
 
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Trange, data08u, 1);       /* ex PMNG_TRANGE_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Trange, data08u, 1);       /* ex PMNG_TRANGE_EADD */
             
             data16u = ((((uint16_t)(*(block_ptr + 8)) << 8) + *(block_ptr + 7) + 50) / 100);
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Power, (uint8_t *)&data16u, 2);       /* ex PMNG_PWRLSB_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Power, (uint8_t *)&data16u, 2);       /* ex PMNG_PWRLSB_EADD */
               
 //            data08u[0] = ((*(block_ptr + 9) + 5) / 10);
             data08u[0] = *(block_ptr + 9);
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Current, data08u, 1);       /* ex PMNG_CURRENT_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Current, data08u, 1);       /* ex PMNG_CURRENT_EADD */
             
             data08u[0] = *(block_ptr + 10) - 1;
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Multip, data08u, 1);       /* ex PMNG_MULTIP_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Multip, data08u, 1);       /* ex PMNG_MULTIP_EADD */
 
             if (*(block_ptr + 11) <= 20)
                 data08u[0] = *(block_ptr + 11);
             else
                 data08u[0] = 20;
 
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Error, data08u, 1);       /* ex PMNG_ERROR_EADD */
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Dmax, (block_ptr + 12), 1);      /* ex PMNG_DMAX_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Error, data08u, 1);       /* ex PMNG_ERROR_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Dmax, (block_ptr + 12), 1);      /* ex PMNG_DMAX_EADD */
 
             if ((*(block_ptr + 13) > 0) && (*(block_ptr + 13) < 36))
                 data08u[0] = *(block_ptr + 13);
             else
                 data08u[0] = 2;
 
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge, data08u, 1);       /* ex TCHARGE_TIME_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.TCharge, data08u, 1);       /* ex TCHARGE_TIME_EADD */
 #ifdef CH_TIME_AUTO
             /* excluded by Nick 19/03/2023 */
             if (data08u[0] != 0)
@@ -1060,7 +1046,7 @@ else    // if (white_list_operation == UID_DELETE)
 // l'indirizzo eeprom si ricava dalla posizione del uid_map_bit-esimo bit nel uid_map_byte-esimo byte
 eadd = USER_UID_EEOFFSET + ((uint16_t)(uid_map_byte) * 8 * CARD_UID_DIM) + (uid_map_bit * CARD_UID_DIM);
 
-SCU_InfoStation_Set ((uint8_t *)&infoStation.persUidNum, &uid_map_num, 1);      /* ex PERS_UIDNUM_EADD */
+SCU_Param_Set ((uint8_t *)&SCU_param.persUidNum, &uid_map_num, 1);      /* ex PERS_UIDNUM_EADD */
 WriteOnEeprom(USER_MAP00_EADD, uid_map_array, USER_MAP_EEDIM);  /*  VERIFICARE SE CORRETTO oppure manca qlcs */
 WriteOnEeprom (eadd, uid_ptr, CARD_UID_DIM); /*  VERIFICARE SE CORRETTO oppure manca qlcs */
 }
@@ -1084,7 +1070,8 @@ uid_map_num = 0;;
 for (i=0; i<USER_MAP_EEDIM; i++)
     uid_map_array[i] = 0x00;
 
-WriteOnEeprom (PERS_UIDNUM_EADD, &uid_map_num, 1);
+// xx WriteOnEeprom (PERS_UIDNUM_EADD, &uid_map_num, 1);
+SCU_Param_Set ((uint8_t *)&SCU_param.persUidNum, (uint8_t *)&uid_map_num, 1);
 WriteOnEeprom (USER_MAP00_EADD, uid_map_array, USER_MAP_EEDIM);
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
@@ -1179,7 +1166,7 @@ static void pers_mode_set(evs_mode_en mode)
 {
 evs_mode_en pers_mode = mode;
 
-SCU_InfoStation_Set ((uint8_t*)&infoStation.evs_mode, (uint8_t*)(&pers_mode), 1);    /* ex EVS_MODE_EADD */
+SCU_Param_Set ((uint8_t*)&SCU_param.evs_mode, (uint8_t*)(&pers_mode), 1);    /* ex EVS_MODE_EADD */
 send_to_evs(EVS_AUTORIZATION_MODE);
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
@@ -1268,8 +1255,7 @@ if (uid_type == UID_MASTER)
 	}
 else    // if (uid_type == UID_USER)
     {
-    // xx eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
-    uid_map_num = infoStation.persUidNum;
+    uid_map_num = SCU_param.persUidNum;
     eeprom_uid_map_get(uid_map_array);
 
     if (uid_map_num < USER_UID_EENUM)
@@ -1304,11 +1290,9 @@ void manual_uid_factory(void)
 {
 uint8_t*    pBuff;
 
-// xx eeprom_param_get(PERS_MASTER_EADD, &master_card_reg, 1);
-master_card_reg = infoStation.persMaster;
+master_card_reg = SCU_param.persMaster;
 eeprom_master_uid_get(master_uid_array);
-// xx eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
-uid_map_num = infoStation.persUidNum;
+uid_map_num = SCU_param.persUidNum;
 eeprom_uid_map_get(uid_map_array);
 
 if (master_card_reg & 0x01)
@@ -1368,8 +1352,7 @@ evs_mode_en     pers_mode;
 new_uid = new_uid_array;
 new_block = new_block_array;
 
-// xx eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&pers_mode), 1);
-pers_mode = infoStation.evs_mode;
+pers_mode = SCU_param.evs_mode;
 
 pers_event_save(pMsg);
 
@@ -1402,10 +1385,8 @@ switch (pers_state)
         {
         if (pMsg->PersMngEvent == PERS_START)
             {
-            // xx eeprom_param_get(PERS_MASTER_EADD, &master_card_reg, 1);
-            master_card_reg = infoStation.persMaster;
-            // xx eeprom_param_get(PERS_UIDNUM_EADD, &uid_map_num, 1);
-            uid_map_num = infoStation.persUidNum;
+            master_card_reg = SCU_param.persMaster;
+            uid_map_num = SCU_param.persUidNum;
             if (master_card_reg & 0x01)
                 eeprom_master_uid_get(master_uid_array);
             else

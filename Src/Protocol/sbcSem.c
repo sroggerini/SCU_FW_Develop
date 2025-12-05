@@ -119,18 +119,6 @@ static const socketPresence_t Default_Socket_Presence = {.chainPresence = 0, .li
                                                         { 1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15, 16,
                                                          17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}, 
                                                         .assignedDeviceId = 0};
-#ifdef NON_SERVE
-/* define a fixed structure where to find the configuration parameters */
-static const allConfPar_st allConfParDef = {
-  (uint16_t)0x0,
-  {(uint32_t)START_EE_ADDRES,             (uint32_t)EEPROM_PARAM_NUM},
-  {(uint32_t)SCU_GENERAL_INFO_EE_ADDRES,  (uint32_t)sizeof(infoStation_t)},
-  {(uint32_t)EDATA_BKP_SCU_EE_ADDRESS,    (uint32_t)sizeof(infoStation_t)},
-  {(uint32_t)PRD_CODE_EE_ADDRES,          (uint32_t)(END_SN_EE_ADDRES - PRD_CODE_EE_ADDRES + 1)},
-  {(uint32_t)EDATA_DEFAULT_ID_CODES,      (uint32_t)(PRODUCT_SN_LENGTH + PRODUCT_CODE_LENGTH + FAKE_CODE_LENGTH)},
-  (uint32_t)0
-};
-#endif                                                    
 
 /* Definitions for SCB (SEM) modbus upgrade register Task   */
 const osThreadAttr_t pollingSlaveTask_attributes = {
@@ -1985,12 +1973,10 @@ void Actuators_Mdb_to_Eeprom_Translate (uint8_t *ptr)
   }
 
   /* Save Backup flag in eeprom (for webUI http )*/
-  // xx eeprom_array_set(BATTERY_CONFIG_EADD, (uint8_t*)&tmp1, 1);    
-  SCU_InfoStation_Set ((uint8_t *)&infoStation.batteryConfig, (uint8_t*)&tmp1, 1);  /* ex BATTERY_CONFIG_EADD */
+  SCU_Param_Set ((uint8_t *)&SCU_param.batteryConfig, (uint8_t*)&tmp1, 1);  /* ex BATTERY_CONFIG_EADD */
     
   /* Get LCD_TYPE address from eeprom, where WIFI_ON is saved */
-  // xx eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&tmp1, 1);
-  tmp1 = infoStation.LcdType;
+  tmp1 = SCU_param.LcdType;
     
   /* Check if WIFI must be enabled or not */
   if((*ptr & ACT_WIFI) == ACT_WIFI)
@@ -2001,7 +1987,7 @@ void Actuators_Mdb_to_Eeprom_Translate (uint8_t *ptr)
   /* Save new configuration */
   
   /*** SAVE ON EEPROM ***/   
-  SCU_InfoStation_Set ((uint8_t *)&infoStation.LcdType, (uint8_t *)&tmp1, 1);  /* ex LCD_TYPE_EADD */
+  SCU_Param_Set ((uint8_t *)&SCU_param.LcdType, (uint8_t *)&tmp1, 1);  /* ex LCD_TYPE_EADD */
   
   /* Get configuration of hw check2 from modbus */ 
   /* P.S --> PAUT in modbus map is inside hw checks settings */
@@ -2039,8 +2025,7 @@ void HW_CHECKS_ACTUATORS_EEprom_Save (uint16_t rAddr)
   {
     case ADDR_HW_CHECKS1_RW:                    /* Prepare HW_CHECK1_RW */
         /* Get configuration from eeprom */
-        // xx eeprom_param_get(CONTROL_BYTE0_EADD, &HwCheckTmp, 1);
-        HwCheckTmp = infoStation.controlByte.Byte.Byte0;
+        HwCheckTmp = SCU_param.controlByte.Byte.Byte0;
         /* bit 4 and 5 have a different codification between Modbus map and Eeprom: BLE and WiFi in modbus, 
            REMOTE and PULS in GSY and WebUI ???) */
         /* Configuration from EEprom --> Consider bit 4 and 5, used for REMOTE and PULS */
@@ -2062,7 +2047,7 @@ void HW_CHECKS_ACTUATORS_EEprom_Save (uint16_t rAddr)
         temp8 = (hwCheck & HGTP_CRL2) >> HGTP_CRL2_bit_pos;        
         
         /*** SAVE ON EEPROM ***/                   
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.LcdType, &temp8, 1);  /* ex TEMP_CTRL_ENB_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.LcdType, &temp8, 1);  /* ex TEMP_CTRL_ENB_EADD */
       break;
       
     case ADDR_HW_ACTUATORS_RW:                /* Prepare HW_ACTUATORS_RW */
@@ -2072,8 +2057,8 @@ void HW_CHECKS_ACTUATORS_EEprom_Save (uint16_t rAddr)
         Actuators_Mdb_to_Eeprom_Translate (&temp[4]);  
         /* Write settings into eeprom */
         /*** SAVE ON EEPROM ***/           
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Word, (uint8_t *)temp, 4);   /* ex CONTROL_BYTE0_EADD */                                  
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.actuators, (uint8_t *)temp[4], 1);   /* ex ACTUATORS_EADD */                                  
+        SCU_Param_Set ((uint8_t *)&SCU_param.controlByte.Word, (uint8_t *)temp, 4);   /* ex CONTROL_BYTE0_EADD */                                  
+        SCU_Param_Set ((uint8_t *)&SCU_param.actuators, (uint8_t *)temp[4], 1);   /* ex ACTUATORS_EADD */                                  
 
         collaudoFlag = getCollaudoRunning();
         /* reset immediato  */
@@ -2116,8 +2101,7 @@ void HW_PRESENCE_FLAG_EEprom_Save (void)
    */
    
    temp16 = getHwFlags();
-   // xx eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&HwFlagsEeprom, 1);
-   HwFlagsEeprom = infoStation.LcdType;
+   HwFlagsEeprom = SCU_param.LcdType;
    /* Check Display LCD presence */
    if ((temp16 & DISPLAY_LCD_FLAG) == DISPLAY_LCD_FLAG)
      HwFlagsEeprom |= LCD_2X20;
@@ -2135,7 +2119,7 @@ void HW_PRESENCE_FLAG_EEprom_Save (void)
      HwFlagsEeprom &= ~DIRI_ON;                
    /* Write settings into eeprom */   
    /*** SAVE ON EEPROM ***/   
-   SCU_InfoStation_Set ((uint8_t *)&infoStation.LcdType, (uint8_t *)&HwFlagsEeprom, 1);   /* ex LCD_TYPE_EADD */
+   SCU_Param_Set ((uint8_t *)&SCU_param.LcdType, (uint8_t *)&HwFlagsEeprom, 1);   /* ex LCD_TYPE_EADD */
 }
 
 /**
@@ -2234,7 +2218,7 @@ static void semUpdateConfig(frameSbcSem_st* pMsg)
           temp[0] = (uint8_t)EVS_MODE_AVAILABLE;
           
           /*** SAVE ON EEPROM ***/
-          SCU_InfoStation_Set ((uint8_t *)&infoStation.socketEnable, (uint8_t*)temp, 1);  /* ex SOCKET_ENABLE_EADD */
+          SCU_Param_Set ((uint8_t *)&SCU_param.socketEnable, (uint8_t*)temp, 1);  /* ex SOCKET_ENABLE_EADD */
           
           evs_reserved_set(0);
           
@@ -2245,14 +2229,12 @@ static void semUpdateConfig(frameSbcSem_st* pMsg)
           temp[0] = (uint8_t)EVS_MODE_UNAVAILABLE;
           
           /*** SAVE ON EEPROM ***/
-          SCU_InfoStation_Set ((uint8_t *)&infoStation.socketEnable, (uint8_t*)temp, 1);  /* ex SOCKET_ENABLE_EADD */
+          SCU_Param_Set ((uint8_t *)&SCU_param.socketEnable, (uint8_t*)temp, 1);  /* ex SOCKET_ENABLE_EADD */
                         
           send_to_evs(EVS_AUTORIZATION_MODE);
         }
         else if (temp16 == (uint16_t)MODE_RESERVED)
         {
-//          temp[0] = (uint8_t)EVS_MODE_AVAILABLE | (uint8_t)EVS_MODE_RESERVED;
-//          eeprom_param_set(SOCKET_ENABLE_EADD, (uint8_t*)temp, 1);
           evs_reserved_set(1);
           send_to_evs(EVS_AUTORIZATION_MODE);
         }
@@ -2281,7 +2263,7 @@ static void semUpdateConfig(frameSbcSem_st* pMsg)
           {
             /* set the current operative mode                       */            
             /*** SAVE ON EEPROM ***/
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.evs_mode, (uint8_t*)&temp[0], 1);   /* ex EVS_MODE_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.evs_mode, (uint8_t*)&temp[0], 1);   /* ex EVS_MODE_EADD */
                           
             send_to_evs(EVS_AUTORIZATION_MODE);
           }
@@ -2291,7 +2273,7 @@ static void semUpdateConfig(frameSbcSem_st* pMsg)
           temp[0] = (char)EVS_OCPP_MODE;
           /* set OCPP = 3 as current operative mode                       */          
           /*** SAVE ON EEPROM ***/
-          SCU_InfoStation_Set ((uint8_t *)&infoStation.evs_mode, (uint8_t*)&temp[0], 1);                    /* ex EVS_MODE_EADD */
+          SCU_Param_Set ((uint8_t *)&SCU_param.evs_mode, (uint8_t*)&temp[0], 1);                    /* ex EVS_MODE_EADD */
           send_to_evs(EVS_AUTORIZATION_MODE);
         }        
         
@@ -2327,7 +2309,7 @@ static void semUpdateConfig(frameSbcSem_st* pMsg)
         temp16 = getMaxTypicalCurrent();
         /* Store into eeprom location */        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.max_current, (uint8_t*)&temp16, 1);         /* ex M3T_CURRENT_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.max_current, (uint8_t*)&temp16, 1);         /* ex M3T_CURRENT_EADD */
         break;
         
       case ADDR_MAX_SIMPLIFIED_CURRENT_RW:
@@ -2335,7 +2317,7 @@ static void semUpdateConfig(frameSbcSem_st* pMsg)
         temp16 = getMaxSimplifiedCurrent();
         /* Store into eeprom location */        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.max_currentSemp, (uint8_t*)&temp16, 1);         /* ex M3S_CURRENT_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.max_currentSemp, (uint8_t*)&temp16, 1);         /* ex M3S_CURRENT_EADD */
         break;
         
       case ADDR_PM_MODE_RW:
@@ -2354,7 +2336,7 @@ static void semUpdateConfig(frameSbcSem_st* pMsg)
         temp16 = getPmMenuVisibility();
         /* Store into eeprom location */        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Visible, (uint8_t*)&temp16, 1);   /* ex HIDDEN_MENU_VIS_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Visible, (uint8_t*)&temp16, 1);   /* ex HIDDEN_MENU_VIS_EADD */
         break;
        
     case ADDR_CHARGE_TIME_RW:
@@ -2362,7 +2344,7 @@ static void semUpdateConfig(frameSbcSem_st* pMsg)
         temp16 = getChargeByTime();
         /* Store into eeprom location */        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.TCharge.Time, (uint8_t*)&temp16, 1);         /* ex TCHARGE_TIME_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.TCharge.Time, (uint8_t*)&temp16, 1);         /* ex TCHARGE_TIME_EADD */
         break;
         
     case ADDR_CHARGE_MAX_ENERGY_RW:
@@ -2370,7 +2352,7 @@ static void semUpdateConfig(frameSbcSem_st* pMsg)
         temp16 = getChargeByEnergy();
         /* Store into eeprom location */        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Energy_limit, (uint8_t*)&temp16, 1);         /* ex ENRG_LIMIT_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Energy_limit, (uint8_t*)&temp16, 1);         /* ex ENRG_LIMIT_EADD */
         break;        
                 
     case ADDR_CONNECTOR_IDS_RW:
@@ -2972,10 +2954,8 @@ static void sbcSemTimCallBack (TimerHandle_t pxTimer)
             {
               tPrintf("Assigned address %d\n\r", result);
               /* a new address must be set */
-              // xx eeprom_array_set(RS485_ADD_EADD, (uint8_t*)&result, 1);
-              SCU_InfoStation_Set ((uint8_t *)&infoStation.rs485Address, (uint8_t*)&result, 1);   /* ex RS485_ADD_EADD */
+              SCU_Param_Set ((uint8_t *)&SCU_param.rs485Address, (uint8_t*)&result, 1);   /* ex RS485_ADD_EADD */
               /* Send event to update eeprom */
-              // send_to_eeprom(EEPROM_UPDATE); 
               /* Restart with new RS485 address */
               activeImmediateReset();
             }
@@ -3225,11 +3205,7 @@ void setCurrentDateTimeInSem(void)
   pRwRegs = getRwMdbRegs(mdbAddr);
   
   /* Get timezone saved in eeprom */
-  // xx eeprom_param_get(TIME_ZONE_EADD, (uint8_t*)&timezone, 1);
-  timezone = infoStation.Time_Settings.TimeZone;
-    
-  /* Get dst flag saved in eeprom */
-  // xx eeprom_param_get(DST_EADD, (uint8_t*)&dst, 1);
+  timezone = SCU_param.Time_Settings.TimeZone;  
   
   pRwRegs->scuSetRegister.rtcInf[0] = pTimeinfo->tm_sec;
   pRwRegs->scuSetRegister.rtcInf[2] = pTimeinfo->tm_min;
@@ -3241,7 +3217,7 @@ void setCurrentDateTimeInSem(void)
   pRwRegs->scuSetRegister.rtcInf[12] = pTimeinfo->tm_wday;
   pRwRegs->scuSetRegister.rtcInf[13] = (pTimeinfo->tm_yday & 0xFF);          /* Fixed ticket SCU-113 */
   pRwRegs->scuSetRegister.rtcInf[14] = (pTimeinfo->tm_yday & 0xFF00) >> 8;   /* Fixed ticket SCU-113 */
-  pRwRegs->scuSetRegister.rtcInf[16] = infoStation.Time_Settings.dst;
+  pRwRegs->scuSetRegister.rtcInf[16] = SCU_param.Time_Settings.dst;
   
   pRwRegs->scuSetRegister.rtcTimeZone = timezone * 60;
 
@@ -3573,10 +3549,7 @@ void resetCommandRemote (void)
 ****************************************************************/
 static uint8_t  getSktNumInFakeCode(void) 
 {
-  // uint8_t connNum;
-  // eeprom_param_get(CONNECTOR_NUMBER_EADD, (uint8_t *)&connNum, 1);
-  // return (connNum);
-  return (infoStation.connectorNumber);
+  return (SCU_param.connectorNumber);
 }
 
 /**
@@ -3624,8 +3597,7 @@ uint8_t  getIdNumberForLcd(void)
   else
   {
     /* get SCU address        */
-    // eeprom_param_get(RS485_ADD_EADD, (uint8_t *)&idLcd, 1);
-    idLcd = infoStation.rs485Address + 1;
+    idLcd = SCU_param.rs485Address + 1;
   }
   return(idLcd);
 }
@@ -3680,8 +3652,7 @@ void  setDevAlias (void)
     pRwRegs->scuSetRegister.devAlias = socketPresence.matrixIdConn[idDev]; 
     numberOnLcd = (uint8_t)pRwRegs->scuSetRegister.devAlias;
 
-    // xx eeprom_param_get(RS485_ADD_EADD, &mdbAddr, 1);
-    mdbAddr = infoStation.rs485Address;
+    mdbAddr = SCU_param.rs485Address;
     
     if (mdbAddr == (SCU_S_REPL_ADDR - 1))
     {
@@ -3813,8 +3784,7 @@ static uint8_t  checkAssignNewAddress(frameSbcSem_st* pMsg)
       socketPresence.matrixIdConn[idLogic] = idLogic + 1;   // update matrix idConn: default is device id + 1 (number on LCD)
 
       /* a new address must be set */
-      // xx eeprom_array_set(RS485_ADD_EADD, (uint8_t*)&modbusAddr, 1);      
-      if (SCU_InfoStation_Set ((uint8_t *)&infoStation.rs485Address, (uint8_t*)&modbusAddr, 1) == (uint8_t)osOK)    /* ex RS485_ADD_EADD */
+      if (SCU_Param_Set ((uint8_t *)&SCU_param.rs485Address, (uint8_t*)&modbusAddr, 1) == (uint8_t)osOK)    /* ex RS485_ADD_EADD */
       {
         /* it necessary to change current SCU modbus address */
         updateScuModbusAddrr();
@@ -4287,11 +4257,7 @@ static uint32_t remoteSuspRelProcess(frameRemote_st* pMsg)
 ****************************************************************/
 uint8_t getRemotePmFlag (void) 
 {
-  // uint8_t               pmng_enable;
-
-  // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);     // legge power management enable  
-  // if ((pmng_enable & HIDDEN_MENU_SEM_ENB) == 0) return(FALSE); else return(TRUE);
-  if (infoStation.Hidden_Menu.Enabled & HIDDEN_MENU_SEM_ENB)
+  if (SCU_param.Hidden_Menu.Enabled & HIDDEN_MENU_SEM_ENB)
     return(FALSE); 
   else 
     return(TRUE);
@@ -4848,15 +4814,12 @@ uint8_t getAndsendAllSlaveParameters(uint8_t idLogic)
 
   /*             Start to set logic SCU id [0..15]                                                                 */
   pConfPar->idLogicScu = (uint16_t)idLogic;
-  /*             Start to copy eeprom array area                                                                   */
+  /*             Copy SCU param          area                                                                   */
   /*             destination                                  source                           len                 */
-  memcpy((uint8_t *)pConfPar->confEepromParamArray, (uint8_t *)getEepromArray(), EEPROM_PARAM_NUM);                             
-  /*             Copy infostation           area                                                                   */
-  /*             destination                                  source                           len                 */
-  memcpy((uint8_t *)&pConfPar->confInfoStation, (uint8_t *)getStationName(), sizeof (infoStation_t));                             
-  /*             Copy backup infostation           area                                                            */
+  memcpy((uint8_t *)&pConfPar->conf_SCU_Param, (uint8_t *)getStationName(), sizeof (SCU_param_t));                             
+  /*             Copy backup SCU_param           area                                                            */
   /*                           data origin                         buffer destination                    len       */
-  result = ReadFromEeprom (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&pConfPar->confBackupInfoStation, sizeof (infoStation_t));     
+  result = ReadFromEeprom (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&pConfPar->conf_SCU_Param_BKP, sizeof (SCU_param_t));     
   /*             Copy product code    area                                                                         */
   /*                          data origin                         buffer destination                    len        */
   result |= ReadFromEeprom (PRD_CODE_EE_ADDRES, (uint8_t *)&pConfPar->confSerialCode, sizeof (pConfPar->confSerialCode));     

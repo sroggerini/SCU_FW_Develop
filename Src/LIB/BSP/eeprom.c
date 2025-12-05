@@ -48,7 +48,7 @@
 typedef enum // eeprom_param_array board default value [eeprom_param_board_val]
 {
 EDATA_VALID_EDEF    = (EDATA_DEFAULT_PRG),                                            // 0  - 
-EDATA_NUM_EDEF      = (EEPROM_PARAM_NUM),                                           // 1  - 
+// EDATA_NUM_EDEF      = (EEPROM_PARAM_NUM),                                           // 1  - 
 SERNUM_BYTE0_EDEF   = (uint8_t)(0xFF),                                              // 2  - 
 SERNUM_BYTE1_EDEF   = (uint8_t)(0xFF),                                              // 3  - 
 SERNUM_BYTE2_EDEF   = (uint8_t)(0xFF),                                              // 4  - 
@@ -182,7 +182,7 @@ static const uint8_t eeprom_param_master_Iso[EEPROM_PARAM_NUM] = {EDATA_VALID_ED
 /**************************** DEFAULT parameter set ************************************************/
 /***************************************************************************************************/
 
-static const infoStation_t infoStation_DEFAULT = {
+static const SCU_param_t SCU_param_DEFAULT = {
   
   .wiring			= PRESA_NESSUNA,
   .max_current			= VALUE_OF_TIPCURR,
@@ -272,7 +272,7 @@ static const infoStation_t infoStation_DEFAULT = {
 
 /************************** DEFAULT parameter set for SCU MASTER ISOLATED ************************************************/
 
-static const infoStation_t infoStation_DEFAULT_Iso = {
+static const SCU_param_t SCU_param_DEFAULT_Iso = {
   
   .wiring			= PRESA_NESSUNA,
   .max_current			= VALUE_OF_TIPCURR,
@@ -373,7 +373,6 @@ xQueueHandle EEpromMngQueue = NULL;
 static EEpromMngMsg_st        EEpromMngMsg;
 #endif
 
-static uint8_t                eeprom_param_array[EEPROM_PARAM_NUM];
 static uint8_t                eeprom_master_uid_array[CARD_UID_DIM];
 static uint8_t                eeprom_user_map_array[USER_MAP_EEDIM];
 static uint8_t                eeprom_user_uid_array[CARD_UID_DIM];
@@ -426,7 +425,7 @@ EEprom_BKP_Reg_Copy_st   EEprom_BKP_Reg_Copy;
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
 extern uint8_t                 scuAddr;
-extern infoStation_t           infoStation;
+extern SCU_param_t             SCU_param;
 extern appMapRwRegister_st     appMapRwRegister[SCU_NUM];
 extern socketPresence_t        socketPresence;
 
@@ -499,14 +498,13 @@ return eeprom_busy;
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 void eeprom_default_set(void)
 {
-  // xx WriteOnEeprom(EDATA_DEFAULT_EADD, eeprom_param_array, EEPROM_PARAM_NUM);
-  /* Insert here the default set for infoStation struct */
+  /* Insert here the default set for SCU_param struct */
   
   /* */
   WriteOnEeprom(EDATA_DEFAULT_SKT_PRESENCE, (uint8_t*)getDefSocketInfoPtr(), sizeof(socketPresence_t));
-  WriteOnEeprom(EDATA_DEFAULT_ID_CODES, (uint8_t*)infoStation.productSn, sizeof(infoStation.productSn));
-  WriteOnEeprom(EDATA_DEFAULT_ID_CODES + sizeof(infoStation.productSn), (uint8_t*)infoStation.productCode, sizeof(infoStation.productCode));
-  WriteOnEeprom(EDATA_DEFAULT_ID_CODES + sizeof(infoStation.productSn) + sizeof(infoStation.productCode), (uint8_t*)infoStation.fakeProductCode, sizeof(infoStation.fakeProductCode));
+  WriteOnEeprom(EDATA_DEFAULT_ID_CODES, (uint8_t*)SCU_param.productSn, sizeof(SCU_param.productSn));
+  WriteOnEeprom(EDATA_DEFAULT_ID_CODES + sizeof(SCU_param.productSn), (uint8_t*)SCU_param.productCode, sizeof(SCU_param.productCode));
+  WriteOnEeprom(EDATA_DEFAULT_ID_CODES + sizeof(SCU_param.productSn) + sizeof(SCU_param.productCode), (uint8_t*)SCU_param.fakeProductCode, sizeof(SCU_param.fakeProductCode));
   manual_uid_factory();
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
@@ -524,7 +522,8 @@ void eeprom_board_default(void)
 {
 uint8_t param = EDATA_BOARD_PRG;
 
-WriteOnEeprom(EDATA_VALID_EADD, &param, 1);
+// xx WriteOnEeprom(EDATA_VALID_EADD, &param, 1);
+SCU_Param_Set((uint8_t *)&SCU_param.key, &param, 1);
 
 TransactionRegister_clearAll();
 osDelay(100);
@@ -546,11 +545,9 @@ void Eeprom_Master_User_card_Force_Reset (void)           /* Fixed ticket SCU-76
 {
   uint8_t   Master_card_reg;          
   
-  // xx eeprom_param_get(PERS_MASTER_EADD, &Master_card_reg, 1);  
-  Master_card_reg = infoStation.persMaster;
+  Master_card_reg = SCU_param.persMaster;
   Master_card_reg &=~ (0x10 | 0x01);
-  // eeprom_param_array[PERS_MASTER_EADD] = Master_card_reg;
-  infoStation.persMaster = Master_card_reg;
+  memCpyInfoSt ((uint8_t*)&SCU_param.persMaster, (uint8_t *)&Master_card_reg, 1);
   WriteOnEeprom((EDATA_DEFAULT_EADD + PERS_MASTER_EADD), &Master_card_reg, 1);   
     
 }
@@ -616,18 +613,14 @@ if (SRAM_SCU_Check.BKP_Store)
   if (eadd < USER_MAP_EEOFFSET)
   {
     update_array = eeprom_master_uid_array;
-    // xx eeprom_update_field |= EEPROM_MASTER_UPDATE;
   }
   else if (eadd < USER_UID_EEOFFSET)
   {
     update_array = eeprom_user_map_array;
-    // xx eeprom_update_field |= EEPROM_USERMAP_UPDATE;
   }
   else
   {
     update_array = eeprom_user_uid_array;
-    // xx eeprom_user_uid_eadd = eadd;
-    // xx eeprom_update_field |= EEPROM_USERID_UPDATE;
   }
   
   for (i = 0; i < num; i++)
@@ -676,30 +669,6 @@ void eeprom_array_set(uint16_t eadd, uint8_t *src_ptr, uint8_t num)
 }
 #endif
 
-// ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
-
-// ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
-//  FUNCTION NAME:  eeprom_param_get
-//
-//  DESCRIPTION:    -
-//
-//  INPUT:          -
-//
-//  OUTPUT:         none
-// ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
-void eeprom_param_get(uint16_t eadd, uint8_t *dst_ptr, uint8_t num)
-{
-uint8_t i;
-
-  for (i=0; i<num; i++)
-  {
-      *(dst_ptr + i) = eeprom_param_array[(eadd + i)];
-  }
-#ifdef IGNORE_VBUS
-  if (eadd == CONTROL_BYTE1_EADD) *dst_ptr &= (~VBUS_CRL1);
-#endif
-}
-// ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 //  FUNCTION NAME:  eeprom_master_uid_get
@@ -752,20 +721,6 @@ ReadFromEeprom((USER_UID_EEOFFSET + uid_add), uid_ptr, CARD_UID_DIM);
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
-// ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
-//  FUNCTION NAME:  eeprom_ProductConfig_Param_Set
-//
-//  DESCRIPTION:    -
-//
-//  INPUT:          -
-//
-//  OUTPUT:         none
-// ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
-void eeprom_ProductConfig_Param_Set (void)
-{
-  WriteOnEeprom(EDATA_VALID_EADD, eeprom_param_array, EEPROM_PARAM_NUM);
-}
-
 
 /**
 *
@@ -800,9 +755,6 @@ static uint8_t rs485AutoAddress(void)
       }
     }
     setFlagHwInfo((RS485_ADD_SET | KEY_FOR_RS485_ADD), MASK_FOR_RS485_ADD_SET);
-    /* a new address must be set */
-    //eeprom_param_set(RS485_ADD_EADD, (uint8_t*)&addr, 1);
-    //WriteOnEeprom(RS485_ADD_EADD, (uint8_t*)&addr, 1);
   }
   return (addr);
 }
@@ -822,20 +774,20 @@ static uint8_t rs485AutoAddress(void)
 void BKP_SCU_Image_Store (void)
 {
     uint16_t ee_data;
-    /* Write infoStation data in BKP area */
-    WriteOnEeprom (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&infoStation, sizeof (infoStation_t));        
-    /* Write infoStation data in BKP area */
+    /* Write parameter data in BKP area */
+    WriteOnEeprom (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&SCU_param, sizeof (SCU_param_t));        
+    /* Write parameter data in BKP area */
     WriteOnEeprom (EDATA_BKP_SEM_EE_ADDRESS, (uint8_t *)&socketPresence, sizeof (socketPresence_t));                    
     /* Save scuAddr for SEM management */
     WriteOnEeprom(EDATA_BKP_RS485_ADDR_EE_ADDRESS, (uint8_t*)&scuAddr, 1);    
     /* Write signature */
     ee_data = EDATA_BKP_SCU_SIGNATURE;
-    WriteOnEeprom (EDATA_BKP_SCU_EE_ADDRESS + sizeof (infoStation_t), (uint8_t *)&ee_data, sizeof (uint16_t));    
+    WriteOnEeprom (EDATA_BKP_SCU_EE_ADDRESS + sizeof (SCU_param_t), (uint8_t *)&ee_data, sizeof (uint16_t));    
     SRAM_SCU_Check.BKP_Store = FALSE;
     
     tPrintf ("BKP image stored in eeprom\r\n");
     
-    EVLOG_Message (EV_INFO, "BKP image for infostation and SEM data stored in eeprom");      
+    EVLOG_Message (EV_INFO, "BKP image for parameters and SEM data stored in eeprom");      
     
 }
 
@@ -1014,7 +966,7 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
   
       /* clear energy value This is important for EM Scame */
       // xx eeprom_array_set(TOT_ENERGY0_EADD, (uint8_t*)&eeprom_param_board_val[TOT_ENERGY0_EADD], 4);
-      SCU_InfoStation_Set ((uint8_t *)&infoStation.TotalEnergy, (uint8_t*)&eeprom_param_board_val[TOT_ENERGY0_EADD], 4);   /* ex TOT_ENERGY0_EADD */
+      SCU_Param_Set ((uint8_t *)&infoStation.TotalEnergy, (uint8_t*)&eeprom_param_board_val[TOT_ENERGY0_EADD], 4);   /* ex TOT_ENERGY0_EADD */
       /* Store data in eeprom */
       WriteOnEeprom(EDATA_VALID_EADD, eeprom_param_array, EEPROM_PARAM_NUM);
   
@@ -1187,13 +1139,13 @@ osSemaphoreRelease(EEprom_semaphore);
 
 #else
 
-uint8_t EDATA_key, serial_tmp[MAX_SERIAL_LENGTH];
+uint8_t SCU_Param_key, serial_tmp[MAX_SERIAL_LENGTH];
 
 if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
 {
 
   /* Read key validity of parameter set */
-  if (ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES + (uint8_t)((uint32_t)&infoStation.key - (uint32_t)&infoStation), (uint8_t*)&EDATA_key, 1) != osOK)
+  if (ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES + (uint8_t)((uint32_t)&SCU_param.key - (uint32_t)&SCU_param), (uint8_t*)&SCU_Param_key, sizeof (SCU_Param_key)) != osOK)
   {
     /* Impossible to read the key --> reset uP and restart */
     EVLOG_Message (EV_ERROR, "Error reading the EEPROM, force a RESET");      
@@ -1204,17 +1156,18 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
   (void)rs485AutoAddress();
   
   /* Check validity key */
-  switch (EDATA_key)
+  switch (SCU_Param_key)
   {
     case EDATA_VALID_PRG:
-      
+    case KEY_FOR_SCU_PARAM_VX:
+   
       EVLOG_Message (EV_INFO, "Data in EEPROM are valid");      
     
       ReadFromEeprom(MASTER_UID00_EADD, eeprom_master_uid_array, CARD_UID_DIM);
-      ReadFromEeprom(USER_MAP00_EADD, eeprom_user_map_array, USER_MAP_EEDIM);
-      ReadFromEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+      ReadFromEeprom(USER_MAP00_EADD, eeprom_user_map_array, USER_MAP_EEDIM);      
+      ReadFromEeprom_no_MPU(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&SCU_param, sizeof(SCU_param_t));
       /* Read backup area for SCU data backup */
-      ReadFromEeprom(EDATA_BKP_SCU_EE_ADDRESS + sizeof (infoStation_t), (uint8_t *)&ee_data16, sizeof (uint16_t));
+      ReadFromEeprom(EDATA_BKP_SCU_EE_ADDRESS + sizeof (SCU_param_t), (uint8_t *)&ee_data16, sizeof (uint16_t));
       /* Check if BKP image is present or not */
       if (ee_data16 != EDATA_BKP_SCU_SIGNATURE)
         SRAM_SCU_Check.BKP_Store = TRUE;                  /* The BKP image for SCU data is missing, create it! */
@@ -1235,23 +1188,27 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
       
       WriteOnEeprom(USER_MAP00_EADD, eeprom_user_map_array, USER_MAP_EEDIM);
       ee_data = 0;
-      WriteOnEeprom(PERS_UIDNUM_EADD, &ee_data, 1);     // cancello in eeprom il numero UID registrati - Fixed SCU-76
+      // xx WriteOnEeprom(PERS_UIDNUM_EADD, &ee_data, 1);     // cancello in eeprom il numero UID registrati - Fixed SCU-76
+      SCU_Param_Set ((uint8_t *)&SCU_param.persUidNum,  &ee_data, 1); // cancello in eeprom il numero UID registrati - Fixed SCU-76
       WriteOnEeprom(SOCKETS_PRESENCE_EE_ADDRES, (uint8_t*)getDefSocketInfoPtr(), sizeof(socketPresence_t));
          
-      /* Copy default values to infostation */
-      memcpy ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT, sizeof (infoStation));
+      /* Copy default values to SCU parameters */
+      memCpyInfoSt ((uint8_t *)&SCU_param, (uint8_t *)&SCU_param_DEFAULT, sizeof (SCU_param));
       /* Restore factory ID copying them from EDATA_DEFAULT_ID_CODES address */
       ReadFromEeprom(EDATA_DEFAULT_ID_CODES, (uint8_t*)Product_SN_temp, sizeof(Product_SN_temp));
       ReadFromEeprom(EDATA_DEFAULT_ID_CODES + sizeof(Product_SN_temp), (uint8_t*)Product_Code_temp, sizeof(Product_Code_temp));
       ReadFromEeprom(EDATA_DEFAULT_ID_CODES + sizeof(Product_SN_temp) + sizeof(Product_Code_temp), (uint8_t*)FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));
       WriteOnEeprom(PRD_SN_EE_ADDRES, (uint8_t*)Product_SN_temp, sizeof(Product_SN_temp));
       WriteOnEeprom(PRD_CODE_EE_ADDRES, (uint8_t*)Product_Code_temp, sizeof(Product_Code_temp));
-      memcpy(infoStation.productSn, Product_SN_temp, sizeof(Product_SN_temp));
-      memcpy(infoStation.productCode, Product_Code_temp, sizeof(Product_Code_temp));
-      memcpy(infoStation.fakeProductCode, FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));
+      memCpyInfoSt((uint8_t *)&SCU_param.productSn, Product_SN_temp, sizeof(Product_SN_temp));
+      memCpyInfoSt((uint8_t *)&SCU_param.productCode, Product_Code_temp, sizeof(Product_Code_temp));
+      memCpyInfoSt((uint8_t *)&SCU_param.fakeProductCode, FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));
+
+      SCU_Param_key = KEY_FOR_SCU_PARAM_VX;
+      memCpyInfoSt ((uint8_t *)&SCU_param.key, (uint8_t *)&SCU_Param_key, 1);
       
       /* Update full infostation structure in EEPROM */
-      WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation));
+      WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&SCU_param, sizeof(SCU_param));
       
       SRAM_SCU_Check.BKP_Store = TRUE;  /* The BKP image for SCU data must be updated */
 
@@ -1268,9 +1225,9 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
         pBuff = (uint8_t*)malloc(EDATA_DEFAULT_EADD);   // cancella da EDATA_VALID_EADD a EDATA_DEFAULT_EADD escluso
         memset((void*)pBuff, 0xFF, EDATA_DEFAULT_EADD); 
     
-        if (WriteOnEeprom((uint16_t)EDATA_VALID_EADD, pBuff, (uint16_t)EDATA_DEFAULT_EADD) == 0)
+        if (WriteOnEeprom((uint16_t)EDATA_FIRST_DATA, pBuff, (uint16_t)EDATA_DEFAULT_EADD) == 0)
         {
-          if (ReadFromEeprom(EDATA_VALID_EADD, pBuff, EDATA_DEFAULT_EADD) == osOK)    // rileggo la eeprom
+          if (ReadFromEeprom(EDATA_FIRST_DATA, pBuff, EDATA_DEFAULT_EADD) == osOK)    // rileggo la eeprom
           {
             for (i = 0; i < EDATA_DEFAULT_EADD; i++)
             {
@@ -1282,14 +1239,17 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
       } while (error != (uint8_t)0);  
 
       /* Backup serial value */
-      memcpy ((uint8_t *)&serial_tmp, (uint8_t *)&infoStation.serial, sizeof (infoStation.serial)); 
+      memcpy ((uint8_t *)&serial_tmp, (uint8_t *)&SCU_param.serial, sizeof (SCU_param.serial)); 
       /* Copy default values to infostation */
-      memcpy ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT, sizeof (infoStation));
+      memCpyInfoSt ((uint8_t *)&SCU_param, (uint8_t *)&SCU_param_DEFAULT, sizeof (SCU_param_t));
       /* Overwrite serial value with the original */
-      memcpy ((uint8_t *)&infoStation.serial, (uint8_t *)&serial_tmp, sizeof (infoStation.serial)); 
+      memCpyInfoSt ((uint8_t *)&SCU_param.serial, (uint8_t *)&serial_tmp, sizeof (SCU_param.serial)); 
 
-      /* Update full infostation structure in EEPROM */
-      if (WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation)) != osOK) 
+      SCU_Param_key = KEY_FOR_SCU_PARAM_VX;
+      memCpyInfoSt ((uint8_t *)&SCU_param.key, (uint8_t *)&SCU_Param_key, 1);
+      
+      /* Update full parameter structure in EEPROM */
+      if (WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&SCU_param, sizeof(SCU_param)) != osOK) 
          error = TRUE;            
         
       /* if error writing default data */
@@ -1337,9 +1297,9 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
   
   /* Restore SCU type working mode  */
   setScuTypeModeFromEeprom();  
-  setGeneralStationParameters(EDATA_key);
+  setGeneralStationParameters();
   Scheduler_scheduleCharge(getSchedulationFromMemory());
-  setNominalPower(eeprom_param_array[M3T_CURRENT_EADD]);
+  setNominalPower(SCU_param.max_current);
   SecureArea_init();
   
   /* Update the backup image for SCU data if needed */
@@ -1609,19 +1569,6 @@ for (;;)
 #endif
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
-/**
-*
-* @brief       get eeprom array value 
-*
-* @param [in]  
-*  
-* @retval      none 
-*  
-****************************************************************/
-uint8_t*  getEepromArray(void) 
-{
-  return(eeprom_param_array);
-}
 
 /**
 *
@@ -1636,16 +1583,12 @@ void  setEepromArrayIsolatedMode(void)
 {
   uint8_t SerNum[8];
 
-  // xx eeprom_param_get(SERNUM_BYTE0_EADD, SerNum, 4);
-  memcpy (&SerNum, &infoStation.serial, sizeof (infoStation.serial));
-  
-  // for (i=0; i<EEPROM_PARAM_NUM; i++)
-  //     eeprom_param_array[i] = eeprom_param_master_Iso[i];                /* Fill the structure with DEFAULT data for isolated mode */
-  
+  memcpy (&SerNum, &SCU_param.serial, sizeof (SCU_param.serial));
+    
   /* Set to DEFAULT values */
-  memcpy ((uint8_t *)&infoStation, (uint8_t *)&infoStation_DEFAULT_Iso, sizeof (infoStation));
+  memCpyInfoSt ((uint8_t *)&SCU_param, (uint8_t *)&SCU_param_DEFAULT_Iso, sizeof (SCU_param));
 
-  SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, SerNum, MAX_SERIAL_LENGTH);         /* ex SERNUM_BYTE0_EADD */
+  SCU_Param_Set ((uint8_t *)&SCU_param.serial, SerNum, MAX_SERIAL_LENGTH);         /* ex SERNUM_BYTE0_EADD */
 }
 
 /**
@@ -1666,18 +1609,18 @@ error_check_data_en SCU_Data_Check(void)
   SRAM_SCU_Check.Param = ScuADDR;
   if (scuAddr >= SCU_NUM)
     return ERROR_ON_SRAM_DATA;
-  /* Check infoStation data */
+  /* Check SCU_param data */
   
   /* #2 --> Check SCU SN data */
   SRAM_SCU_Check.Param = Serial;  
   for (cnt = 0; cnt < BOARD_SN_LENGTH; cnt++)
   {
      /* check if is a number */
-    if ((infoStation.serial[cnt] >= '0') && (infoStation.serial[cnt] <= '9'))
+    if ((SCU_param.serial[cnt] >= '0') && (SCU_param.serial[cnt] <= '9'))
       continue;
-    if (infoStation.serial[cnt] == 'F')     /* DEFAULT value */
+    if (SCU_param.serial[cnt] == 'F')     /* DEFAULT value */
       continue;
-    if ((infoStation.serial[cnt] == 0) && (cnt == BOARD_SN_LENGTH - 1)) /* Termination char */
+    if ((SCU_param.serial[cnt] == 0) && (cnt == BOARD_SN_LENGTH - 1)) /* Termination char */
       continue;
     return ERROR_ON_SRAM_DATA;
   }
@@ -1687,16 +1630,16 @@ error_check_data_en SCU_Data_Check(void)
   {
     
     /* Only if socket has been activated, check user Pin, otherwise is filled with 0xFF */
-    if (infoStation.socketActivatedFlag == TRUE)
+    if (SCU_param.socketActivatedFlag == TRUE)
     {
       /* #3 --> Check User pin data */
       SRAM_SCU_Check.Param = UserPin;        
       for (cnt = 0; cnt < USER_PIN_LENGTH; cnt++)
       {
         /* check if is a number */
-        if ((infoStation.userPin[cnt] >= '0') && (infoStation.userPin[cnt] <= '9'))  
+        if ((SCU_param.userPin[cnt] >= '0') && (SCU_param.userPin[cnt] <= '9'))  
           continue;
-        if ((infoStation.userPin[cnt] == 0) && (cnt == USER_PIN_LENGTH - 1))    /* Termination char */
+        if ((SCU_param.userPin[cnt] == 0) && (cnt == USER_PIN_LENGTH - 1))    /* Termination char */
           continue;
         return ERROR_ON_SRAM_DATA;
       }
@@ -1709,9 +1652,9 @@ error_check_data_en SCU_Data_Check(void)
       for (cnt = 0; cnt < MAX_ROUTER_SSID_LENGTH; cnt++)
       {
         /* #4 --> check if ssid is empty or corrupted */
-        if (infoStation.routerSsid[cnt] == 0xFF)  
+        if (SCU_param.routerSsid[cnt] == 0xFF)  
           return ERROR_ON_SRAM_DATA;    
-        if (infoStation.routerSsid[cnt] == 0)  /* Termination char */
+        if (SCU_param.routerSsid[cnt] == 0)  /* Termination char */
           break;      
       }
       
@@ -1719,9 +1662,9 @@ error_check_data_en SCU_Data_Check(void)
       for (cnt = 0; cnt < MAX_ROUTER_PASS_LENGTH; cnt++)
       {
         /* #5 --> check if is password is empty */
-        if (infoStation.routerPass[cnt] == 0xFF)  
+        if (SCU_param.routerPass[cnt] == 0xFF)  
           return ERROR_ON_SRAM_DATA;
-        if (infoStation.routerPass[cnt] == 0)  /* Termination char */
+        if (SCU_param.routerPass[cnt] == 0)  /* Termination char */
           break;      
       }
     }   
@@ -1732,13 +1675,13 @@ error_check_data_en SCU_Data_Check(void)
   for (cnt = 0; cnt < PRODUCT_SN_LENGTH; cnt++)
   {
      /* check if is a number */
-    if ((infoStation.productSn[cnt] >= '0') && (infoStation.productSn[cnt] <= '9'))
+    if ((SCU_param.productSn[cnt] >= '0') && (SCU_param.productSn[cnt] <= '9'))
       continue;
-    if ((infoStation.productSn[cnt] == 0) && (cnt == PRODUCT_SN_LENGTH - 1)) /* Termination char */
+    if ((SCU_param.productSn[cnt] == 0) && (cnt == PRODUCT_SN_LENGTH - 1)) /* Termination char */
       continue;
-    if (infoStation.productSn[0] == '5')
+    if (SCU_param.productSn[0] == '5')
       Product_SN_SOBEM = true;
-    if ((infoStation.productSn[9] == '/') && (Product_SN_SOBEM == true))
+    if ((SCU_param.productSn[9] == '/') && (Product_SN_SOBEM == true))
       continue;
     return ERROR_ON_SRAM_DATA;
   }
@@ -1747,13 +1690,13 @@ error_check_data_en SCU_Data_Check(void)
   for (cnt = 0; cnt < PRODUCT_CODE_LENGTH; cnt++)
   {
     /* Check Ascii char admitted */
-    if ((infoStation.productCode[cnt] >= '0') && (infoStation.productCode[cnt] <= '9'))      /* Numbers from 0 t0 9*/
+    if ((SCU_param.productCode[cnt] >= '0') && (SCU_param.productCode[cnt] <= '9'))      /* Numbers from 0 t0 9*/
       continue;
-    else if ((infoStation.productCode[cnt] >= 'A') && (infoStation.productCode[cnt] <= 'Z')) /* Letters from A to Z */
+    else if ((SCU_param.productCode[cnt] >= 'A') && (SCU_param.productCode[cnt] <= 'Z')) /* Letters from A to Z */
       continue;
-    if (infoStation.productCode[cnt] == '\0')   /* DEFAULT value */
+    if (SCU_param.productCode[cnt] == '\0')   /* DEFAULT value */
       continue;
-    else if ((infoStation.productCode[cnt] == '.') || (infoStation.productCode[cnt] == '-'))   /* '.' or '-' */
+    else if ((SCU_param.productCode[cnt] == '.') || (SCU_param.productCode[cnt] == '-'))   /* '.' or '-' */
       continue;
     else
       return ERROR_ON_SRAM_DATA;    
@@ -1762,13 +1705,13 @@ error_check_data_en SCU_Data_Check(void)
   /* #8 --> Symplified current value */
   SRAM_SCU_Check.Param = SimplCurr;
   /* Value must be max 16A */
-  if (infoStation.max_currentSemp > VALUE_OF_SIMPLCURR)
+  if (SCU_param.max_currentSemp > VALUE_OF_SIMPLCURR)
       return ERROR_ON_SRAM_DATA;        
   
   /* #9 --> Typical current value */
   SRAM_SCU_Check.Param = TypCurr;
   /* Value must be max 32A */
-  if (infoStation.max_current > VALUE_OF_TIPCURR)
+  if (SCU_param.max_current > VALUE_OF_TIPCURR)
       return ERROR_ON_SRAM_DATA;        
   
   /* NO ERRORS on SCU data */
@@ -1797,13 +1740,13 @@ error_check_data_en SEM_Data_Check(void)
     for (cnt = 0; cnt < FAKE_CODE_LENGTH; cnt++)
     {
       /* Check Ascii char admitted */
-      if ((infoStation.fakeProductCode[cnt] >= '0') && (infoStation.fakeProductCode[cnt] <= '9'))      /* Numbers from 0 t0 9*/
+      if ((SCU_param.fakeProductCode[cnt] >= '0') && (SCU_param.fakeProductCode[cnt] <= '9'))      /* Numbers from 0 t0 9*/
         continue;
-      else if ((infoStation.fakeProductCode[cnt] >= 'A') && (infoStation.fakeProductCode[cnt] <= 'Z')) /* Letters from A to Z */
+      else if ((SCU_param.fakeProductCode[cnt] >= 'A') && (SCU_param.fakeProductCode[cnt] <= 'Z')) /* Letters from A to Z */
         continue;
-      else if (infoStation.fakeProductCode[cnt] == '.')   /* '.' */
+      else if (SCU_param.fakeProductCode[cnt] == '.')   /* '.' */
         continue;
-      if (infoStation.fakeProductCode[cnt] == '\0')  /* DEFAULT value */
+      if (SCU_param.fakeProductCode[cnt] == '\0')  /* DEFAULT value */
         continue;
       else
         return ERROR_ON_SRAM_DATA;    
@@ -1852,8 +1795,8 @@ error_check_data_en SEM_Data_Check(void)
 error_check_data_en Data_Integrity_Check (sram_check_type_en checkType)
 {
   
-    /* Check infostation data only if EEPROM has been initialized */
-    if (infoStation.key != EDATA_VALID_PRG)
+    /* Check SCU parameter data only if EEPROM has been initialized */
+    if (SCU_param.key != EDATA_VALID_PRG)
       return NO_SRAM_DATA_CHECKED;
      
     /* Check data integrity */
@@ -1905,31 +1848,31 @@ void SRAM_Param_Show_Corrupted_Value (SRAM_SCU_Check_List_e Param)
       tPrintf ( "CORRUPTED VALUE of ScuADDR --> %d\r\n" , scuAddr);      
       break;
     case Serial:
-      tPrintf ( "CORRUPTED VALUE of SerialNumber --> %s\r\n" , infoStation.serial);      
+      tPrintf ( "CORRUPTED VALUE of SerialNumber --> %s\r\n" , SCU_param.serial);      
       break;
     case UserPin:
-      tPrintf ( "CORRUPTED VALUE of User pin --> %s\r\n" , infoStation.userPin);      
+      tPrintf ( "CORRUPTED VALUE of User pin --> %s\r\n" , SCU_param.userPin);      
       break;    
     case RouterSsid:
-      tPrintf ( "CORRUPTED VALUE of Router ssid --> %s\r\n" , infoStation.routerSsid);      
+      tPrintf ( "CORRUPTED VALUE of Router ssid --> %s\r\n" , SCU_param.routerSsid);      
       break;    
     case RouterPass:
-      tPrintf ( "CORRUPTED VALUE of router password --> %s\r\n" , infoStation.routerPass);      
+      tPrintf ( "CORRUPTED VALUE of router password --> %s\r\n" , SCU_param.routerPass);      
       break;    
     case ProductSN:
-      tPrintf ( "CORRUPTED VALUE of Product SN --> %s\r\n" , infoStation.productSn);      
+      tPrintf ( "CORRUPTED VALUE of Product SN --> %s\r\n" , SCU_param.productSn);      
       break;    
     case ProductCode:
-      tPrintf ( "CORRUPTED VALUE of Product Code --> %s\r\n" , infoStation.productCode);      
+      tPrintf ( "CORRUPTED VALUE of Product Code --> %s\r\n" , SCU_param.productCode);      
       break;    
     case FakeProductCode:
-      tPrintf ("CORRUPTED VALUE of Fake Product Code --> %s\r\n" , infoStation.fakeProductCode);      
+      tPrintf ("CORRUPTED VALUE of Fake Product Code --> %s\r\n" , SCU_param.fakeProductCode);      
       break;    
     case SimplCurr:
-      tPrintf ("CORRUPTED VALUE of Simplified current --> %d\r\n" , infoStation.max_currentSemp);  
+      tPrintf ("CORRUPTED VALUE of Simplified current --> %d\r\n" , SCU_param.max_currentSemp);  
       break;    
     case TypCurr:
-      tPrintf ("CORRUPTED VALUE of Typical current --> %d\r\n" , infoStation.max_current);      
+      tPrintf ("CORRUPTED VALUE of Typical current --> %d\r\n" , SCU_param.max_current);      
       break;    
     
     default:
@@ -1951,14 +1894,14 @@ void SRAM_Param_Show_Corrupted_Value (SRAM_SCU_Check_List_e Param)
 
 void SRAM_Param_DEFAULT_Force (SRAM_SCU_Check_List_e Param)
 {
-  infoStation_t*      pInfoStation;
-  uint8_t             infoSet;
+  SCU_param_t*        pSCU_param;
+  uint8_t             ParamSet;
 
-  pInfoStation = (infoStation_t*)malloc(sizeof(infoStation_t));
+  pSCU_param = (SCU_param_t*)malloc(sizeof(SCU_param_t));
   /* make a copy of current structure values */
-  memcpy ((void*)pInfoStation, (void*)&infoStation, sizeof(infoStation_t));
+  memcpy ((void*)pSCU_param, (void*)&SCU_param, sizeof(SCU_param_t));
 
-  infoSet = FALSE;
+  ParamSet = FALSE;
 
   /* Select which parameter value must be forced to DEFAULT */
   switch (Param)
@@ -1968,46 +1911,46 @@ void SRAM_Param_DEFAULT_Force (SRAM_SCU_Check_List_e Param)
       break;
     case Serial:
       /* Force DEFAULT value into the param */
-      SRAM_Param_DEFAULT_Set (&pInfoStation->serial[0], 'F', BOARD_SN_LENGTH);    
-      infoSet = TRUE;
+      SRAM_Param_DEFAULT_Set (&pSCU_param->serial[0], 'F', BOARD_SN_LENGTH);    
+      ParamSet = TRUE;
       break;
     case UserPin:
       /* Force DEFAULT value into the param */
-      SRAM_Param_DEFAULT_Set (&pInfoStation->userPin[0], ' ', USER_PIN_LENGTH);    
-      infoSet = TRUE;
+      SRAM_Param_DEFAULT_Set (&pSCU_param->userPin[0], ' ', USER_PIN_LENGTH);    
+      ParamSet = TRUE;
       break;    
     case RouterSsid:
       /* Force DEFAULT value into the param */
-      SRAM_Param_DEFAULT_Set (&pInfoStation->routerSsid[0], 0, MAX_ROUTER_SSID_LENGTH);    
-      infoSet = TRUE;
+      SRAM_Param_DEFAULT_Set (&pSCU_param->routerSsid[0], 0, MAX_ROUTER_SSID_LENGTH);    
+      ParamSet = TRUE;
       break;    
     case RouterPass:
       /* Force DEFAULT value into the param */
-      SRAM_Param_DEFAULT_Set (&pInfoStation->routerPass[0], 0, MAX_ROUTER_PASS_LENGTH);    
-      infoSet = TRUE;
+      SRAM_Param_DEFAULT_Set (&pSCU_param->routerPass[0], 0, MAX_ROUTER_PASS_LENGTH);    
+      ParamSet = TRUE;
       break;    
     case ProductSN:
       /* Force DEFAULT value into the param */
-      SRAM_Param_DEFAULT_Set (&pInfoStation->productSn[0], '0', PRODUCT_SN_LENGTH);    
-      infoSet = TRUE;
+      SRAM_Param_DEFAULT_Set (&pSCU_param->productSn[0], '0', PRODUCT_SN_LENGTH);    
+      ParamSet = TRUE;
       break;    
     case ProductCode:
       /* Force DEFAULT value into the param */
-      SRAM_Param_DEFAULT_Set (&pInfoStation->productCode[0], 0, PRODUCT_CODE_LENGTH);    
-      infoSet = TRUE;
+      SRAM_Param_DEFAULT_Set (&pSCU_param->productCode[0], 0, PRODUCT_CODE_LENGTH);    
+      ParamSet = TRUE;
       break;    
     case FakeProductCode:
       /* Force DEFAULT value into the param */
-      SRAM_Param_DEFAULT_Set (&pInfoStation->fakeProductCode[0], 0, FAKE_CODE_LENGTH);    
-      infoSet = TRUE;
+      SRAM_Param_DEFAULT_Set (&pSCU_param->fakeProductCode[0], 0, FAKE_CODE_LENGTH);    
+      ParamSet = TRUE;
       break;          
     case SimplCurr:
       /* Force DEFAULT value into the param */
-      infoStation.max_currentSemp = VALUE_OF_SIMPLCURR;  
+      SCU_param.max_currentSemp = VALUE_OF_SIMPLCURR;  
       break;    
     case TypCurr:
       /* Force DEFAULT value into the param */
-      infoStation.max_current = VALUE_OF_TIPCURR;    
+      SCU_param.max_current = VALUE_OF_TIPCURR;    
       break;          
     case MatrixConv:
       SRAM_Param_DEFAULT_Set ((char *)&socketPresence.matrixConv[0], '^', SCU_NUM);
@@ -2019,13 +1962,13 @@ void SRAM_Param_DEFAULT_Force (SRAM_SCU_Check_List_e Param)
     default:
       break;
   }
-  if (infoSet == TRUE)
+  if (ParamSet == TRUE)
   {
     /*                             destination                source                   len   */
-    configASSERT(memCpyInfoSt((uint8_t*)&infoStation, (uint8_t*)pInfoStation, sizeof(infoStation_t)));
+    configASSERT(memCpyInfoSt((uint8_t*)&SCU_param, (uint8_t*)pSCU_param, sizeof(SCU_param_t)));
   }
   /* free allocated area */
-  free(pInfoStation);
+  free(pSCU_param);
 }
 
 /**
@@ -2070,23 +2013,21 @@ void BKP_CNT_TRAP_EE_DATA_Update(void)
 
 void BKP_Reload_Param (uint8_t FromIdle)
 {
-  infoStation_t*      pInfoStation;
+  SCU_param_t *      pSCU_param;
   
-  pInfoStation = (infoStation_t*)malloc(sizeof(infoStation_t));
+  pSCU_param = (SCU_param_t*)malloc(sizeof(SCU_param_t));
 
   /* Reload values from infostation BKP area */
   if (FromIdle)
-    ReadFromEeprom (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&infoStation, sizeof (infoStation_t));     
+    ReadFromEeprom_no_MPU (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&SCU_param, sizeof (SCU_param_t));     
   else
-    ReadFromEeprom_no_Semaph (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&infoStation, sizeof (infoStation_t));       
+    ReadFromEeprom_no_Semaph (EDATA_BKP_SCU_EE_ADDRESS, (uint8_t *)&SCU_param, sizeof (SCU_param_t));       
   /* Set values in eeprom_param_array */
-  // xx eeprom_param_array[M3S_CURRENT_EADD] = infoStation.max_currentSemp / 1000;
-  // xx eeprom_param_array[M3T_CURRENT_EADD] = infoStation.max_current / 1000;
   
    /*              destination                source                   len   */
-   configASSERT(memCpyInfoSt((uint8_t*)&infoStation, (uint8_t*)pInfoStation, sizeof(infoStation_t)));
+   configASSERT(memCpyInfoSt((uint8_t*)&SCU_param, (uint8_t*)pSCU_param, sizeof(SCU_param_t)));
    /* free allocated area */
-   free(pInfoStation);
+   free(pSCU_param);
 
 }
 
@@ -2202,7 +2143,8 @@ void EEPROM_Default_Write (void)
     
     case ScuADDR:
       /* Write product Serial number in EEPROM */
-      WriteOnEeprom (RS485_ADD_EADD, (uint8_t*)&scuAddr, 1);            
+      // xx WriteOnEeprom (RS485_ADD_EADD, (uint8_t*)&scuAddr, 1);            
+      SCU_Param_Set((uint8_t *)&SCU_param.rs485Address, (uint8_t*)&scuAddr, 1);
       break;
     
     case Serial:
@@ -2210,35 +2152,35 @@ void EEPROM_Default_Write (void)
       memset (BCD_Data, 0xFF, sizeof (BCD_Data));
       memset (Data, 'F', sizeof (Data));
       /* Write SCU serial number */
-      SCU_InfoStation_Set ((uint8_t *)&infoStation.serial, BCD_Data, sizeof (BCD_Data));    /* ex SERNUM_BYTE0_EADD */
+      SCU_Param_Set ((uint8_t *)&SCU_param.serial, BCD_Data, sizeof (BCD_Data));    /* ex SERNUM_BYTE0_EADD */
       setScuSerialNumberEeprom((char*)BCD_Data, (char*)Data);      
       break;
     case ProductSN:
       /* Write product Serial number */
-      WriteOnEeprom (PRD_SN_EE_ADDRES, (uint8_t*)infoStation.productSn, PRODUCT_SN_LENGTH);      
-      WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+      WriteOnEeprom (PRD_SN_EE_ADDRES, (uint8_t*)SCU_param.productSn, PRODUCT_SN_LENGTH);      
+      WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&SCU_param, sizeof(SCU_param_t));
       break;
     case ProductCode:
       /* Write product Code */
-      WriteOnEeprom (PRD_CODE_EE_ADDRES, (uint8_t*)&infoStation.productCode, PRODUCT_CODE_LENGTH);              
-      WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));
+      WriteOnEeprom (PRD_CODE_EE_ADDRES, (uint8_t*)&SCU_param.productCode, PRODUCT_CODE_LENGTH);              
+      WriteOnEeprom(SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&SCU_param, sizeof(SCU_param_t));
       break;    
       
     case SimplCurr:
       /* Write simplified current */
-      Data[0] = infoStation.max_currentSemp / 1000;
-      SCU_InfoStation_Set ((uint8_t *)&infoStation.max_currentSemp, &Data[0], 1);     /* ex M3S_CURRENT_EADD */
+      Data[0] = SCU_param.max_currentSemp / 1000;
+      SCU_Param_Set ((uint8_t *)&SCU_param.max_currentSemp, &Data[0], 1);     /* ex M3S_CURRENT_EADD */
       break;      
       
     case TypCurr: 
       /* Write typical current */
-      Data[0] = infoStation.max_current / 1000;
-      SCU_InfoStation_Set ((uint8_t *)&infoStation.max_current, &Data[0], 1);     /* ex M3T_CURRENT_EADD */
+      Data[0] = SCU_param.max_current / 1000;
+      SCU_Param_Set ((uint8_t *)&SCU_param.max_current, &Data[0], 1);     /* ex M3T_CURRENT_EADD */
       break;      
       
     default:
-      /* Write new infoStation data */
-      WriteOnEeprom (SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&infoStation, sizeof(infoStation_t));        
+      /* Write new SCU_param data */
+      WriteOnEeprom (SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&SCU_param, sizeof(SCU_param_t));        
       break;
       
   }
@@ -2257,17 +2199,16 @@ void EEPROM_Default_Write (void)
 void EEPROM_Check_Data_Before_Write (unsigned short Address)
 {
   /* Check integrity of sensible data and manage errors */
-  if (infoStation.key == EDATA_VALID_PRG)
+  if (SCU_param.key == EDATA_VALID_PRG)
   {
     switch (Address)
     {
       case SCU_GENERAL_INFO_EE_ADDRES:        
       case SOCKETS_PRESENCE_EE_ADDRES:
-      case RS485_ADD_EADD:        
         /* Check if a different default value (0xFF) is on productSn, productCode, fakeProductCode 
         Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
         SRAM_Check_DEFAULT_of_Code();    
-        /* Check SCU data (infoStation), if no errors, update the backup image */
+        /* Check SCU data (SCU_param), if no errors, update the backup image */
         if (SRAM_Data_Integrity_check(ON_ALL_DATA, FALSE) == NO_ERROR_ON_SRAM_DATA)
           SRAM_SCU_Check.BKP_Store = TRUE;
         break;
@@ -2322,38 +2263,41 @@ void EEPROM_Check_Data_Idle (void)
 
 /**
 *
-* @brief       SCU_InfoStation_Set
+* @brief       SCU_Param_Set
 *               
-*              Save parameter directly in eeprom and in infoStation (RAM)
+*              Save parameter directly in eeprom and in SCU_param (RAM)
 *
-* @param [in]  pDst: address in infoStation struct
-*              pSrc: adress of data to load in infoStation struct             
+* @param [in]  pDst: address in SCU_param struct
+*              pSrc: adress of data to load in SCU_param struct             
 *              nByte: number of bytes to save
 *  
 * @retval      OK / NOT_OK 
 *  
 ****************************************************************/
 
-uint8_t SCU_InfoStation_Set (uint8_t *pDst, uint8_t *pSrc, uint16_t nByte)
+uint8_t SCU_Param_Set (uint8_t *pDst, uint8_t *pSrc, uint16_t nByte)
 {
   
   uint8_t  result;
   uint16_t Address;
   
   /* Save configuration in RAM */
-  memCpyInfoSt (pDst, pSrc, nByte);
+  configASSERT(memCpyInfoSt (pDst, pSrc, nByte));
   
-  // xx eeprom_array_set (Address, Buffer, Length);   
-  Address = SCU_GENERAL_INFO_EE_ADDRES + ((uint32_t )pDst - (uint32_t)&infoStation);
+  Address = SCU_GENERAL_INFO_EE_ADDRES + ((uint32_t )pDst - (uint32_t)&SCU_param);
     
-  /* Save configuration in EEPROM */
+  /* Save data in EEPROM */
   result = WriteOnEeprom(Address, (uint8_t*)pDst, nByte);
+  
+  Address = SCU_GENERAL_INFO_EE_ADDRES + ((uint32_t )&SCU_param.checksum - (uint32_t)&SCU_param);
+  /* save checksum in EEPROM */
+  result = WriteOnEeprom(Address, (uint8_t*)&SCU_param.checksum, sizeof (uint32_t));
   
   /* Check writing result */
   if (result == 0)
   {
-    tPrintf("Infostation data updated!\n\r");
-    EVLOG_Message(EV_INFO, "Infostation data updated!");
+    tPrintf("SCU parameters updated!\n\r");
+    EVLOG_Message(EV_INFO, "SCU parameters updated!");
     
     /* Check if a different default value (0xFF) is on productSn, productCode, fakeProductCode 
       Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
@@ -2371,6 +2315,27 @@ uint8_t SCU_InfoStation_Set (uint8_t *pDst, uint8_t *pSrc, uint16_t nByte)
   
   return result;  
   
+}
+
+/**
+*
+* @brief       ReadFromEeprom disabling the MPU protection
+*
+* @param [in]  unsigned short: start read address 
+*              unsigned char *: pointer where store read data
+*              unsigned short: number of data to be read 
+*  
+* @retval      unsigned char: 0 when successfull read, error code otherwise 
+*  
+****************************************************************/
+uint8_t ReadFromEeprom_no_MPU (uint16_t Address, uint8_t *Buffer, uint16_t Length)
+{
+  uint8_t result;
+  
+  HAL_MPU_Disable();
+  result = ReadFromEeprom(Address, Buffer, Length);
+  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+  return result;  
 }
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //

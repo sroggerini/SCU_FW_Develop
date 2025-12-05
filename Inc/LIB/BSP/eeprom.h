@@ -22,78 +22,78 @@
 #define EDATA_DEFAULT_PRG       (uint8_t)(0xFF)      // default value for eeprom/flash data
 //#define EDATA_VALID_PRG         (uint8_t)(0x02)      // flag validità dati in eeprom/flash
 
-#define EDATA_VALID_EADD        (uint16_t)(0)       // flag validità dati in eeprom
-#define EDATA_NUM_EADD          (uint16_t)(1)       // numero di byte in eeprom
-#define SERNUM_BYTE0_EADD       (uint16_t)(2)       // byte numero di serie LSB (2 digit BDC)
-#define SERNUM_BYTE1_EADD       (uint16_t)(3)       // byte numero di serie (2 digit BDC)
-#define SERNUM_BYTE2_EADD       (uint16_t)(4)       // byte numero di serie (2 digit BDC)
-#define SERNUM_BYTE3_EADD       (uint16_t)(5)       // byte numero di serie MSB (2 digit BDC)
-#define SOCKET_ENABLE_EADD      (uint16_t)(6)       // abilitazione presa
-#define BATTERY_CONFIG_EADD     (uint16_t)(7)       // modalità di funzionamento in presenza di batteria tampone
-#define LANG_DEFAULT_EADD       (uint16_t)(8)       // lingua di default display lcd
-#define RS485_ADD_EADD          (uint16_t)(9)       // indirizzo SCU su bus RS-485
-#define RTC_VALID_EADD          (uint16_t)(10)      // flag rtc configurato correttamente
-#define EVS_MODE_EADD           (uint16_t)(11)      // modalità di funzionamento della EVS
-#define M3T_CURRENT_EADD        (uint16_t)(12)      // corrente massima in Modo3 standard [A]
-#define M3S_CURRENT_EADD        (uint16_t)(13)      // corrente massima in Modo3 semplificato [A]
-#define SOCKET_TYPE_EADD        (uint16_t)(14)      // tipo presa, socket type
-#define EMETER_INT_EADD         (uint16_t)(15)      // tipo misuratore di energia interno
+// #define EDATA_VALID_EADD        (uint16_t)(0)       // flag validità dati in eeprom
+// #define EDATA_NUM_EADD          (uint16_t)(1)       // numero di byte in eeprom
+// #define SERNUM_BYTE0_EADD       (uint16_t)(2)       // byte numero di serie LSB (2 digit BDC)
+// #define SERNUM_BYTE1_EADD       (uint16_t)(3)       // byte numero di serie (2 digit BDC)
+// #define SERNUM_BYTE2_EADD       (uint16_t)(4)       // byte numero di serie (2 digit BDC)
+// #define SERNUM_BYTE3_EADD       (uint16_t)(5)       // byte numero di serie MSB (2 digit BDC)
+// #define SOCKET_ENABLE_EADD      (uint16_t)(6)       // abilitazione presa
+// #define BATTERY_CONFIG_EADD     (uint16_t)(7)       // modalità di funzionamento in presenza di batteria tampone
+// #define LANG_DEFAULT_EADD       (uint16_t)(8)       // lingua di default display lcd
+// #define RS485_ADD_EADD          (uint16_t)(9)       // indirizzo SCU su bus RS-485
+// #define RTC_VALID_EADD          (uint16_t)(10)      // flag rtc configurato correttamente
+// #define EVS_MODE_EADD           (uint16_t)(11)      // modalità di funzionamento della EVS
+// #define M3T_CURRENT_EADD        (uint16_t)(12)      // corrente massima in Modo3 standard [A]
+// #define M3S_CURRENT_EADD        (uint16_t)(13)      // corrente massima in Modo3 semplificato [A]
+// #define SOCKET_TYPE_EADD        (uint16_t)(14)      // tipo presa, socket type
+// #define EMETER_INT_EADD         (uint16_t)(15)      // tipo misuratore di energia interno
 #define CONTROL_BYTE0_EADD      (uint16_t)(16)      // abilitazione controlli byte 0
-#define CONTROL_BYTE1_EADD      (uint16_t)(17)      // abilitazione controlli byte 1
-#define CONTROL_BYTE2_EADD      (uint16_t)(18)      // abilitazione controlli byte 2
-#define CONTROL_BYTE3_EADD      (uint16_t)(19)      // abilitazione controlli byte 3
-#define ACTUATORS_EADD          (uint16_t)(20)      // configurazione attuatori contattore, blocchi presa e bobina di sgancio
-#define BLOCK_DIR_EADD          (uint16_t)(21)      // configurazione direzione blocchi presa
+// #define CONTROL_BYTE1_EADD      (uint16_t)(17)      // abilitazione controlli byte 1
+// #define CONTROL_BYTE2_EADD      (uint16_t)(18)      // abilitazione controlli byte 2
+// #define CONTROL_BYTE3_EADD      (uint16_t)(19)      // abilitazione controlli byte 3
+// #define ACTUATORS_EADD          (uint16_t)(20)      // configurazione attuatori contattore, blocchi presa e bobina di sgancio
+// #define BLOCK_DIR_EADD          (uint16_t)(21)      // configurazione direzione blocchi presa
 #define PERS_UIDNUM_EADD        (uint16_t)(22)      // personal: numero UID registrati [EVS_PERS_MODE]
 #define PERS_MASTER_EADD        (uint16_t)(23)      // personal: flag UID master registrato
-#define PMNG_MODE_EADD          (uint16_t)(24)      // power management: configurazione power management
-#define PMNG_EMETER_EADD        (uint16_t)(25)      // power management: tipo misuratore di energia esterno
-#define PMNG_PWRLSB_EADD        (uint16_t)(26)      // power management: potenza domestica installata LSB [KW * 10]
-#define PMNG_PWRMSB_EADD        (uint16_t)(27)      // power management: potenza domestica installata MSB [KW * 10]
-#define PMNG_ERROR_EADD         (uint16_t)(28)      // power management: errore ammesso nella regolazione di potenza [KW * 10]
-#define PMNG_CURRENT_EADD       (uint16_t)(29)      // power management: corrente minima di ricarica del veicolo prima di andare in sospensione [ampere]
-#define PMNG_MULTIP_EADD        (uint16_t)(30)      // power management: fattore moltiplicativo della potenza minima per uscire da no-power HPOWER
-#define PMNG_DMAX_EADD          (uint16_t)(31)      // power management: fattore moltiplicativo della potenza per la sospensione immediata della ricarica
-#define PMNG_TRANGE_EADD        (uint16_t)(32)      // power management: abilitazione della ricarica con potenza variabile per fasce orarie [fisse]
-#define TCHARGE_MODE_EADD       (uint16_t)(33)      // configurazione ricarica a tempo
-#define TCHARGE_TIME_EADD       (uint16_t)(34)      // numero step di 30 minuti in ricarica a tempo
-#define PMNG_PWDB0_EADD         (uint16_t)(35)      // password menù nascosto byte 0
-#define PMNG_PWDB1_EADD         (uint16_t)(36)      // password menù nascosto byte 1
-#define PMNG_PWDB2_EADD         (uint16_t)(37)      // password menù nascosto byte 2
-#define PMNG_UNBAL_EADD         (uint16_t)(38)      // power management: flag di consenso per carichi sbilanciati in trifase
-#define LANG_CONFIG0_EADD       (uint16_t)(39)      // Configurazione lingue abilitate byte 0
-#define LANG_CONFIG1_EADD       (uint16_t)(40)      // Configurazione lingue abilitate byte 1
-#define LANG_CONFIG2_EADD       (uint16_t)(41)      // Configurazione lingue abilitate byte 2
-#define LANG_CONFIG3_EADD       (uint16_t)(42)      // Configurazione lingue abilitate byte 3
-#define TOT_ENERGY0_EADD        (uint16_t)(43)      // energia attiva totale erogata byte 0
-#define TOT_ENERGY1_EADD        (uint16_t)(44)      // energia attiva totale erogata byte 1
-#define TOT_ENERGY2_EADD        (uint16_t)(45)      // energia attiva totale erogata byte 2
-#define TOT_ENERGY3_EADD        (uint16_t)(46)      // energia attiva totale erogata byte 3
-#define STRIP_LED_TYPE_EADD     (uint16_t)(47)      // tipo di strip: 6 9 12 24 leds
-#define TIME_ZONE_EADD          (uint16_t)(48)      // byte per il time zone 
-#define DST_EADD                (uint16_t)(49)      // byte per abilitazione ora legale (daylight saving time) 
-#define TIME_DST_OFFSET_EADD    (uint16_t)(50)      // byte per entità del DST (tipicamente 1h) 
-#define DST_STATUS_EADD         (uint16_t)(51)      // byte per stato corrente dell'ora legale (attiva da aprile a ottobre, disattiva da nov a marzo) 
-#define LCD_TYPE_EADD           (uint16_t)(52)      // byte per stato presenza LCD  
-#define HIDDEN_MENU_VIS_EADD    (uint16_t)(53)      // visiblità dei setup [menu nascosto]
-#define HIDDEN_MENU_ENB_EADD    (uint16_t)(54)      // abilitazione dei setup [menu nascosto]
-#define ENRG_LIMIT_EADD         (uint16_t)(55)      // massima energia erogata per la ricarica a energia limitata [KWh]
-#define SINAPSI_INST_EADD       (uint16_t)(56)      // flag di avvenuta configurazione e verifica della prima installazione sinapsi
-#define EMETER_SCU_INT_EADD     (uint16_t)(57)      // 
-#define OPERATIVE_MODE_EADD     (uint16_t)(58)      // modo operativo EMUMAX0 = 1 / SEM = 0
-#define TEMP_CTRL_ENB_EADD      (uint16_t)(59)      // 
-#define TEMP_CTRL_VAL_EADD      (uint16_t)(60)      // 
-#define TEMP_DELTA_EADD         (uint16_t)(61)      // 
-#define TEMP_HYSTERESIS_EADD    (uint16_t)(62)      // 
-#define RS485_ADD_ALIAS_EADD    (uint16_t)(63)      // non usato 
-#define SEM_FLAGS_CTRL_EADD     (uint16_t)(64)      // parametri aggiunti per SEM: bit 0 = fixed / adj SCU address bits 1-2-3 = num socket in the product
-#define STATION_NOM_PWR_EADD    (uint16_t)(65)      // potenza nominale del prodotto [KW * 10] --> 7,4KW diventa 74
-#define CONNECTOR_NUMBER_EADD   (uint16_t)(66)      // indice del connettore 1..4 nella quartina finale del fake code 
-#define POST_SUSP_TIME_EADD     (uint16_t)(67)
+// #define PMNG_MODE_EADD          (uint16_t)(24)      // power management: configurazione power management
+// #define PMNG_EMETER_EADD        (uint16_t)(25)      // power management: tipo misuratore di energia esterno
+// #define PMNG_PWRLSB_EADD        (uint16_t)(26)      // power management: potenza domestica installata LSB [KW * 10]
+// #define PMNG_PWRMSB_EADD        (uint16_t)(27)      // power management: potenza domestica installata MSB [KW * 10]
+// #define PMNG_ERROR_EADD         (uint16_t)(28)      // power management: errore ammesso nella regolazione di potenza [KW * 10]
+// #define PMNG_CURRENT_EADD       (uint16_t)(29)      // power management: corrente minima di ricarica del veicolo prima di andare in sospensione [ampere]
+// #define PMNG_MULTIP_EADD        (uint16_t)(30)      // power management: fattore moltiplicativo della potenza minima per uscire da no-power HPOWER
+// #define PMNG_DMAX_EADD          (uint16_t)(31)      // power management: fattore moltiplicativo della potenza per la sospensione immediata della ricarica
+// #define PMNG_TRANGE_EADD        (uint16_t)(32)      // power management: abilitazione della ricarica con potenza variabile per fasce orarie [fisse]
+// #define TCHARGE_MODE_EADD       (uint16_t)(33)      // configurazione ricarica a tempo
+// #define TCHARGE_TIME_EADD       (uint16_t)(34)      // numero step di 30 minuti in ricarica a tempo
+// #define PMNG_PWDB0_EADD         (uint16_t)(35)      // password menù nascosto byte 0
+// #define PMNG_PWDB1_EADD         (uint16_t)(36)      // password menù nascosto byte 1
+// #define PMNG_PWDB2_EADD         (uint16_t)(37)      // password menù nascosto byte 2
+// #define PMNG_UNBAL_EADD         (uint16_t)(38)      // power management: flag di consenso per carichi sbilanciati in trifase
+// #define LANG_CONFIG0_EADD       (uint16_t)(39)      // Configurazione lingue abilitate byte 0
+// #define LANG_CONFIG1_EADD       (uint16_t)(40)      // Configurazione lingue abilitate byte 1
+// #define LANG_CONFIG2_EADD       (uint16_t)(41)      // Configurazione lingue abilitate byte 2
+// #define LANG_CONFIG3_EADD       (uint16_t)(42)      // Configurazione lingue abilitate byte 3
+// #define TOT_ENERGY0_EADD        (uint16_t)(43)      // energia attiva totale erogata byte 0
+// #define TOT_ENERGY1_EADD        (uint16_t)(44)      // energia attiva totale erogata byte 1
+// #define TOT_ENERGY2_EADD        (uint16_t)(45)      // energia attiva totale erogata byte 2
+// #define TOT_ENERGY3_EADD        (uint16_t)(46)      // energia attiva totale erogata byte 3
+// #define STRIP_LED_TYPE_EADD     (uint16_t)(47)      // tipo di strip: 6 9 12 24 leds
+// #define TIME_ZONE_EADD          (uint16_t)(48)      // byte per il time zone 
+// #define DST_EADD                (uint16_t)(49)      // byte per abilitazione ora legale (daylight saving time) 
+// #define TIME_DST_OFFSET_EADD    (uint16_t)(50)      // byte per entità del DST (tipicamente 1h) 
+// #define DST_STATUS_EADD         (uint16_t)(51)      // byte per stato corrente dell'ora legale (attiva da aprile a ottobre, disattiva da nov a marzo) 
+// #define LCD_TYPE_EADD           (uint16_t)(52)      // byte per stato presenza LCD  
+// #define HIDDEN_MENU_VIS_EADD    (uint16_t)(53)      // visiblità dei setup [menu nascosto]
+// #define HIDDEN_MENU_ENB_EADD    (uint16_t)(54)      // abilitazione dei setup [menu nascosto]
+// #define ENRG_LIMIT_EADD         (uint16_t)(55)      // massima energia erogata per la ricarica a energia limitata [KWh]
+// #define SINAPSI_INST_EADD       (uint16_t)(56)      // flag di avvenuta configurazione e verifica della prima installazione sinapsi
+// #define EMETER_SCU_INT_EADD     (uint16_t)(57)      // 
+// #define OPERATIVE_MODE_EADD     (uint16_t)(58)      // modo operativo EMUMAX0 = 1 / SEM = 0
+// #define TEMP_CTRL_ENB_EADD      (uint16_t)(59)      // 
+// #define TEMP_CTRL_VAL_EADD      (uint16_t)(60)      // 
+// #define TEMP_DELTA_EADD         (uint16_t)(61)      // 
+// #define TEMP_HYSTERESIS_EADD    (uint16_t)(62)      // 
+// #define RS485_ADD_ALIAS_EADD    (uint16_t)(63)      // non usato 
+// #define SEM_FLAGS_CTRL_EADD     (uint16_t)(64)      // parametri aggiunti per SEM: bit 0 = fixed / adj SCU address bits 1-2-3 = num socket in the product
+// #define STATION_NOM_PWR_EADD    (uint16_t)(65)      // potenza nominale del prodotto [KW * 10] --> 7,4KW diventa 74
+// #define CONNECTOR_NUMBER_EADD   (uint16_t)(66)      // indice del connettore 1..4 nella quartina finale del fake code 
+// #define POST_SUSP_TIME_EADD     (uint16_t)(67)
                                 
-#define EEPROM_PARAM_NUM        (uint16_t)(68)      // numero elementi eeprom_param_array da caricare su eeprom_param_array 
-#define EEPROM_PARAM_NUM_V421   (uint16_t)(58)      // numero elementi eeprom_param_array nella versione V4.2.1 
-#define EEPROM_PARAM_NUM_V423   (uint16_t)(64)      // numero elementi eeprom_param_array nella versione V4.2.3 
+// #define EEPROM_PARAM_NUM        (uint16_t)(68)      // numero elementi eeprom_param_array da caricare su eeprom_param_array 
+// #define EEPROM_PARAM_NUM_V421   (uint16_t)(58)      // numero elementi eeprom_param_array nella versione V4.2.1 
+// #define EEPROM_PARAM_NUM_V423   (uint16_t)(64)      // numero elementi eeprom_param_array nella versione V4.2.3 
 //#define RFID_CARD_SIZE_V421     (uint16_t)(0x200 - 0x40)
 #define RFID_CARD_SIZE_V421     (uint16_t)(0x364 - 0x40)
 //#define RFID_CARD_SIZE_V423     (uint16_t)(0x3C4 - 0x40)
@@ -134,6 +134,8 @@
 #define USER_UID_EENUM          (uint16_t)(USER_MAP_EEDIM * 8)	    // numero di UID registrabili 12 * 8 = 96 -> 0x60
 
 #define USER_UID_BYTE_NUM       (uint16_t)(USER_UID_EENUM * 8)      // numero di Byte necessari per salvare il numero di UID registrabili 96 * 8 = 768 -> 0x300
+
+#define EDATA_FIRST_DATA        (uint16_t)(MASTER_UID_EEOFFSET)     // first byte of data in EEPROM
 #define EDATA_LAST_BYTE         (uint16_t)(0x03A4)                  // 0x300 + 0xA4 = 0x3A4 = 932
  /* ******************************************************************* */
 
@@ -264,10 +266,10 @@ typedef struct {
 
 #define BKP_REG_COPY_KEY_ADDRESS    ((unsigned short)BKP_REG_COPY_ADDRESS + (sizeof(EEprom_BKP_Reg_Copy_st) - sizeof (EEprom_BKP_Reg_Copy.Key)))
 
-
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
 // -------------------------- global constats ------------------------------------------------------------------------------------------------------------------------ //
+
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
 // -------------------------- global references ---------------------------------------------------------------------------------------------------------------------- //
@@ -314,7 +316,7 @@ extern osSemaphoreId                 EEprom_semaphore;
 extern void EEpromManager_init(void);
 extern void BKP_SCU_Image_Store (void);
 extern void EEPROM_Check_Data_Before_Write (unsigned short Address);
-extern uint8_t SCU_InfoStation_Set (uint8_t *pDst, uint8_t *pSrc, uint16_t nByte);
+extern uint8_t SCU_Param_Set (uint8_t *pDst, uint8_t *pSrc, uint16_t nByte);
 
 #endif
 

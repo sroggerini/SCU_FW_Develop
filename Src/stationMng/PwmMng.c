@@ -605,16 +605,13 @@ sinapsiSetReg_st    *pmng_sinapsi_ptr;
 uint8_t             pass[3], unbalance_enable, eeprom_min_power_index, eeprom_delta_error;
 uint16_t            pmng_max_current_entry;
 
-// xx eeprom_param_get(PMNG_PWRLSB_EADD, pass, 2);
-// eeprom_available_power = ((uint16_t)(pass[1]) << 8) + pass[0];      // potenza totale disponibile da eeprom data [potenza contrattuale]
-eeprom_available_power = infoStation.Pmng.Power;
-// xx eeprom_param_get(PMNG_UNBAL_EADD, &eeprom_unbalance_enable, 1);     // legge consenso al carico sbilanciato nei sistemi trifase
-eeprom_unbalance_enable = infoStation.Pmng.Unbal;
+eeprom_available_power = SCU_param.Pmng.Power;
+eeprom_unbalance_enable = SCU_param.Pmng.Unbal;
 
 if ((isSemMode() == TRUE) && (eeprom_unbalance_enable == 0))
     {
     eeprom_unbalance_enable = 1;
-    SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, &eeprom_unbalance_enable, 1);      /* ex PMNG_UNBAL_EADD */
+    SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Unbal, &eeprom_unbalance_enable, 1);      /* ex PMNG_UNBAL_EADD */
     }
 
 evs_error_get(pass, 0, 0, 0);                                       // legge la presenza di errori [EMETER_EXT_ANOM2]
@@ -636,14 +633,10 @@ if (((eeprom_pmng_enable & HIDDEN_MENU_PMNG_ENB) == 0)/* || (pmng_internal_em ==
     return;
     }
 
-// xx eeprom_param_get(PMNG_MULTIP_EADD, &eeprom_min_power_index, 1);     // fattore moltiplicativo della potenza minima per uscire da NO POWER
-eeprom_min_power_index = infoStation.Pmng.Multip;
-// xx eeprom_param_get(PMNG_ERROR_EADD, &eeprom_delta_error, 1);          // errore ammesso nella regolazione di potenza [KW * 10] [da sottrarre al setpoint potenza disponibile]
-eeprom_delta_error = infoStation.Pmng.Error;
-// xx eeprom_param_get(PMNG_DMAX_EADD, &eeprom_dmax_power, 1);            // fattore moltiplicativo della potenza per la sospensione immediata della ricarica
-eeprom_dmax_power = infoStation.Pmng.Dmax;
-// xx eeprom_param_get(PMNG_TRANGE_EADD, &eeprom_time_range_enable, 1);   // abilitazione modalità a fasce orarie
-eeprom_time_range_enable = infoStation.Pmng.Trange;
+eeprom_min_power_index = SCU_param.Pmng.Multip;
+eeprom_delta_error = SCU_param.Pmng.Error;
+eeprom_dmax_power = SCU_param.Pmng.Dmax;
+eeprom_time_range_enable = SCU_param.Pmng.Trange;
 
 pmng_max_current_entry = *max_current;
 
@@ -1061,12 +1054,9 @@ uint8_t     m3t_current, m3s_current;
   }
 
 
-// xx eeprom_param_get(PMNG_MODE_EADD, &eeprom_pmng_mode, 1);             // legge tipo di power management
-eeprom_pmng_mode = infoStation.Pmng.Mode;
-// xx eeprom_param_get(M3T_CURRENT_EADD, &m3t_current, 1);
-m3t_current = infoStation.max_current;
-// xx eeprom_param_get(M3S_CURRENT_EADD, &m3s_current, 1);
-m3s_current = infoStation.max_currentSemp;
+eeprom_pmng_mode = SCU_param.Pmng.Mode;
+m3t_current = SCU_param.max_current;
+m3s_current = SCU_param.max_currentSemp;
 
 pwm_m3t_current = ((uint16_t)(m3t_current) * 10);
 pwm_m3s_current = ((uint16_t)(m3s_current) * 10);
@@ -1090,12 +1080,9 @@ pwm_gsy_current = gsy_current_get();                                // lettura d
 if (charging_current > pwm_gsy_current)                             // limitazione pwm da corrente impostata via gsy
     charging_current = pwm_gsy_current;
         
-// xx eeprom_param_get(PMNG_CURRENT_EADD, &eeprom_min_current, 1);        // minima corrente pwm applicabile prima di andare in sospensione [A]
-eeprom_min_current = infoStation.Pmng.Current;
-// xx eeprom_param_get(EMETER_INT_EADD, &eeprom_emeter_type, 1);          // tipo di energy meter interno
-eeprom_emeter_type = infoStation.emTypeInt;
-// xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &eeprom_pmng_enable, 1);     // legge power management enable
-eeprom_pmng_enable = infoStation.Hidden_Menu.Enabled;
+eeprom_min_current = SCU_param.Pmng.Current;
+eeprom_emeter_type = SCU_param.emTypeInt;
+eeprom_pmng_enable = SCU_param.Hidden_Menu.Enabled;
 eeprom_pmng_enable &= (HIDDEN_MENU_SEM_ENB | HIDDEN_MENU_PMNG_ENB);
 
 if (pMsg->PwmMngEvent == PWM_INTERNAL_EM_GOOD)                      // aggiornamento stato energy meter
@@ -1521,7 +1508,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmImin(); 
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Current, (uint8_t *)&tmp16, 1);         /* ex PMNG_CURRENT_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Current, (uint8_t *)&tmp16, 1);         /* ex PMNG_CURRENT_EADD */
       break;
       
     case ADDR_PM_PMAX_RW:
@@ -1529,7 +1516,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmPmax();
         // Set in eeprom       
         /*** SAVE ON EEPROM ***/        
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Power, (uint8_t *)&tmp16, 2);          /* ex PMNG_PWRLSB_EADD - PMNG_PWRMSB_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Power, (uint8_t *)&tmp16, 2);          /* ex PMNG_PWRLSB_EADD - PMNG_PWRMSB_EADD */
       break;
       
     case ADDR_PM_FLAGS_RW:
@@ -1539,12 +1526,12 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp8 = tmp16 & HIDDEN_MENU_PMNG_ENB;
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Hidden_Menu.Enabled, &tmp8, 1);     /* ex HIDDEN_MENU_ENB_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Hidden_Menu.Enabled, &tmp8, 1);     /* ex HIDDEN_MENU_ENB_EADD */
         // Get Unbalance flag
         tmp8 = tmp16 >> 1;
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Unbal, &tmp8, 1);     /* ex PMNG_UNBAL_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Unbal, &tmp8, 1);     /* ex PMNG_UNBAL_EADD */
         // Check if TIME RANGE functionality is enabled
         if (tmp16 & PM_TIME_RANGE_FUNC_MASK)
           tmp8 = TRUE;
@@ -1552,7 +1539,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
           tmp8 = FALSE;
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Trange, &tmp8, 1);     /* ex PMNG_TRANGE_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Trange, &tmp8, 1);     /* ex PMNG_TRANGE_EADD */
       break;
       
     case ADDR_PM_HPOWER_RW:
@@ -1560,7 +1547,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmHpower() - 1;
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Multip, (uint8_t *)&tmp16, 1);         /* ex PMNG_MULTIP_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Multip, (uint8_t *)&tmp16, 1);         /* ex PMNG_MULTIP_EADD */
       break;
       
     case ADDR_PM_DSET_RW:
@@ -1568,7 +1555,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmDset();
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Error, (uint8_t *)&tmp16, 1);         /* ex PMNG_ERROR_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Error, (uint8_t *)&tmp16, 1);         /* ex PMNG_ERROR_EADD */
       break;
       
     case ADDR_PM_DMAX_RW:
@@ -1576,7 +1563,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmDmax();
         // Set in eeprom        
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Dmax, (uint8_t *)&tmp16, 1);         /* ex PMNG_DMAX_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Dmax, (uint8_t *)&tmp16, 1);         /* ex PMNG_DMAX_EADD */
       break;
       
     case ADDR_PM_MODE_RW:
@@ -1584,7 +1571,7 @@ void PM_Mdb_to_EEprom_Translate (uint16_t rAddr)
         tmp16 = getPmMode();
         // Set in eeprom
         /*** SAVE ON EEPROM ***/
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Pmng.Mode, (uint8_t *)&tmp16, 1);         /* ex PMNG_MODE_EADD */
+        SCU_Param_Set ((uint8_t *)&SCU_param.Pmng.Mode, (uint8_t *)&tmp16, 1);         /* ex PMNG_MODE_EADD */
       break;
       
     default:

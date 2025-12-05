@@ -98,9 +98,9 @@
 #define   DELTA_TRANS_TIME           ((uint32_t)5)
 
 /*** define at fix SRAM location to activate MPU on this area ***/
-#define INFO_ADDR           ((uint32_t)0x20056e90)
+#define SCU_PARAM_ADDR      ((uint32_t)0x20056e90)
 #define MPU_AREA            0x200
-#define INFO_SIZE           sizeof(infoStation_t)
+#define SCU_PARAM_SIZE      sizeof(SCU_param_t)
 #define MPU_AREA_SIZE       MPU_REGION_SIZE_512B
 #define RAM_REGION_NUMBER   MPU_REGION_NUMBER0
 
@@ -731,17 +731,17 @@ typedef __packed struct
 #define   WIFI_ANTENNA_TEST_TO_DO      ((uint8_t)3)                             /* Wifi antenna test for production has to done yet                             */
 #define   ANTENNA_THRESHOLD            ((uint8_t)70)                            /* Wifi antenna threshold for test production                                   */
 
-#define WIFI_AP_MIN_CHANNEL_ID  1
-#define WIFI_AP_MAX_CHANNEL_ID  13
+#define   WIFI_AP_MIN_CHANNEL_ID                 1
+#define   WIFI_AP_MAX_CHANNEL_ID                13
+          
+#define   KEY_FOR_SCU_PARAM_V0         ((char)0xA6)
+#define   KEY_FOR_SCU_PARAM_V1         ((char)0xA8)      /* add checksum at the end  */
+#define   KEY_FOR_SCU_PARAM_V2         ((char)0xAA)      /* renamed  productSn[10] in italyProductSn[10] and new productSn[16] at the end */
+#define   KEY_FOR_SCU_PARAM_V3         ((char)0xAB)      /* added time range 1  at the end                                                */
+#define   KEY_FOR_SCU_PARAM_V5         ((char)0xAE)      /* infoStation for RED: timeout for user collaudo and password for service and developper */
+#define   KEY_FOR_SCU_PARAM_VX         KEY_FOR_SCU_PARAM_V5
 
-#define KEY_FOR_INFOSTATION_V0  ((char)0xA6)
-#define KEY_FOR_INFOSTATION_V1  ((char)0xA8)      /* add checksum at the end  */
-#define KEY_FOR_INFOSTATION_V2  ((char)0xAA)      /* renamed  productSn[10] in italyProductSn[10] and new productSn[16] at the end */
-#define KEY_FOR_INFOSTATION_V3  ((char)0xAB)      /* added time range 1  at the end                                                */
-#define KEY_FOR_INFOSTATION_V5  ((char)0xAE)      /* infoStation for RED: timeout for user collaudo and password for service and developper */
-#define KEY_FOR_INFOSTATION_VX  KEY_FOR_INFOSTATION_V5
-
-#define KEY_FOR_INFO_VALID      ((uint16_t)0xA8A6)
+#define   KEY_FOR_SCU_PARAM_VALID      ((uint16_t)0xA8A6)
 
 /* Station general parameters  */
 typedef __packed struct 
@@ -795,7 +795,6 @@ typedef __packed struct
   uint32_t                      passWebWiFiHash;                                /* hash della password per accesso wifi                         */
   uint32_t                      startTimeWebCollaudo;                           /* istante di prima attivazione web server al collaudo          */
   uint16_t                      confDataAndPassStatus;                          /* flag = 0xBBAA con tutti i dati di configurazione presenti    */
-  uint32_t                      checksum;                                       /* checksum It is  the sum of all structure byte                */
   /*                    From there parameters comes from original eeprom_param_array[]                      */
   uint8_t                       socketEnable;                                   /* ex SOCKET_ENABLE_EADD    */
   uint8_t                       batteryConfig;                                  /* ex BATTERY_CONFIG_EADD   */
@@ -825,8 +824,9 @@ typedef __packed struct
   Hidden_Menu_t                 Hidden_Menu;                                    /* ex HIDDEN_MENU_VIS_EADD - HIDDEN_MENU_ENB_EADD */
   Time_Settings_t               Time_Settings;                                  /* ex TIME_ZONE_EADD - DST_EADD - TIME_DST_OFFSET_EADD - DST_STATUS_EADD */
   Temp_Ctrl_t                   Temp_Ctrl;                                      /* ex TEMP_CTRL_ENB_EADD - TEMP_CTRL_VAL_EADD - TEMP_DELTA_EADD - TEMP_HYSTERESIS_EADD */
+  uint32_t                      checksum;                                       /* checksum It is  the sum of all structure byte                */
   
-} infoStation_t;
+} SCU_param_t;
 
 /* Socket */
 typedef struct 
@@ -922,21 +922,9 @@ typedef struct {
 
 /* Structure used to manage the different area in EEPROM involved in configuration parameter */
 typedef struct {
-  uint16_t               confParIdLogicScu;
-  confPar_st             confParEepromArray;
-  confPar_st             confParInfoStation;
-  confPar_st             confParBackupInfoStation;
-  confPar_st             confParSerialCode;
-  confPar_st             confParSerialFactoryCode;
-  uint32_t               confParCkecksumControl;
-} allConfPar_st;
-
-/* Structure used to manage the different area in EEPROM involved in configuration parameter */
-typedef struct {
   uint16_t               idLogicScu;
-  uint8_t                confEepromParamArray[EEPROM_PARAM_NUM];
-  infoStation_t          confInfoStation;
-  infoStation_t          confBackupInfoStation;
+  SCU_param_t            conf_SCU_Param;
+  SCU_param_t            conf_SCU_Param_BKP;
   uint8_t                confSerialCode[END_SN_EE_ADDRES - PRD_CODE_EE_ADDRES + 1];
   uint8_t                confSerialFactoryCode[PRODUCT_SN_LENGTH + PRODUCT_CODE_LENGTH + FAKE_CODE_LENGTH];
   uint32_t               confRtcBackup[NUM_BACKUP_SAVE_EEPROM];
@@ -1065,7 +1053,7 @@ void            sendEventToSemMng             (sbcSemEvent_e eventMsg , uint16_t
 
 /* primitive per gestione informazioni della stazione  */
 uint8_t*        getFwVer                        (void);
-void            setGeneralStationParameters     (uint8_t Type);
+void            setGeneralStationParameters     (void);
 char *          getStationName                  (void);
 unsigned char   setStationName                  (char* stName, int length);
 char*           getStationSerialNumber          (void);
@@ -1228,7 +1216,7 @@ void            setReleCarico                 (uint8_t* pMsg);
 
 extern          osThreadId_t          RfidTaskHandle;
 extern          uint8_t               rfidTaskStatus;
-extern          infoStation_t         infoStation;
+extern          SCU_param_t           SCU_param;
 
 #endif //  __WRAPPER_H
 

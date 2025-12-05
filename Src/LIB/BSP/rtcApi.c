@@ -79,7 +79,7 @@ uint8_t TamperDetected = FALSE;
 */
 extern RTC_HandleTypeDef hrtc;
 extern uint32_t BKP_SRAM_UnixTimestamp;
-extern infoStation_t  infoStation;
+extern SCU_param_t  SCU_param;
 
 /*
 *********************************** SCAME ************************************
@@ -138,8 +138,7 @@ struct DataAndTime_t GetDateTime_from_Unix (uint32_t UnixTimestamp)  /* Ticket S
   DT_Value.Year   = pTimeinfo->tm_year + 1900;
   DT_Value.DayWeek = (pTimeinfo->tm_wday == 0) ? 7 : pTimeinfo->tm_wday;
   /* get abilitazione ora legale      */  
-  // eeprom_param_get(DST_EADD, (uint8_t *)&DT_Value.dstFlag, 1);
-  DT_Value.dstFlag = infoStation.Time_Settings.dst;
+  DT_Value.dstFlag = SCU_param.Time_Settings.dst;
   
   return (DT_Value);
   
@@ -179,8 +178,7 @@ void DateTimeSet(struct DataAndTime_t *DT_Set)
 
   /* unix time for current RTC value */
   currentUnixTime = newUnixTime;
-  // xx eeprom_param_get(RTC_VALID_EADD, &dataValid, 1);
-   if (infoStation.rtcValid == 0x01)
+   if (SCU_param.rtcValid == 0x01)
   {
     DateTimeGet(&DT_Get);
     structUnixTime.tm_sec  = (int)DT_Get.Second;
@@ -226,7 +224,7 @@ void DateTimeSet(struct DataAndTime_t *DT_Set)
   }
   /* calibration */
   prevTimeSet = getLastRtcSetTime();
-  if ((prevTimeSet > MIN_UNIX_TIME_VAL) && (infoStation.rtcValid == 0x01))
+  if ((prevTimeSet > MIN_UNIX_TIME_VAL) && (SCU_param.rtcValid == 0x01))
   {
     deltaSet = (uint32_t)difftime(newUnixTime, prevTimeSet);
 
@@ -582,7 +580,6 @@ void setLegalPeriod(uint32_t locUT)
   DT_Current = GetDateTime_from_Unix(currUT);    /* Ticket SCU-100 */      
 
   /* get time zone         */
-  // xx eeprom_param_get(TIME_ZONE_EADD, (uint8_t *)&tZone, 1);  
   
   for (i = 31, DT_Current.Month = 3; i >= 25; i--)
   {
@@ -596,13 +593,13 @@ void setLegalPeriod(uint32_t locUT)
       structUnixTime.tm_mon  = (int)DT_Current.Month - 1;
       structUnixTime.tm_year = (int)DT_Current.Year - 1900;
       currentUnixTime = (uint32_t)mktime((struct tm *)&structUnixTime);  
-      if (infoStation.Time_Settings.TimeZone > (char)0)
+      if (SCU_param.Time_Settings.TimeZone > (char)0)
       {
-        currentUnixTime -= (uint32_t)infoStation.Time_Settings.TimeZone * (uint32_t)3600;  // subtract  seconds for time zone 
+        currentUnixTime -= (uint32_t)SCU_param.Time_Settings.TimeZone * (uint32_t)3600;  // subtract  seconds for time zone 
       }
       else
       {
-        currentUnixTime += (uint32_t)infoStation.Time_Settings.TimeZone * (uint32_t)3600;  // add seconds for time zone 
+        currentUnixTime += (uint32_t)SCU_param.Time_Settings.TimeZone * (uint32_t)3600;  // add seconds for time zone 
       }
       legalPeriod.startDstUnixTime = currentUnixTime;
       break;
@@ -621,27 +618,24 @@ void setLegalPeriod(uint32_t locUT)
       structUnixTime.tm_mon  = (int)DT_Current.Month - 1;
       structUnixTime.tm_year = (int)DT_Current.Year - 1900;
       currentUnixTime = (uint32_t)mktime((struct tm *)&structUnixTime);  
-      if (infoStation.Time_Settings.TimeZone > (char)0)
+      if (SCU_param.Time_Settings.TimeZone > (char)0)
       {
-        currentUnixTime -= (uint32_t)infoStation.Time_Settings.TimeZone * (uint32_t)3600;  // subtract  seconds for time zone 
+        currentUnixTime -= (uint32_t)SCU_param.Time_Settings.TimeZone * (uint32_t)3600;  // subtract  seconds for time zone 
       }
       else
       {
-        currentUnixTime += (uint32_t)infoStation.Time_Settings.TimeZone * (uint32_t)3600;  // add seconds for time zone 
+        currentUnixTime += (uint32_t)SCU_param.Time_Settings.TimeZone * (uint32_t)3600;  // add seconds for time zone 
       }
       legalPeriod.endDstUnixTime = currentUnixTime;
       break;
     }
   }
   /* get abilitazione ora legale      */
-  // xx eeprom_param_get(DST_EADD, (uint8_t *)&legalPeriod.oraLegFlag, 1);
-  legalPeriod.oraLegFlag = infoStation.Time_Settings.dst;    
+  legalPeriod.oraLegFlag = SCU_param.Time_Settings.dst;    
   /* get dst status         */
-  // xx eeprom_param_get(DST_STATUS_EADD, (uint8_t *)&legalPeriod.dstStatus, 1); 
-  legalPeriod.dstStatus = infoStation.Time_Settings.DstStatus;
+  legalPeriod.dstStatus = SCU_param.Time_Settings.DstStatus;
   /* get time zone         */
-  // xx eeprom_param_get(TIME_ZONE_EADD, (uint8_t *)&legalPeriod.tZone, 1);
-  legalPeriod.tZone = infoStation.Time_Settings.TimeZone;
+  legalPeriod.tZone = SCU_param.Time_Settings.TimeZone;
 
   checkLegalPeriod((uint32_t)currUT);
 }
@@ -677,7 +671,7 @@ void checkLegalPeriod(uint32_t locUT)
       {
         legalPeriod.dstStatus = 1;
        /* we are inside legal period */ 
-       SCU_InfoStation_Set ((uint8_t *)&infoStation.Time_Settings.DstStatus, (uint8_t*)&legalPeriod.dstStatus, 1);  /*ex DST_STATUS_EADD*/
+       SCU_Param_Set ((uint8_t *)&SCU_param.Time_Settings.DstStatus, (uint8_t*)&legalPeriod.dstStatus, 1);  /*ex DST_STATUS_EADD*/
       }
     }
     else
@@ -686,7 +680,7 @@ void checkLegalPeriod(uint32_t locUT)
       {
         legalPeriod.dstStatus = 0;
         /* we are outside legal period */ 
-        SCU_InfoStation_Set ((uint8_t *)&infoStation.Time_Settings.DstStatus, (uint8_t*)&legalPeriod.dstStatus, 1); /*ex DST_STATUS_EADD*/
+        SCU_Param_Set ((uint8_t *)&SCU_param.Time_Settings.DstStatus, (uint8_t*)&legalPeriod.dstStatus, 1); /*ex DST_STATUS_EADD*/
       }
     }
   }
@@ -697,7 +691,7 @@ void checkLegalPeriod(uint32_t locUT)
     {
       legalPeriod.dstStatus = 0;
       /* we are outside legal period */ 
-      SCU_InfoStation_Set ((uint8_t *)&infoStation.Time_Settings.DstStatus, (uint8_t*)&legalPeriod.dstStatus, 1); /*ex DST_STATUS_EADD*/
+      SCU_Param_Set ((uint8_t *)&SCU_param.Time_Settings.DstStatus, (uint8_t*)&legalPeriod.dstStatus, 1); /*ex DST_STATUS_EADD*/
     }
   }
 }

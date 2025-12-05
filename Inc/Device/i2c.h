@@ -66,6 +66,7 @@ extern unsigned char  checkI2c(void);
 extern unsigned char  ReadFromEeprom        (unsigned short Address, unsigned char *Buffer, unsigned short Length);
 extern unsigned char  WriteOnEeprom         (unsigned short Address, unsigned char *Buffer, unsigned short Length);
 extern unsigned char  ReadFromEeprom_no_Semaph (unsigned short Address, unsigned char *Buffer, unsigned short Length);
+extern uint8_t  ReadFromEeprom_no_MPU (uint16_t Address, uint8_t *Buffer, uint16_t Length);
 
 extern unsigned char  ReadFromIoExp         (uint16_t slaveAddr, unsigned char Address, unsigned char *Buffer, unsigned short Length);
 extern unsigned char  WriteToIoExp          (uint16_t slaveAddr, unsigned short Address, unsigned char data);

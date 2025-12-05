@@ -390,7 +390,7 @@ static void EvsManager(EvsMngMsg_st *pMsg);
 // -------------------------- global references ---------------------------------------------------------------------------------------------------------------------- //
 extern uint8_t        ledCurrentSet[NUM_LED];
 //extern osThreadId_t   RfidTaskHandle;
-extern infoStation_t  infoStation;
+extern SCU_param_t    SCU_param;
 
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
@@ -676,8 +676,7 @@ void evs_error_set(uint8_t error_byte, uint8_t error_bit, uint8_t error_val)
 {
 uint8_t control_enable;
 
-// xx eeprom_param_get((CONTROL_BYTE0_EADD + error_byte), &control_enable, 1);
-control_enable = *(uint8_t *)(&infoStation.controlByte.Byte.Byte0 + error_byte);
+control_enable = *(uint8_t *)(&SCU_param.controlByte.Byte.Byte0 + error_byte);
 
 if (error_val == 1)
     {
@@ -1099,10 +1098,8 @@ uint8_t ret, pmng_enable, control_enable, emeter_type;
 
 ret = 0;
 
-// xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
-emeter_type = infoStation.emTypeInt;
-// xx eeprom_param_get(CONTROL_BYTE1_EADD, &control_enable, 1);
-control_enable = infoStation.controlByte.Byte.Byte1;
+emeter_type = SCU_param.emTypeInt;
+control_enable = SCU_param.controlByte.Byte.Byte1;
 
 if (emeter_int_anom1_save == 2)
     {
@@ -1125,7 +1122,7 @@ if ((pMsg->EvsMngEvent == EVS_EXTERNAL_EM_GOOD) || (pMsg->EvsMngEvent == EVS_SIN
         if (sinapsi_inst_status != 1)
             {
             sinapsi_inst_status = 1;
-            SCU_InfoStation_Set ((uint8_t *)&infoStation.Sinapsi_Installed, &sinapsi_inst_status, 1);  /* ex SINAPSI_INST_EADD */
+            SCU_Param_Set ((uint8_t *)&SCU_param.Sinapsi_Installed, &sinapsi_inst_status, 1);  /* ex SINAPSI_INST_EADD */
             }
 
         chn2_error_enable = 1;
@@ -1139,12 +1136,10 @@ if ((pMsg->EvsMngEvent == EVS_EXTERNAL_EM_GOOD) || (pMsg->EvsMngEvent == EVS_SIN
     }
 else if (pMsg->EvsMngEvent == EVS_EXTERNAL_EM_UPDATE)
     {
-    // xx eeprom_param_get(CONTROL_BYTE2_EADD, &control_enable, 1);
-    control_enable = infoStation.controlByte.Byte.Byte2;
+    control_enable = SCU_param.controlByte.Byte.Byte2;
     lcd_external_em_set(1);
 
-    // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);            // legge power management enable
-    pmng_enable = infoStation.Hidden_Menu.Enabled;
+    pmng_enable = SCU_param.Hidden_Menu.Enabled;
     pmng_enable &= HIDDEN_MENU_PMNG_ENB;
             
     if (((control_enable & EMETER_EXT_CRL2) == 0) || (pmng_enable == 0))
@@ -1208,12 +1203,9 @@ else if ((state == EVSTATE_AUTH_WAIT) || (state == EVSTATE_SOCKET_AVAILABLE) || 
             }
         else if (pMsg->EvsMngEvent == EVS_EXTERNAL_EM_UPDATE)
             {
-            // xx eeprom_param_get(CONTROL_BYTE2_EADD, &control_enable, 1);
-            control_enable = infoStation.controlByte.Byte.Byte2;
+            control_enable = SCU_param.controlByte.Byte.Byte2;
             lcd_external_em_set(1);
-
-            // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);            // legge power management enable
-            pmng_enable = infoStation.Hidden_Menu.Enabled;
+            pmng_enable = SCU_param.Hidden_Menu.Enabled;
             pmng_enable &= HIDDEN_MENU_PMNG_ENB;
                     
             if (((control_enable & EMETER_EXT_CRL2) == 0) || (pmng_enable == 0))
@@ -1245,8 +1237,7 @@ else if ((state == EVSTATE_AUTH_WAIT) || (state == EVSTATE_SOCKET_AVAILABLE) || 
             {
             if (hidden_menu_sel_get() == HIDDEN_IDLE)
                 {
-                // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);            // legge power management enable
-                pmng_enable = infoStation.Hidden_Menu.Enabled;  
+                pmng_enable = SCU_param.Hidden_Menu.Enabled;  
                 pmng_enable &= HIDDEN_MENU_PMNG_ENB;
                     
                 if (pmng_enable == HIDDEN_MENU_PMNG_ENB)
@@ -1256,8 +1247,7 @@ else if ((state == EVSTATE_AUTH_WAIT) || (state == EVSTATE_SOCKET_AVAILABLE) || 
                     else    // if (pMsg->EvsMngEvent == EVS_SINAPSI_CHN2_FAIL)
                         evs_error_set(CONTROL_BYTE_2, SINAPSI_CHN2_ANOM2, 1);
 
-                     // xx eeprom_param_get(CONTROL_BYTE2_EADD, &control_enable, 1);
-                     control_enable = infoStation.controlByte.Byte.Byte2;
+                     control_enable = SCU_param.controlByte.Byte.Byte2;
                      lcd_external_em_set(0);
 
                      if (((control_enable & EMETER_EXT_CRL2) == EMETER_EXT_CRL2)
@@ -1291,8 +1281,7 @@ else if (((emeter_type != EMETER_TAMP) && (emeter_type != EMETER_TAMP_3)) && (pM
 else if (((emeter_type != EMETER_TAMP) && (emeter_type != EMETER_TAMP_3))
        && ((pMsg->EvsMngEvent == EVS_EXTERNAL_EM_FAIL) || ((pMsg->EvsMngEvent == EVS_SINAPSI_CHN2_FAIL) && (chn2_error_enable == 1))) && (snp3_error_save == 0))
     {
-    // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);            // legge power management enable
-    pmng_enable = infoStation.Hidden_Menu.Enabled;
+    pmng_enable = SCU_param.Hidden_Menu.Enabled;
     pmng_enable &= HIDDEN_MENU_PMNG_ENB;
                     
     if (pmng_enable == HIDDEN_MENU_PMNG_ENB)
@@ -1343,11 +1332,7 @@ static uint8_t evs_res_error_capture(EvsMngMsg_st *pMsg, evs_state_en state)
 {
 uint8_t ret, pmng_enable, control_enable, /* actuator_enable,*/ error_capture_array[EVS_ERROR_ARRAY_SIZE];
 
-// xx eeprom_param_get(ACTUATORS_EADD, &actuator_enable, 1);
-// xx actuator_enable = infoStation.actuators;
-
-// xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-control_enable = infoStation.controlByte.Byte.Byte0;
+control_enable = SCU_param.controlByte.Byte.Byte0;
 
 ret = 0;
 
@@ -1403,8 +1388,7 @@ else
 
 if (evs_error_array[2] & EMETER_EXT_ANOM2)          // l'errore EMETER_EXT_ANOM2 nel ciclo di confronto sotto non origina ret = 1 in uscita [evs_error_wait_capture]
     {
-    // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);            // legge power management enable
-    pmng_enable = infoStation.Hidden_Menu.Enabled;
+    pmng_enable = SCU_param.Hidden_Menu.Enabled;
     pmng_enable &= HIDDEN_MENU_PMNG_ENB;
     
     if (pmng_enable == HIDDEN_MENU_PMNG_ENB)
@@ -1415,8 +1399,7 @@ else
 
 if (evs_error_array[2] & SINAPSI_CHN2_ANOM2)        // l'errore SINAPSI_CHN2_ANOM2 nel ciclo di confronto sotto non origina ret = 1 in uscita [evs_error_wait_capture]
     {
-    // xx eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);            // legge power management enable
-    pmng_enable = infoStation.Hidden_Menu.Enabled;
+    pmng_enable = SCU_param.Hidden_Menu.Enabled;
     pmng_enable &= HIDDEN_MENU_PMNG_ENB;
     
     if (pmng_enable == HIDDEN_MENU_PMNG_ENB)
@@ -1448,10 +1431,7 @@ static uint8_t evs_lid_error(consistency_en consistency, uint8_t gsy_update)
 {
 uint8_t /* control_enable,*/ socket_type;
 
-// xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-// control_enable = infoStation.controlByte.Byte.Byte0;
-// xx eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
-socket_type = infoStation.socketType;
+socket_type = SCU_param.socketType;
 
 evs_error_set(CONTROL_BYTE_0, LID_ANOM0, 0);
 
@@ -1483,8 +1463,7 @@ static void evs_error_update(void)
 {
 uint8_t control_enable;
 
-// xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-control_enable = infoStation.controlByte.Byte.Byte0;
+control_enable = SCU_param.controlByte.Byte.Byte0;
 
 evs_error_set(CONTROL_BYTE_0, EVS_RESETTABLE_ERROR0, 0);
 evs_error_set(CONTROL_BYTE_1, EVS_RESETTABLE_ERROR1, 0);
@@ -1519,10 +1498,9 @@ else if ((snp3_error_save == 0) && (getInputState_enable == 1))
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 void evs_control_save(void)
 {
-// xx eeprom_param_get(CONTROL_BYTE0_EADD, control_byte_old, CONTROL_BYTE_NUM);
-  control_byte_old [0] = infoStation.controlByte.Byte.Byte0;
-  control_byte_old [1] = infoStation.controlByte.Byte.Byte1;
-  control_byte_old [2] = infoStation.controlByte.Byte.Byte2;
+  control_byte_old [0] = SCU_param.controlByte.Byte.Byte0;
+  control_byte_old [1] = SCU_param.controlByte.Byte.Byte1;
+  control_byte_old [2] = SCU_param.controlByte.Byte.Byte2;
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 
@@ -1539,22 +1517,20 @@ void evs_chn2_init(void)
 {
 uint8_t control_enable;
 
-// xx eeprom_param_get(CONTROL_BYTE2_EADD, &control_enable, 1);
-control_enable = infoStation.controlByte.Byte.Byte2;
+control_enable = SCU_param.controlByte.Byte.Byte2;
 
 if ((control_enable & EMETER_EXT_CRL2) && ((control_enable & SINAPSI_CHN2_CRL2) == 0))
     {
     control_enable |= SINAPSI_CHN2_CRL2;
-    SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, &control_enable, 1);       /* ex CONTROL_BYTE2_EADD */
+    SCU_Param_Set ((uint8_t *)&SCU_param.controlByte.Byte.Byte2, &control_enable, 1);       /* ex CONTROL_BYTE2_EADD */
     }
 else if (((control_enable & EMETER_EXT_CRL2) == 0) && (control_enable & SINAPSI_CHN2_CRL2))
     {
     control_enable &=~ SINAPSI_CHN2_CRL2;
-    SCU_InfoStation_Set ((uint8_t *)&infoStation.controlByte.Byte.Byte2, &control_enable, 1);       /* ex CONTROL_BYTE2_EADD */
+    SCU_Param_Set ((uint8_t *)&SCU_param.controlByte.Byte.Byte2, &control_enable, 1);       /* ex CONTROL_BYTE2_EADD */
     }
 
-// xx eeprom_param_get(SINAPSI_INST_EADD, &sinapsi_inst_status, 1);
-sinapsi_inst_status = infoStation.Sinapsi_Installed;
+sinapsi_inst_status = SCU_param.Sinapsi_Installed;
 
 chn2_error_enable = 0;
 internal_chn2_error_enable = 0;
@@ -1718,10 +1694,7 @@ uint8_t         /* xx reserved,*/ socket_enable, /* xx control_enable,*/ battery
 evs_state_en    destination_state = set_state;
 int32_t         activeSessionEnergy;
 
-// xx eeprom_param_get(SOCKET_ENABLE_EADD, &reserved, 1);
-// reserved = infoStation.socketEnable;
-// xx eeprom_param_get(BATTERY_CONFIG_EADD, &battery_config, 1);
-battery_config = infoStation.batteryConfig;
+battery_config = SCU_param.batteryConfig;
 
 setLed((ledIdx_e)0, LED_EVENT_OFF_ALL, (uint16_t)(0), (uint8_t)(0));
 
@@ -1751,15 +1724,10 @@ if (destination_state == EVSTATE_MODE_SEL)
     suspending_enable = 0;
     charging_mode = CHARGING_MODE_NULL;
     
-    // xx eeprom_param_get(EVS_MODE_EADD, &evs_mode, 1);
-    evs_mode = infoStation.evs_mode;
+    evs_mode = SCU_param.evs_mode;
     
-    // xx eeprom_param_get(SOCKET_ENABLE_EADD, &socket_enable, 1);
-    socket_enable = infoStation.socketEnable;
+    socket_enable = SCU_param.socketEnable;
     socket_enable &= EVS_MODE_AVAILABLE;
-
-    // xx eeprom_param_get(CONTROL_BYTE1_EADD, &control_enable, 1);
-    // xx control_enable = infoStation.controlByte.Byte.Byte1;
 
     send_to_rfid(RFID_CONTROL_START);                                       // start RfidMngTask
     send_to_pers(PERS_START);                                               // start PersMngTask
@@ -1895,8 +1863,7 @@ switch (destination_state)
 	        evsModbusState = MDBSTATE_AVAILABLE;
 	        }
 
-        // xx eeprom_param_get(ACTUATORS_EADD, &actuator_mode, 1);
-        actuator_mode = infoStation.actuators;
+        actuator_mode = SCU_param.actuators;
         actuator_mode &= PAUT_ATT0;
 
         if ((vbus_anom1_save == 0) && (actuator_mode == 0))
@@ -1973,8 +1940,7 @@ switch (destination_state)
         evs_sec = DISP_WAIT_POINTS;
         evs_set_timer(EVS_WAIT_TIM, evs_wait_time);
 
-        // xx eeprom_param_get(ACTUATORS_EADD, &actuator_mode, 1);
-        actuator_mode = infoStation.actuators;
+        actuator_mode = SCU_param.actuators;
         actuator_mode &= PAUT_ATT0;
 
         if ((actuator_mode & PAUT_ATT0) && (evs_gost_plug == 1))
@@ -2146,9 +2112,6 @@ switch (destination_state)
 
         suspending_enable_set = 1;
         
-        // xx eeprom_param_get(BATTERY_CONFIG_EADD, &control_enable, 1);
-        // xx control_enable = infoStation.batteryConfig;
-        
         evsModbusState = MDBSTATE_SUSPENDING_EVSE;
 
         if (suspending_set & PEN_SUSPENDING)
@@ -2252,9 +2215,6 @@ switch (destination_state)
         suspending_enable_set = 1;
         send_to_contact(CONTACT_CLOSE_REQ);
         
-        // xx eeprom_param_get(BATTERY_CONFIG_EADD, &control_enable, 1);
-        // xx control_enable = infoStation.batteryConfig;
-        
         if (charging_time_run_get() == 0)
             send_to_evstime(EVSTIME_CHARGING_START);
 
@@ -2279,9 +2239,6 @@ switch (destination_state)
         
         send_to_pwm(PWM_OUTPUT_HIGH);
         
-        // xx eeprom_param_get(BATTERY_CONFIG_EADD, &control_enable, 1);
-        // xx control_enable = infoStation.batteryConfig;
-
         send_to_lcd(LCD_INTERRUPTING_CHARGE);
         }
         break;
@@ -2373,8 +2330,7 @@ switch (destination_state)
             {
             gsy_quick_polling_update(BUSY_OUTLET, 0);
 
-            // xx eeprom_param_get(ACTUATORS_EADD, &actuator_mode, 1);
-            actuator_mode = infoStation.actuators;
+            actuator_mode = SCU_param.actuators;
             actuator_mode &= PAUT_ATT0;
 
             if ((actuator_mode & PAUT_ATT0) && (evs_gost_plug == 1))
@@ -2778,11 +2734,9 @@ static void EvsManager(EvsMngMsg_st *pMsg)
 uint8_t     val, emeter_type, control_enable, control, actuator_mode, battery_config, socket_type, error_array[EVS_ERROR_ARRAY_SIZE];
 uint32_t    rtc_reg_save;
 
-// xx eeprom_param_get(BATTERY_CONFIG_EADD, &battery_config, 1);
-battery_config = infoStation.batteryConfig;
+battery_config = SCU_param.batteryConfig;
 
-// xx eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
-socket_type = infoStation.socketType;
+socket_type = SCU_param.socketType;
 evs_tPrintf_state(pMsg);
 evs_event_save(pMsg);
 
@@ -2858,8 +2812,7 @@ switch (evs_state)
         {
         if ((pMsg->EvsMngEvent == CPSET_TIM_EXPIRED) && (getADCvalid() == 1))
             {
-            // xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
-            emeter_type = infoStation.emTypeInt;
+            emeter_type = SCU_param.emTypeInt;
 
             if ((emeter_type == EMETER_TAMP) || (emeter_type == EMETER_TAMP_3))
                 {
@@ -2906,10 +2859,8 @@ switch (evs_state)
 
     case EVSTATE_AUTH_WAIT: // wait for authorization / remote supervisor action
         {
-        // xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-        control_enable = infoStation.controlByte.Byte.Byte0;
-        // xx eeprom_param_get(ACTUATORS_EADD, &actuator_mode, 1);
-        actuator_mode = infoStation.actuators;
+        control_enable = SCU_param.controlByte.Byte.Byte0;
+        actuator_mode = SCU_param.actuators;
         actuator_mode &= PAUT_ATT0;
 
         if (lcd_msg_update_num)
@@ -3334,8 +3285,7 @@ switch (evs_state)
 
                 if (charging_mode == M3S_CHARGING_MODE)
                     {
-                    // xx eeprom_param_get(CONTROL_BYTE2_EADD, &control_enable, 1);
-                    control_enable = infoStation.controlByte.Byte.Byte2;
+                    control_enable = SCU_param.controlByte.Byte.Byte2;
                     control = (control_enable & RECTIFIER_CRL2);
 
                     if (control == RECTIFIER_CRL2)
@@ -3348,8 +3298,7 @@ switch (evs_state)
                     }
                 else if (charging_mode == M3T_CHARGING_MODE)
                     {
-                    // xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-                    control_enable = infoStation.controlByte.Byte.Byte0;  
+                    control_enable = SCU_param.controlByte.Byte.Byte0;  
                     control = (control_enable & VENT_CRL0);
         
                     if ((s2_state_get() == S2_STATE_D) && (getInput(IN7_VENT_EXP0) == GPIO_PIN_SET) && (control == VENT_CRL0))
@@ -3379,8 +3328,7 @@ switch (evs_state)
             {
             if (pMsg->EvsMngEvent != EVS_ISO15118_INFO_DEVICE_UPDATE)
                 {
-                // xx eeprom_param_get(BATTERY_CONFIG_EADD, &control_enable, 1);
-                control_enable = infoStation.batteryConfig;  
+                control_enable = SCU_param.batteryConfig;  
                 
                 if ((evs_rtc_backup_get(BACKUP_CHARGE_STATUS) & M3S_CHARGE_SAVE) == M3S_CHARGE_SAVE)    // recupero charging_mode da scenario salvato [asssenza tensione, fault, ecc.]
                     {
@@ -3420,8 +3368,7 @@ switch (evs_state)
                     }
                 }
 
-            // xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-            control_enable = infoStation.controlByte.Byte.Byte0;
+            control_enable = SCU_param.controlByte.Byte.Byte0;
             control = (control_enable & VENT_CRL0);
 
             if ((s2_state_get() == S2_STATE_D) && (getInput(IN7_VENT_EXP0) == GPIO_PIN_SET) && (control == VENT_CRL0))
@@ -3454,8 +3401,7 @@ switch (evs_state)
             if (evs_iso15118_run == 0)
                 send_to_pwm(PWM_OUTPUT_DC_START);
 
-            // xx eeprom_param_get(CONTROL_BYTE2_EADD, &control_enable, 1);
-            control_enable = infoStation.controlByte.Byte.Byte2;
+            control_enable = SCU_param.controlByte.Byte.Byte2;
             control = (control_enable & RECTIFIER_CRL2);
             
             if (control == RECTIFIER_CRL2)
@@ -3557,8 +3503,7 @@ switch (evs_state)
          && (is_pwm_CP_Active() == TRUE))
             send_to_pwm(PWM_OUTPUT_HIGH);
         
-        // xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-        control_enable = infoStation.controlByte.Byte.Byte0;
+        control_enable = SCU_param.controlByte.Byte.Byte0;
         control = (control_enable & VENT_CRL0);
 
         if (pMsg->EvsMngEvent == EVS_AUTH_REQUIRED)                         		    // è stata passata una carta
@@ -3591,8 +3536,7 @@ switch (evs_state)
                     }
                 else if ((s2_state_get() == S2_STATE_D) || (s2_state_get() == S2_STATE_C))
                     {
-                    // xx eeprom_param_get(POST_SUSP_TIME_EADD, &val, 1);
-                    val = infoStation.postSuspensionTime;
+                    val = SCU_param.postSuspensionTime;
                     
                     if ((val > 0) && (val <= 9) && (post_suspending == 0))  // 15/05/25 Nick: portato a 9 
                         {
@@ -3600,8 +3544,7 @@ switch (evs_state)
                             post_suspending_num --;
                         else if ((val > 0) && (val <= 9) && (post_suspending == 0)) // 15/05/25 Nick: portato a 9
                             {
-                            // xx eeprom_param_get(POST_SUSP_TIME_EADD, (uint8_t*)&val, 1);
-                            val = infoStation.postSuspensionTime;                        
+                            val = SCU_param.postSuspensionTime;                        
                             post_suspending_time = (uint32_t)(val) * EVSTATE_WAITING_10S;
                             evs_set_timer(EVS_POST_SUSPENDING_TIM, post_suspending_time);
                             }
@@ -3743,8 +3686,7 @@ switch (evs_state)
             }
         else if (pMsg->EvsMngEvent == EVS_VENT_UPDATE)
             {
-            // xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-            control_enable = infoStation.controlByte.Byte.Byte0;
+            control_enable = SCU_param.controlByte.Byte.Byte0;
             control = (control_enable & VENT_CRL0);
 
             if ((s2_state_get() == S2_STATE_D) && (getInput(IN7_VENT_EXP0) == GPIO_PIN_SET) && (control == VENT_CRL0))
@@ -3757,8 +3699,7 @@ switch (evs_state)
             }
         else if (pMsg->EvsMngEvent == EVS_S2_STATE_UPDATE)
             {
-            // xx eeprom_param_get(CONTROL_BYTE0_EADD, &control_enable, 1);
-            control_enable = infoStation.controlByte.Byte.Byte0;
+            control_enable = SCU_param.controlByte.Byte.Byte0;
             control = (control_enable & VENT_CRL0);
 
             if ((s2_state_get() == S2_STATE_D) && (getInput(IN7_VENT_EXP0) == GPIO_PIN_SET) && (control == VENT_CRL0))
@@ -3771,8 +3712,7 @@ switch (evs_state)
                 ev_suspending = 1;
                 charging_mode = M3T_CHARGING_MODE;                                  // set modalità di carica = Modo3 standard
 
-                // xx eeprom_param_get(BATTERY_CONFIG_EADD, &control_enable, 1);
-                control_enable = infoStation.batteryConfig;
+                control_enable = SCU_param.batteryConfig;
 
                 post_suspending = 0;
                 evs_iso15118_s2 = 1;
@@ -3797,8 +3737,7 @@ switch (evs_state)
                 if ((s2_state_get() == S2_STATE_B) && (pMsg->EvsMngEvent == EVS_S2_STATE_UPDATE))
                     charging_mode = M3T_CHARGING_MODE;                                  // set modalità di carica = Modo3 standard
             
-                // xx eeprom_param_get(BATTERY_CONFIG_EADD, &control_enable, 1);
-                control_enable = infoStation.batteryConfig;
+                control_enable = SCU_param.batteryConfig;
             
                 if (evs_error_get(error_array, 1, 1, 6) == 1)
                     evs_state_set(&evs_state, EVSTATE_RES_ERROR);

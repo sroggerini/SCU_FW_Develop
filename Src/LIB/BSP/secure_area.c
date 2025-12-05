@@ -19,7 +19,7 @@ static SecureArea secureArea @ ".secure_area";
 #define SECURE_AREA_ADDRESS_START ((uint32_t)&secureArea)
 #define SECURE_AREA_ADDRESS_END   (SECURE_AREA_ADDRESS_START + SECURE_AREA_SIZE - 1)
 
-extern infoStation_t infoStation;
+extern SCU_param_t SCU_param;
 
 void SecureArea_init(void)
 {
@@ -46,7 +46,7 @@ void SecureArea_init(void)
 static void SecureArea_initLocalApSSID(SecureArea * const sa)
 {
   strcpy(sa->localApSSID, "ChargePointScame ");
-  strcpy(&sa->localApSSID[17], infoStation.productSn);
+  strcpy(&sa->localApSSID[17], SCU_param.productSn);
 }
 
 static void SecureArea_initLocalApPass(SecureArea * const sa)
@@ -56,13 +56,13 @@ static void SecureArea_initLocalApPass(SecureArea * const sa)
 
 static void SecureArea_initRemoteApSSID(SecureArea * const sa)
 {
-  strncpy(sa->remoteApSSID, infoStation.routerSsid, SECAREA_REMOTE_AP_SSID_LEN);
+  strncpy(sa->remoteApSSID, SCU_param.routerSsid, SECAREA_REMOTE_AP_SSID_LEN);
   sa->remoteApSSID[SECAREA_REMOTE_AP_SSID_LEN] = '\0';
 }
 
 static void SecureArea_initRemoteApPass(SecureArea * const sa)
 {
-  strncpy(sa->remoteApPass, infoStation.routerPass, SECAREA_REMOTE_AP_PASS_LEN);
+  strncpy(sa->remoteApPass, SCU_param.routerPass, SECAREA_REMOTE_AP_PASS_LEN);
   sa->remoteApPass[SECAREA_REMOTE_AP_PASS_LEN] = '\0';
 }
 
@@ -74,7 +74,7 @@ static void SecureArea_initActivationKey(SecureArea * const sa)
   
   for(i = 0; i < sizeof(pi); i++)
   {
-    sum[i] = infoStation.productSn[i] - '0';
+    sum[i] = SCU_param.productSn[i] - '0';
   }
   
   for(i = 0; i < sum[sizeof(pi) - 1]; i++)
@@ -103,7 +103,7 @@ static void SecureArea_initActivationKey(SecureArea * const sa)
 
 static void SecureArea_initUserPin(SecureArea * const sa)
 {
-  strncpy(sa->userPin, infoStation.userPin, SECAREA_USER_PIN_LEN);
+  strncpy(sa->userPin, SCU_param.userPin, SECAREA_USER_PIN_LEN);
   sa->userPin[SECAREA_USER_PIN_LEN] = '\0';
 }
 

@@ -319,21 +319,13 @@ else
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
 void pilot_error_reset(void)
 {
-// xx uint8_t		socket_type;
-
-// xx eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
-
-// xx socket_type = infoStation.socketType;
-
-//if (cpshort_set == 0)
-	cpshort_init();
+  
+cpshort_init();
 
 cppresence_init();
 
 #ifndef HW_MP28947
-//if (ppshort_set == 0)
-	ppshort_init();
-
+ppshort_init();
 pppresence_init();
 #endif
 
@@ -745,10 +737,8 @@ static void plug_manager(uint8_t config)
 uint8_t		socket_type, actuator_mode, plug_error, pers_evs_mode, plug_presence_pp;
 uint16_t	plug_configuration;
 
-// xx eeprom_param_get(EVS_MODE_EADD, &pers_evs_mode, 1);
-pers_evs_mode = infoStation.evs_mode;
-// xx eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
-socket_type = infoStation.socketType;
+pers_evs_mode = SCU_param.evs_mode;
+socket_type = SCU_param.socketType;
 
 plug_presence_pp = 0;
 plug_configuration = CPLOST_CRL1;
@@ -764,8 +754,7 @@ if ((socket_type == SOCKET_T2_NO_LID) || (socket_type == SOCKET_T2_CLOSE_LID) ||
 
 plug_configuration |= (plug_configuration << 8);
 
-// xx eeprom_param_get(ACTUATORS_EADD, &actuator_mode, 1);
-actuator_mode = infoStation.actuators;
+actuator_mode = SCU_param.actuators;
 actuator_mode &= PAUT_ATT0;
 
 switch (plug_state)
@@ -1263,10 +1252,8 @@ CPSN_VAL = getADCmV(CP_ADC_IN);
 PPSN_VAL = getADCmV(PP_ADC_IN);
 #endif
 
-// xx eeprom_param_get(CONTROL_BYTE1_EADD, &control_enable, 1);							// legge abilitazione dei controlli CP e PP in eeprom
-control_enable = infoStation.controlByte.Byte.Byte1;
+control_enable = SCU_param.controlByte.Byte.Byte1;
 xp_short_manager((control_enable & xpshort_enable));
-//xp_presence_manager((control_enable & xppresence_enable));
 xp_presence_manager(xppresence_enable);
 plug_manager(control_enable);
 s2_manager();

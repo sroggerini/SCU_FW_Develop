@@ -186,8 +186,7 @@ if (pMsg->taskEv == DIFF_RIARM_EVENT_STOP)
       switch (pMsg->taskEv)
       {
       	case DIFF_RIARM_EVENT_POLLING:
-            // xx eeprom_param_get(LCD_TYPE_EADD, (uint8_t *)&diffStatus, 1);
-            diffStatus = infoStation.LcdType;
+            diffStatus = SCU_param.LcdType;
             diffStatus &= DIRI_MASK;
             diffRiarm.diffMode = (diriMode_e)diffStatus;
             if (diffRiarm.diffMode == DIRI_ON)

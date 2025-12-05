@@ -1719,8 +1719,7 @@ evs_mode_en lcd_mode;
 
 if (aux_inf & LCD_EVS_MODE_ORINF)                                   // l'info si allinea al margine sinistro
     {
-    // xx eeprom_param_get(EVS_MODE_EADD, (uint8_t*)(&lcd_mode), 1);
-    lcd_mode = infoStation.evs_mode;
+    lcd_mode = SCU_param.evs_mode;
     lcd_rs485_add  = getIdNumberForLcd();  // indirizzi da 0 a 15 -> visualizzazione da 1 a 16
 
     if (lcd_mode == EVS_PERS_MODE)
@@ -1875,8 +1874,7 @@ if (aux_inf == LCD_DATE_TIME_EXINF)
     }
 else if (aux_inf == LCD_USER_UID_NUM_EXINF)
     {
-    // xx eeprom_param_get(PERS_UIDNUM_EADD, &data08u, 1);
-    data08u = infoStation.persUidNum;
+    data08u = SCU_param.persUidNum;
 
     *num = lcd_hex08_to_ascii(&data08u, dst_ptr, 0);                // dato inserito in testa alla linea
     
@@ -2476,11 +2474,9 @@ uint8_t *array_ptr;
 
 *dst_ptr = 0;
 
-// xx eeprom_param_get(EMETER_INT_EADD, &emeter_type, 1);
-emeter_type = infoStation.emTypeInt;
+emeter_type = SCU_param.emTypeInt;
 
-// eeprom_param_get(HIDDEN_MENU_ENB_EADD, &pmng_enable, 1);
-pmng_enable = infoStation.Hidden_Menu.Enabled;
+pmng_enable = SCU_param.Hidden_Menu.Enabled;
 pmng_enable &= HIDDEN_MENU_PMNG_ENB;
 
 if (emeter_type != lcd_emeter_type_old)
@@ -2580,12 +2576,10 @@ static void lcd_charging_string_get(char *dst_ptr, uint8_t *emeter_parameter)
 uint8_t i, enrg_limit;
 uint8_t *string_ptr;
 
-// xx eeprom_param_get(TCHARGE_MODE_EADD, &enrg_limit, 1);
-enrg_limit = infoStation.TCharge.Mode;
+enrg_limit = SCU_param.TCharge.Mode;
 
 if (enrg_limit == 1)
-    // xx eeprom_param_get(ENRG_LIMIT_EADD, &enrg_limit, 1);
-    enrg_limit = infoStation.Energy_limit;
+    enrg_limit = SCU_param.Energy_limit;
 
 switch (*emeter_parameter)
     {
@@ -2691,8 +2685,8 @@ lang_def_byte = (*(src_ptr + 4) / 8);
 
 *(src_ptr + lang_def_byte) |= lang_bit;                 // si forza la lingua selezionata di default a essere fra quelle abilitate [si controlla e nel caso, si forza]
 
-SCU_InfoStation_Set ((uint8_t *)&infoStation.default_Lang, (src_ptr + 4), 1);     /* ex LANG_DEFAULT_EADD */
-SCU_InfoStation_Set ((uint8_t *)&infoStation.LangConfig, (src_ptr + 0), 4);     /* ex LANG_CONFIG0_EADD */
+SCU_Param_Set ((uint8_t *)&SCU_param.default_Lang, (src_ptr + 4), 1);     /* ex LANG_DEFAULT_EADD */
+SCU_Param_Set ((uint8_t *)&SCU_param.LangConfig, (src_ptr + 0), 4);     /* ex LANG_CONFIG0_EADD */
 send_to_lcd(LANGUAGE_TIME_EXPIRED);                     // forza aggiornamento a nuova lingua di default
 }
 // ------------------------------------------------------------------------------------------------------------------------------------------------------------------- //
@@ -2741,7 +2735,7 @@ void lcd_language_def_update(void)
 lcd_language_def_enable = 0;
 lcd_main_blink = 1;
 lcd_toggle = 0;
-SCU_InfoStation_Set ((uint8_t *)&infoStation.default_Lang, &lcd_language, 1);     /* ex LANG_DEFAULT_EADD */
+SCU_Param_Set ((uint8_t *)&SCU_param.default_Lang, &lcd_language, 1);     /* ex LANG_DEFAULT_EADD */
 lcd_set_timer(LCD_MAIN_BLINK_TIM, LCD_MAIN_BLINK_TIME);
 send_to_lcd(REFRESH_TIME_EXPIRED);
 }
@@ -2777,11 +2771,10 @@ uint8_t scroll, lang_set, lang_sel, lang_bit, lang_byte, language_array[4];
 
 scroll = 0;
 
-// xx eeprom_param_get(LANG_CONFIG0_EADD, language_array, 4);
-language_array[0] = infoStation.LangConfig.Byte.Byte0;
-language_array[1] = infoStation.LangConfig.Byte.Byte1;
-language_array[2] = infoStation.LangConfig.Byte.Byte2;
-language_array[3] = infoStation.LangConfig.Byte.Byte3;
+language_array[0] = SCU_param.LangConfig.Byte.Byte0;
+language_array[1] = SCU_param.LangConfig.Byte.Byte1;
+language_array[2] = SCU_param.LangConfig.Byte.Byte2;
+language_array[3] = SCU_param.LangConfig.Byte.Byte3;
 
 lang_set = (lcd_language % 8);
 lang_sel = 0x01;
@@ -2855,8 +2848,7 @@ void LANG_Modbus_to_EEprom_Translate(uint32_t display_lang_reg)
    {
      if ((display_lang_reg & bit) != 0)
      {
-       // xx eeprom_array_set(LANG_DEFAULT_EADD, (uint8_t*)&cnt, 1);
-       SCU_InfoStation_Set ((uint8_t *)&infoStation.default_Lang, (uint8_t*)&cnt, 1);     /* ex LANG_DEFAULT_EADD */
+       SCU_Param_Set ((uint8_t *)&SCU_param.default_Lang, (uint8_t*)&cnt, 1);     /* ex LANG_DEFAULT_EADD */
        lcd_language_set(cnt);
        lcd_language_def_update();
        break;
@@ -2882,7 +2874,7 @@ void LANG_Available_Mdb_to_EEprom_Translate (uint32_t display_avail_lang)
    temp[2] = (display_avail_lang >> 16) & 0x000000FF;
    temp[3] = (display_avail_lang >> 24) & 0x000000FF;
    /* set in eeprom */
-   SCU_InfoStation_Set ((uint8_t *)&infoStation.LangConfig, (uint8_t *)temp, 4);        /* ex LANG_CONFIG0_EADD */
+   SCU_Param_Set ((uint8_t *)&SCU_param.LangConfig, (uint8_t *)temp, 4);        /* ex LANG_CONFIG0_EADD */
    
 }
 
@@ -2975,8 +2967,7 @@ while (osSemaphoreAcquire (EEprom_semaphore, osWaitForever) != osOK);
 osSemaphoreRelease (EEprom_semaphore);
 
 if (pMsg->LcdMngEvent == LANGUAGE_TIME_EXPIRED)
-    // xx eeprom_param_get(LANG_DEFAULT_EADD, &lcd_language, 1);
-    lcd_language = infoStation.default_Lang;
+    lcd_language = SCU_param.default_Lang;
 
 if ((pMsg->LcdMngEvent == LCD_PERS_BACK) && (LcdPersMsg_Old.LcdMngEvent != LCD_NULL))
     {
@@ -2999,8 +2990,7 @@ switch (pMsg->LcdMngEvent)
     {
     case LCD_WRITE_SCAME:
         {
-        // xx eeprom_param_get(LANG_DEFAULT_EADD, &lcd_language, 1);
-        lcd_language =  infoStation.default_Lang;
+        lcd_language =  SCU_param.default_Lang;
         lcd_line_update(lcd_line1, lcd_write_scame_string1, CENTER_ALIGNMENT, LCD_AUX_NULL_EXINF);
 
         /*         destination       source */
@@ -3090,12 +3080,9 @@ switch (pMsg->LcdMngEvent)
 
         lcd_line_update(lcd_line1, lang_table[(lcd_language_offset + WRITE_CARD_WAIT)], CENTER_ALIGNMENT, LCD_EVS_MODE_ORINF);
         
-        // xx eeprom_param_get(EVS_MODE_EADD, &data8u[0], 1);
-        data8u[0] = infoStation.evs_mode;
-        // xx eeprom_param_get(RTC_VALID_EADD, &data8u[1], 1);
-        data8u[1] = infoStation.rtcValid;
-        // xx eeprom_param_get(SOCKET_ENABLE_EADD, &data8u[2], 1);
-        data8u[2] = infoStation.socketEnable;
+        data8u[0] = SCU_param.evs_mode;
+        data8u[1] = SCU_param.rtcValid;
+        data8u[2] = SCU_param.socketEnable;
 
         if ((data8u[0] > EVS_FREE_MODE) && (data8u[1] == 0))
             lcd_line_update(lcd_line2, lcd_write_clke_error, CENTER_ALIGNMENT, LCD_AUX_NULL_EXINF);
@@ -3395,8 +3382,7 @@ switch (pMsg->LcdMngEvent)
 
     case LCD_CLOSE_LID:
         {
-        // xx eeprom_param_get(SOCKET_TYPE_EADD, &socket_type, 1);
-        socket_type = infoStation.socketType;
+        socket_type = SCU_param.socketType;
 
         if (socket_type & EVS_TETHERED)
             {

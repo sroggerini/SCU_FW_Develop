@@ -59,7 +59,7 @@ char EvLog_Entry_Type_Text[8][12] =
 /********************** External Function *************************/
 
 extern sFLASH_Info sFLASH_Information;
-extern infoStation_t  infoStation;
+extern SCU_param_t  SCU_param;
 
 /**
   * @brief  Init Event log
@@ -251,7 +251,7 @@ void EVLOG_Read (void)
   
   /* Show on Teraterm at the moment */
   tPrintf ("----------------------------------------------------------------------------------\r\n");
-  tPrintf (" EVENT LOG for SCU SN %s8\r\n", infoStation.productSn);
+  tPrintf (" EVENT LOG for SCU SN %s8\r\n", SCU_param.productSn);
   tPrintf ("----------------------------------------------------------------------------------\r\n");
   tPrintf ("  #      TIMESTAMP                TYPE                     DESCRIPTION            \r\n\n");
   
