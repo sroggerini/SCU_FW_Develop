@@ -5675,7 +5675,7 @@ static void scuGsyDwldTask (void * pvParameters)
                   {
                     /* The board serial number must be preserved so overwrite old board serial */
                     memcpy ((uint8_t *)&pConfPar->blockConfPar[0].conf_SCU_Param.serial, (uint8_t *)&SCU_param.serial, MAX_SERIAL_LENGTH);
-                    ReadFromEeprom (SCU_SN_EE_ADDRES,  &pConfPar->blockConfPar[0].confSerialCode[SCU_SN_EE_ADDRES - PRD_CODE_EE_ADDRES], 4); 
+                    ReadFromEeprom (SCU_SN_EE_ADDRES,  &pConfPar->blockConfPar[0].confSerialCode[SCU_SN_EE_ADDRES - PRD_CODE_EE_ADDRES], BOARD_SN_LENGTH); 
                     /*             destination                                                           source                       len  */
                     memcpy((uint8_t *)&pConfPar->blockConfPar[0].conf_SCU_Param.serial[0], (uint8_t *)getStationSerialNumber(), BOARD_SN_LENGTH);     
                     /*             destination                                                           source                       len  */

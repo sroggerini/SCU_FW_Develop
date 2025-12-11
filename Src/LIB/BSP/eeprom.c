@@ -836,7 +836,7 @@ uint8_t     ee_data;
 uint16_t    i, error, ee_data16;
 uint8_t     *pBuff;
 
-uint8_t Product_SN_temp[PRODUCT_SN_LENGTH], Product_Code_temp[PRODUCT_CODE_LENGTH], FakeProduct_Code_temp[FAKE_CODE_LENGTH];
+uint8_t SCU_SN_temp[BOARD_SN_LENGTH], Product_SN_temp[PRODUCT_SN_LENGTH], Product_Code_temp[PRODUCT_CODE_LENGTH], FakeProduct_Code_temp[FAKE_CODE_LENGTH];
                                            
 #ifdef OLD_EPROM_MNG
 
@@ -1193,11 +1193,13 @@ if(osSemaphoreAcquire(EEprom_semaphore, portMAX_DELAY) == osOK)
       /* Copy default values to SCU parameters */
       memCpyInfoSt ((uint8_t *)&SCU_param, (uint8_t *)&SCU_param_DEFAULT, sizeof (SCU_param));
       /* Restore factory ID copying them from EDATA_DEFAULT_ID_CODES address */
+      ReadFromEeprom(SCU_SN_EE_ADDRES, (uint8_t *)SCU_SN_temp, BOARD_SN_LENGTH);
       ReadFromEeprom(EDATA_DEFAULT_ID_CODES, (uint8_t*)Product_SN_temp, sizeof(Product_SN_temp));
       ReadFromEeprom(EDATA_DEFAULT_ID_CODES + sizeof(Product_SN_temp), (uint8_t*)Product_Code_temp, sizeof(Product_Code_temp));
       ReadFromEeprom(EDATA_DEFAULT_ID_CODES + sizeof(Product_SN_temp) + sizeof(Product_Code_temp), (uint8_t*)FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));
       WriteOnEeprom(PRD_SN_EE_ADDRES, (uint8_t*)Product_SN_temp, sizeof(Product_SN_temp));
       WriteOnEeprom(PRD_CODE_EE_ADDRES, (uint8_t*)Product_Code_temp, sizeof(Product_Code_temp));
+      memCpyInfoSt((uint8_t *)&SCU_param.serial, SCU_SN_temp, sizeof(SCU_SN_temp));
       memCpyInfoSt((uint8_t *)&SCU_param.productSn, Product_SN_temp, sizeof(Product_SN_temp));
       memCpyInfoSt((uint8_t *)&SCU_param.productCode, Product_Code_temp, sizeof(Product_Code_temp));
       memCpyInfoSt((uint8_t *)&SCU_param.fakeProductCode, FakeProduct_Code_temp, sizeof(FakeProduct_Code_temp));

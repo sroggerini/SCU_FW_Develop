@@ -2264,7 +2264,6 @@ uint8_t*  getFwVer (void)
 
 void setGeneralStationParameters (void)
 {
-    unsigned char SerNum[4];
     SCU_param_t * pSCU_param;
     uint32_t val;
     uint8_t tmp, keySN;
@@ -2412,24 +2411,6 @@ void setGeneralStationParameters (void)
     free(pSCU_param);
     /* Save in EEPROM */
     WriteOnEeprom (SCU_GENERAL_INFO_EE_ADDRES, (uint8_t*)&SCU_param, sizeof(SCU_param_t));
-
-    /* check product serial number in reserved area */
-    if (keySN != (uint8_t)0xA6)
-    {
-        keySN = (uint8_t)0xA6;
-        /* save on EEPROM SCU SN */
-        tmp = WriteOnEeprom(SCU_SN_EE_ADDRES, (uint8_t*)SerNum, 4);
-        /* save on EEPROM PRD SN */
-        tmp |= WriteOnEeprom(PRD_SN_EE_ADDRES, (uint8_t*)pSCU_param->productSn, PRODUCT_SN_LENGTH);
-        /* save on key  SN */
-        tmp |= WriteOnEeprom(SN_KEY_EE_ADDRES, (uint8_t*)&keySN, 1);
-        if (tmp == osOK)
-        {
-            tPrintf("Recovery SNs done!!\n\r");
-            EVLOG_Message(EV_INFO, "Recovery SN done!!");
-        }
-    }
-
     
     /* Check if a different default value (oxFF) is on productSn, productCode, fakeProductCode 
        Starting from v4.3.x and 4.6.x, the default value for these parameters is ' ' and not 0xFF */
@@ -3203,13 +3184,13 @@ uint8_t sbcPresence (void)
       /* this is an anomal condition: try to reset the DBC power */
       /** SBC and router OFF  OSC OFF **/
       sbcPowerControl(DISABLED);
-      HAL_Delay(500);
+      osDelay (pdMS_TO_TICKS(500));
       /** SBC and router OFF  OSC OFF **/
       sbcPowerControl(ENABLED);
       numRetry++;
       tPrintf("SBC " ANSI_COLOR_RED "RESETTED!!" ANSI_COLOR_RESET "\n\r" );
     }
-    HAL_Delay(300);
+    osDelay (pdMS_TO_TICKS(300));
     if (HAL_GPIO_ReadPin(SBC_CONN_GPIO_Port, SBC_CONN_Pin) == GPIO_PIN_SET)
     {
       tPrintf("SBC " ANSI_COLOR_GREEN "PRESENT!!" ANSI_COLOR_RESET "\n\r" );
@@ -4307,7 +4288,8 @@ unsigned char  setScuSerialNumberEeprom(char* key, char* keyString)
   /* Set serial number */
   SCU_Param_Set ((uint8_t *)SCU_param.serial, (uint8_t *)locStr, sizeof(SCU_param.serial)); 
 
-  return ( WriteOnEeprom(SCU_SN_EE_ADDRES, (uint8_t*)key, 4));
+  // xx return ( WriteOnEeprom(SCU_SN_EE_ADDRES, (uint8_t*)key, 4));
+  return (WriteOnEeprom(SCU_SN_EE_ADDRES, (uint8_t*)(uint8_t *)SCU_param.serial, sizeof(SCU_param.serial)));
 }
 
 /**
