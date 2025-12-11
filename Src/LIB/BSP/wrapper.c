@@ -2955,21 +2955,13 @@ void  setStationEmType(energy_meter_e emType,  emEnum_e pos, EmeterType_en gsyEm
         break;
     }
   }
-  if ((SCU_param.emTypeInt != emTypeInt) && (pos == INTERNAL_EM))
-  {
-    /*                                             destination                   source                   len   */
-    SCU_Param_Set ((uint8_t*)&SCU_param.emTypeInt, (uint8_t*)&emTypeInt, sizeof(SCU_param.emTypeInt));
-  }
-  if ((SCU_param.emTypeExt != emTypeExt) && (pos == EXTERNAL_EM))
-  {
-    /*                                             destination              source                   len   */
-    SCU_Param_Set ((uint8_t*)&SCU_param.emTypeExt, (uint8_t*)&emTypeExt, sizeof(SCU_param.emTypeExt));
-  }
+  
   if (SCU_param.modePwr != modePwr)
   {
     /*                                             destination          source                   len   */
     SCU_Param_Set ((uint8_t*)&SCU_param.modePwr, (uint8_t*)&modePwr, sizeof(SCU_param.modePwr));
   }
+  
   /* Set internal and external energy meter in modbus map */
   setEnergyMetersType();
 }

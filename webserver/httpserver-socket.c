@@ -2629,14 +2629,14 @@ static err_t http_recv(void *arg, struct tcp_pcb *pcb,  struct pbuf *p, err_t er
             }
 
             /* get corrente massima in Modo3 standard [A]  from M3T_CURRENT_EADD   */
-            pass[0] = SCU_param.max_current;
+            pass[0] = SCU_param.max_current / 1000;
             pass[10] = pass[11] = ' ';
             len = sprintf((char*)&pass[10], "%d", pass[0]);
             /*       destination      source            len   */
             memcpy ((void*)pItypical, (void*)&pass[10], len );
 
             /* get corrente massima in Modo3 standard [A]  from M3S_CURRENT_EADD   */
-            pass[0] = SCU_param.max_currentSemp;
+            pass[0] = SCU_param.max_currentSemp / 1000;
             pass[10] = pass[11] = ' ';
             len = sprintf((char*)&pass[10], "%d", pass[0]);
             /*       destination      source            len   */
